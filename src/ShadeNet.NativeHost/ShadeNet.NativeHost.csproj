@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <RootNamespace>ShadeNet.NativeHost</RootNamespace>
+        <AssemblyName>ShadeNet.NativeHost</AssemblyName>
+        <!-- stdout belongs to the browser: nothing but protocol frames may ever be written to it. -->
+        <InvariantGlobalization>true</InvariantGlobalization>
+        <UseAppHost>true</UseAppHost>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ShadeNet.Bridge\ShadeNet.Bridge.csproj" />
+    </ItemGroup>
+
+</Project>

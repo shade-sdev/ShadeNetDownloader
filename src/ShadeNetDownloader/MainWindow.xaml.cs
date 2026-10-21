@@ -1,0 +1,259 @@
+using System.ComponentModel;
+using System.IO;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using ShadeNetDownloader.Services;
+using ShadeNetDownloader.Services.Tray;
+using ShadeNetDownloader.Util;
+using ShadeNetDownloader.ViewModels;
+using Wpf.Ui;
+using Wpf.Ui.Controls;
+
+namespace ShadeNetDownloader;
+
+public partial class MainWindow : FluentWindow
+{
+    readonly MainViewModel _vm;
+    readonly SettingsService _settings;
+    readonly IDialogService _dialogService;
+    readonly ToastService _toasts;
+    readonly AppController _app;
+
+    public MainWindow(MainViewModel vm, SettingsService settings, AppThemeService theme,
+        IContentDialogService dialogs, IDialogService dialogService, ToastService toasts, AppController app)
+    {
+        _vm = vm;
+        _settings = settings;
+        _dialogService = dialogService;
+        _toasts = toasts;
+        _app = app;
+
+        DataContext = vm;
+        InitializeComponent();
+
+        dialogs.SetDialogHost(DialogHost);
+
+        // Window position/size from last time (only if it still fits on a screen).
+        RestoreGeometry(settings.Current.Window);
+
+        theme.Attach(this);
+        theme.Apply(settings.Current.Theme);
+
+        // The limit flyout sits above its button with the right edges aligned (the button is at the window's right edge,
+        // so a centred popup would hang outside the window). 14 = the transparent margin around the popup's card.
+        LimitPopup.CustomPopupPlacementCallback = (popupSize, targetSize, _) => new[]
+        {
+            new CustomPopupPlacement(new Point(targetSize.Width - popupSize.Width + 14, -popupSize.Height + 8), PopupPrimaryAxis.None),
+        };
+
+        // Ctrl+F → search, Ctrl+, → settings
+        InputBindings.Add(new KeyBinding(new RelayAction(() =>
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+        }), Key.F, ModifierKeys.Control));
+        InputBindings.Add(new KeyBinding(new RelayAction(() => vm.SelectCommand.Execute(vm.SettingsItem)),
+            Key.OemComma, ModifierKeys.Control));
+    }
+
+    void OnThemeClick(object sender, RoutedEventArgs e) => _vm.SettingsPage.CycleTheme();
+
+    long _limitPopupClosedAt;
+
+    /// <summary>
+    /// Opens the speed-limit flyout. A click on the button while the flyout is open first closes it (it is not "sticky"),
+    /// and would then reopen it: ignore a click that arrives right after the flyout closed.
+    /// </summary>
+    void OnLimitButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (Environment.TickCount64 - _limitPopupClosedAt < 250) return;
+        _vm.Limit.Refresh();
+        _vm.Limit.IsOpen = true;
+    }
+
+    void OnLimitPopupClosed(object? sender, EventArgs e) => _limitPopupClosedAt = Environment.TickCount64;
+
+    // ---- paste: Ctrl+V anywhere (outside a text box) with a link on the clipboard opens the Add dialog ----
+
+    void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.V || Keyboard.Modifiers != ModifierKeys.Control) return;
+        if (Keyboard.FocusedElement is TextBoxBase or System.Windows.Controls.PasswordBox) return;
+
+        string? text = null;
+        try
+        {
+            if (Clipboard.ContainsText()) text = Clipboard.GetText();
+        }
+        catch
+        {
+            // the clipboard can be locked by another application for a moment
+        }
+
+        var links = UrlParser.Extract(text);
+        if (links.Count == 0) return;
+
+        e.Handled = true;
+        _ = _dialogService.ShowAddDownloadAsync(links);
+    }
+
+    // ---- drag and drop ----
+
+    static bool CanTake(IDataObject data) =>
+        data.GetDataPresent(DataFormats.UnicodeText) || data.GetDataPresent(DataFormats.Text)
+        || data.GetDataPresent(DataFormats.FileDrop) || data.GetDataPresent("UniformResourceLocatorW");
+
+    void OnDragOver(object sender, DragEventArgs e)
+    {
+        if (CanTake(e.Data))
+        {
+            e.Effects = DragDropEffects.Copy;
+            DropOverlay.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+
+        e.Handled = true;
+    }
+
+    void OnDragLeave(object sender, DragEventArgs e) => DropOverlay.Visibility = Visibility.Collapsed;
+
+    async void OnDrop(object sender, DragEventArgs e)
+    {
+        DropOverlay.Visibility = Visibility.Collapsed;
+        e.Handled = true;
+
+        var links = LinksFrom(e.Data);
+        if (links.Count == 0)
+        {
+            _toasts.Show("No download links found in what you dropped.", ToastKind.Error);
+            return;
+        }
+
+        await _dialogService.ShowAddDownloadAsync(links);
+    }
+
+    /// <summary>Links from dragged text, a browser link, or text-like files (.txt, .url, .html, …).</summary>
+    static IReadOnlyList<string> LinksFrom(IDataObject data)
+    {
+        var all = new List<string>();
+
+        foreach (var format in new[] { DataFormats.UnicodeText, DataFormats.Text, "UniformResourceLocatorW" })
+        {
+            if (!data.GetDataPresent(format)) continue;
+            try
+            {
+                if (data.GetData(format) is string s) all.AddRange(UrlParser.Extract(s));
+            }
+            catch
+            {
+                // exotic data object: skip this format
+            }
+        }
+
+        if (data.GetDataPresent(DataFormats.FileDrop) && data.GetData(DataFormats.FileDrop) is string[] files)
+        {
+            foreach (var file in files)
+            {
+                try
+                {
+                    var ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (ext is ".txt" or ".url" or ".html" or ".htm" or ".md" or ".csv" or ".lst" or ".list"
+                        && new FileInfo(file).Length <= 2 * 1024 * 1024)
+                        all.AddRange(UrlParser.Extract(File.ReadAllText(file)));
+                }
+                catch
+                {
+                    // unreadable file: ignore
+                }
+            }
+        }
+
+        return all.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // ---- window geometry ----
+
+    void RestoreGeometry(WindowGeometry g)
+    {
+        if (g.Left is { } left && g.Top is { } top
+            && left < SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 100
+            && top < SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 100
+            && left + g.Width > SystemParameters.VirtualScreenLeft + 100
+            && top + g.Height > SystemParameters.VirtualScreenTop + 40)
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = left;
+            Top = top;
+        }
+
+        Width = Math.Max(MinWidth, g.Width);
+        Height = Math.Max(MinHeight, g.Height);
+        if (g.Maximized) WindowState = WindowState.Maximized;
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        var g = _settings.Current.Window;
+        g.Maximized = WindowState == WindowState.Maximized;
+        var b = RestoreBounds;
+        if (!b.IsEmpty)
+        {
+            g.Left = b.Left;
+            g.Top = b.Top;
+            g.Width = b.Width;
+            g.Height = b.Height;
+        }
+
+        base.OnClosing(e);
+
+        // With a tray icon the close button only hides the window; downloads carry on. "Exit" in the tray menu really quits.
+        if (!e.Cancel && _app.HideToTrayIfWanted()) e.Cancel = true;
+    }
+
+    /// <summary>The window really closed (no tray, or Exit): the program ends.</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        base.OnClosed(e);
+        Application.Current.Shutdown();
+    }
+
+    // ---- "when finished" menu in the status bar ----
+
+    void OnFinishButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_vm.Finish is not { } finish || sender is not UIElement button) return;
+
+        var menu = new ContextMenu { PlacementTarget = button, Placement = PlacementMode.Top, StaysOpen = false };
+        menu.Items.Add(new System.Windows.Controls.MenuItem { Header = "When all downloads are finished", IsEnabled = false, FontWeight = FontWeights.SemiBold });
+        foreach (var (action, label) in TrayMenu.FinishChoices)
+        {
+            var item = new System.Windows.Controls.MenuItem { Header = label, IsChecked = finish.Action == action };
+            item.Click += (_, _) => finish.Action = action;
+            menu.Items.Add(item);
+        }
+
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Minimal ICommand for key bindings that just run an action.</summary>
+    sealed class RelayAction : ICommand
+    {
+        readonly Action _action;
+
+        public RelayAction(Action action) => _action = action;
+
+        public event EventHandler? CanExecuteChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public bool CanExecute(object? parameter) => true;
+        public void Execute(object? parameter) => _action();
+    }
+}

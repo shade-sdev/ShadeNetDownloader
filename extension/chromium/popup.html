@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShadeNet Downloader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" width="28" height="28" alt="">
+    <div>
+      <h1>ShadeNet Downloader</h1>
+      <p id="state" class="muted">Checking…</p>
+    </div>
+  </header>
+
+  <label class="switch">
+    <input id="enabled" type="checkbox">
+    <span>Send downloads to ShadeNet</span>
+  </label>
+
+  <p id="note" class="note" hidden></p>
+
+  <section id="media" hidden>
+    <h2>Videos on this page</h2>
+    <ul id="mediaList"></ul>
+  </section>
+
+  <button id="connect" type="button">Connect to the app</button>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

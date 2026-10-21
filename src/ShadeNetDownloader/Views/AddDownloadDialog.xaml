@@ -1,0 +1,245 @@
+<ui:ContentDialog x:Class="ShadeNetDownloader.Views.AddDownloadDialog"
+                  Style="{StaticResource {x:Type ui:ContentDialog}}"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                  Title="Add download"
+                  PrimaryButtonText="Download now"
+                  PrimaryButtonIcon="{ui:SymbolIcon ArrowDownload24}"
+                  PrimaryButtonAppearance="Primary"
+                  SecondaryButtonText="Add to queue"
+                  CloseButtonText="Cancel"
+                  DefaultButton="Primary"
+                  DialogWidth="640" DialogMaxWidth="720"
+                  IsPrimaryButtonEnabled="{Binding CanAdd}"
+                  IsSecondaryButtonEnabled="{Binding CanAdd}">
+
+    <ui:ContentDialog.Resources>
+        <BooleanToVisibilityConverter x:Key="B2V" />
+
+        <Style x:Key="Field" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="2,14,0,6" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
+        <!-- visible only in the given probe state -->
+        <Style x:Key="WhenProbing" TargetType="FrameworkElement">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ProbeState}" Value="Probing">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="WhenReady" TargetType="FrameworkElement">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ProbeState}" Value="Ready">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="WhenFailed" TargetType="FrameworkElement">
+            <Setter Property="Visibility" Value="Collapsed" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ProbeState}" Value="Failed">
+                    <Setter Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </ui:ContentDialog.Resources>
+
+    <StackPanel MinWidth="560">
+
+        <!-- ================= link(s) ================= -->
+        <TextBlock Style="{StaticResource Field}" Text="Web address" Margin="2,0,0,6" />
+        <ui:TextBox x:Name="UrlBox" AutomationProperties.Name="Web address" MinLines="2" MaxLines="5" AcceptsReturn="True" TextWrapping="NoWrap"
+                    VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                    PlaceholderText="Paste a link (or several, one per line)"
+                    Icon="{ui:SymbolIcon Link24}"
+                    Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}" />
+
+        <TextBlock Margin="2,6,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                   Visibility="{Binding IsBatch, Converter={StaticResource B2V}}">
+            <Run Text="{Binding LinkCount, Mode=OneWay}" /><Run Text=" links found - each one is added as its own download." />
+        </TextBlock>
+
+        <TextBlock Margin="2,6,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                   Text="{Binding SessionNote}" TextWrapping="Wrap"
+                   Visibility="{Binding SessionNote, Converter={StaticResource NullToCollapsed}}" />
+
+        <!-- ================= what the server says (single link) ================= -->
+        <Border Margin="0,12,0,0" Padding="14" CornerRadius="10" BorderThickness="1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                Visibility="{Binding IsSingle, Converter={StaticResource B2V}}">
+            <Grid MinHeight="52">
+                <!-- probing -->
+                <StackPanel Style="{StaticResource WhenProbing}" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:ProgressRing IsIndeterminate="True" Width="22" Height="22" />
+                    <TextBlock Text="Checking the link…" Margin="12,0,0,0" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
+                <!-- ready -->
+                <Grid Style="{StaticResource WhenReady}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="52" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="44" Height="44" CornerRadius="10" VerticalAlignment="Top"
+                            Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                        <Image Source="{Binding Icon}" Width="28" Height="28"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                    </Border>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <ui:TextBox Text="{Binding FileName, UpdateSourceTrigger=PropertyChanged}" FontWeight="SemiBold"
+                                    ToolTip="File name - you can change it" />
+                        <StackPanel Orientation="Horizontal" Margin="2,8,0,0">
+                            <TextBlock Text="{Binding SizeText}" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+
+                            <StackPanel Orientation="Horizontal" Margin="14,0,0,0">
+                                <ui:SymbolIcon FontSize="14" Margin="0,0,5,0" VerticalAlignment="Center">
+                                    <ui:SymbolIcon.Style>
+                                        <Style TargetType="ui:SymbolIcon">
+                                            <Setter Property="Symbol" Value="DismissCircle24" />
+                                            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Resumable}" Value="True">
+                                                    <Setter Property="Symbol" Value="CheckmarkCircle24" />
+                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ui:SymbolIcon.Style>
+                                </ui:SymbolIcon>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Can't resume if interrupted" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Resumable}" Value="True">
+                                                    <Setter Property="Text" Value="Pause &amp; resume supported" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </StackPanel>
+
+                            <TextBlock Text="{Binding TypeText}" FontSize="12" Margin="14,0,0,0"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        </StackPanel>
+
+                        <!-- a video stream: which quality -->
+                        <StackPanel Orientation="Horizontal" Margin="2,10,0,0"
+                                    Visibility="{Binding HasQualities, Converter={StaticResource B2V}}">
+                            <TextBlock Text="Quality" VerticalAlignment="Center" FontSize="12" Margin="0,0,10,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <ComboBox MinWidth="220" ItemsSource="{Binding Qualities}" DisplayMemberPath="Label"
+                                      SelectedItem="{Binding SelectedQuality, Mode=TwoWay}"
+                                      AutomationProperties.Name="Quality" />
+                        </StackPanel>
+                        <CheckBox Margin="2,8,0,0" Content="{Binding SubtitleText}" IsChecked="{Binding IncludeSubtitles, Mode=TwoWay}"
+                                  Visibility="{Binding HasSubtitles, Converter={StaticResource B2V}}" />
+                        <CheckBox Margin="22,2,0,0" Content="Put them inside the video file (needs ffmpeg)"
+                                  IsChecked="{Binding EmbedSubtitles, Mode=TwoWay}" IsEnabled="{Binding IncludeSubtitles}"
+                                  Visibility="{Binding HasSubtitles, Converter={StaticResource B2V}}" />
+                        <TextBlock Margin="2,8,0,0" FontSize="12" TextWrapping="Wrap"
+                                   Text="Recording starts now and goes on until the broadcast ends or you press Stop and save on its card."
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding IsLiveStream, Converter={StaticResource B2V}}" />
+                    </StackPanel>
+                </Grid>
+
+                <!-- failed -->
+                <StackPanel Style="{StaticResource WhenFailed}" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ui:SymbolIcon Symbol="ErrorCircle24" FontSize="22" VerticalAlignment="Top"
+                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                    <StackPanel Margin="12,0,0,0" MaxWidth="470">
+                        <TextBlock Text="Can't use this link" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding ProbeError}" TextWrapping="Wrap" FontSize="12" Margin="0,3,0,0"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="{Binding ProbeHint}"
+                                   TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0"
+                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- duplicate warning -->
+        <Border Margin="0,10,0,0" Padding="12,9" CornerRadius="8"
+                Background="{DynamicResource SystemFillColorCautionBackgroundBrush}"
+                Visibility="{Binding DuplicateWarning, Converter={StaticResource NullToCollapsed}}">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon Symbol="Warning24" FontSize="16" Margin="0,0,10,0" VerticalAlignment="Top"
+                               Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                <TextBlock Text="{Binding DuplicateWarning}" TextWrapping="Wrap" MaxWidth="500" FontSize="12" />
+            </StackPanel>
+        </Border>
+
+        <!-- ================= destination ================= -->
+        <TextBlock Style="{StaticResource Field}" Text="Save to" />
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ui:TextBox Text="{Binding SaveFolder, UpdateSourceTrigger=PropertyChanged}"
+                        Icon="{ui:SymbolIcon Folder24}" />
+            <ui:Button Grid.Column="1" Margin="8,0,0,0" Height="34" Content="Browse…"
+                       Icon="{ui:SymbolIcon FolderOpen24}" Command="{Binding BrowseCommand}" />
+        </Grid>
+        <TextBlock Margin="2,6,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                   Visibility="{Binding IsSingle, Converter={StaticResource B2V}}">
+            <Run Text="Category: " /><Run Text="{Binding Category, Mode=OneWay}" FontWeight="SemiBold" />
+        </TextBlock>
+
+        <!-- ================= connections ================= -->
+        <Grid Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Style="{StaticResource Field}" Text="Connections" Margin="2,0,0,0" />
+            <TextBlock Grid.Column="1" FontSize="12" FontWeight="SemiBold">
+                <Run Text="{Binding Connections, Mode=OneWay}" /><Run Text=" at most" />
+            </TextBlock>
+        </Grid>
+        <Slider Minimum="1" Maximum="32" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,0"
+                Value="{Binding Connections, Mode=TwoWay}" />
+        <TextBlock Margin="2,2,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                   Text="The engine starts with one and adds more only while they actually speed things up." />
+
+        <!-- ================= advanced ================= -->
+        <ui:Button Appearance="Transparent" Margin="-8,12,0,0" Padding="8,4" HorizontalAlignment="Left"
+                   Command="{Binding ToggleAdvancedCommand}">
+            <StackPanel Orientation="Horizontal">
+                <ui:SymbolIcon FontSize="14" Margin="0,0,6,0">
+                    <ui:SymbolIcon.Style>
+                        <Style TargetType="ui:SymbolIcon">
+                            <Setter Property="Symbol" Value="ChevronRight24" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ShowAdvanced}" Value="True">
+                                    <Setter Property="Symbol" Value="ChevronDown24" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ui:SymbolIcon.Style>
+                </ui:SymbolIcon>
+                <TextBlock Text="Advanced (sign-in cookie, referring page)" FontSize="12" />
+            </StackPanel>
+        </ui:Button>
+
+        <StackPanel Visibility="{Binding ShowAdvanced, Converter={StaticResource B2V}}" Margin="0,4,0,0">
+            <TextBlock Style="{StaticResource Field}" Text="Referring page" Margin="2,6,0,6" />
+            <ui:TextBox Text="{Binding Referer, UpdateSourceTrigger=LostFocus}" PlaceholderText="https://…" />
+            <TextBlock Style="{StaticResource Field}" Text="Cookie header" />
+            <ui:TextBox Text="{Binding Cookies, UpdateSourceTrigger=LostFocus}" PlaceholderText="name=value; name2=value2" />
+        </StackPanel>
+    </StackPanel>
+</ui:ContentDialog>

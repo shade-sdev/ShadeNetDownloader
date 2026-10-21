@@ -1,0 +1,34 @@
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #1b1b1f;
+  --muted: #62626b;
+  --accent: #2563eb;
+  --ok: #2e9d57;
+  --bad: #c4452d;
+  --line: #e1e1e6;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1f1f23; --fg: #f1f1f4; --muted: #a4a4ad; --accent: #60a5fa; --line: #34343b; }
+}
+
+body { width: 300px; margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+p { margin: 0; }
+.muted { color: var(--muted); }
+.ok { color: var(--ok); }
+.bad { color: var(--bad); }
+.switch { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
+.note { margin-top: 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+h2 { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+ul { list-style: none; margin: 0; padding: 0; }
+li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); }
+li .what { flex: 1; min-width: 0; }
+li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+li .meta { color: var(--muted); font-size: 11px; }
+li button { margin: 0; width: auto; padding: 5px 10px; }
+li button:disabled { opacity: .5; cursor: default; }
+button { margin-top: 12px; width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: inherit; cursor: pointer; }
+button:hover { border-color: var(--accent); }

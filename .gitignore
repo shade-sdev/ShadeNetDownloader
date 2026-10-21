@@ -1,0 +1,13 @@
+bin/
+obj/
+bin-*/
+obj-*/
+.vs/
+*.user
+tools/ffmpeg/
+extension/dist/
+extension/node_modules/
+.claude
+.idea
+.git
+docs/

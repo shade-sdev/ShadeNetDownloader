@@ -1,0 +1,746 @@
+<UserControl x:Class="ShadeNetDownloader.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
+
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="B2V" />
+
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="2,0,0,8" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
+        <Style x:Key="CardHint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,2,0,0" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </Style>
+
+        <Style x:Key="CardError" TargetType="TextBlock" BasedOn="{StaticResource CardHint}">
+            <Setter Property="Margin" Value="0,4,0,0" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+        </Style>
+    </UserControl.Resources>
+
+    <UserControl.Triggers>
+        <EventTrigger RoutedEvent="Loaded">
+            <BeginStoryboard>
+                <Storyboard>
+                    <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0" To="1"
+                                     Duration="{StaticResource MotionBase}"
+                                     EasingFunction="{StaticResource EaseOut}" />
+                </Storyboard>
+            </BeginStoryboard>
+        </EventTrigger>
+    </UserControl.Triggers>
+
+    <Grid Margin="{StaticResource PagePadding}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="188" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ===== the sections ===== -->
+        <StackPanel Grid.Column="0" Margin="0,0,20,0">
+            <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" Margin="0,0,0,18" />
+
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsGeneral, Mode=TwoWay}" AutomationProperties.Name="General">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Settings24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="General" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsDownloads, Mode=TwoWay}" AutomationProperties.Name="Downloads">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Downloads" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsCategories, Mode=TwoWay}" AutomationProperties.Name="Categories">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Folder24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Categories" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsQueue, Mode=TwoWay}" AutomationProperties.Name="Queue">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Clock24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Queue" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsNetwork, Mode=TwoWay}" AutomationProperties.Name="Network">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Wifi124" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Network" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsBrowser, Mode=TwoWay}" AutomationProperties.Name="Browser">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Globe24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Browser" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsAppearance, Mode=TwoWay}" AutomationProperties.Name="Appearance">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="PaintBrush24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="Appearance" />
+                </StackPanel>
+            </RadioButton>
+            <RadioButton GroupName="settingsSection" Style="{StaticResource SettingsNavRadio}" IsChecked="{Binding IsAbout, Mode=TwoWay}" AutomationProperties.Name="About">
+                <StackPanel Orientation="Horizontal">
+                    <ui:SymbolIcon Symbol="Info24" FontSize="16" Margin="0,0,10,0" />
+                    <TextBlock Text="About" />
+                </StackPanel>
+            </RadioButton>
+        </StackPanel>
+
+        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+            <Grid MaxWidth="820" HorizontalAlignment="Stretch" Margin="0,4,12,24">
+
+                <!-- ================= General ================= -->
+                <StackPanel DataContext="{Binding General}" Visibility="{Binding DataContext.IsGeneral, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Tray and start-up" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Window24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Show an icon in the notification area" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Left-click opens ShadeNet; right-click has pause, resume, the speed limit and Exit." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding ShowTrayIcon, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowMinimize24}" Margin="0,0,0,8" IsEnabled="{Binding CanCloseToTray}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Closing the window keeps ShadeNet running" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Downloads carry on in the background. Use Exit in the tray menu to quit for real." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding CloseToTray, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Power24}" Margin="0,0,0,24">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Start with Windows" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Starts hidden in the notification area when you sign in." />
+                                <TextBlock Style="{StaticResource CardError}" Text="{Binding StartupError}"
+                                           Visibility="{Binding StartupError, Converter={StaticResource NullToCollapsed}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding StartWithWindows, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <TextBlock Text="Notifications" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon CheckmarkCircle24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <TextBlock Text="Tell me when a download finishes" FontSize="14" />
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding NotifyOnComplete, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ErrorCircle24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <TextBlock Text="Tell me when a download fails" FontSize="14" />
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding NotifyOnFailure, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon EyeOff24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Only when ShadeNet is not the window in front" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="You can already see the list; no pop-up is needed." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding NotifyOnlyInBackground, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Speaker224}">
+                        <ui:CardControl.Header>
+                            <TextBlock Text="Play the Windows notification sound" FontSize="14" />
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding NotificationSound, Mode=TwoWay}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+                <!-- ================= Downloads ================= -->
+                <StackPanel DataContext="{Binding Downloads}" Visibility="{Binding DataContext.IsDownloads, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Where and how" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon FolderOpen24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Default download folder" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardError}" Text="{Binding DownloadRootError}"
+                                           Visibility="{Binding DownloadRootError, Converter={StaticResource NullToCollapsed}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBox Width="300" Text="{Binding DownloadRootText, UpdateSourceTrigger=LostFocus}" Margin="0,0,8,0" />
+                            <ui:Button Content="Browse…" Icon="{ui:SymbolIcon FolderOpen24}" Command="{Binding BrowseDownloadRootCommand}" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon FolderLink24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Sort downloads into category folders" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Video, Music, Documents… each in its own folder. Edit the folders under Categories." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding UseCategoryFolders, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Flash24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Connections per download" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="The starting point for new downloads (1 to 32). A site's own limit, or the download dialog, can lower it." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center"
+                                 Text="{Binding DefaultConnections, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Resume unfinished downloads when ShadeNet starts" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="Off: they wait, paused, until you resume them." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding AutoResumeOnStartup, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Record24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Stop live recordings after (minutes)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="0 means a recording goes on until the broadcast ends or you press Stop and save. Watch your disk space." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center"
+                                    Text="{Binding MaxRecordingMinutes, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <TextBlock Text="Helper programs" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
+
+                    <ItemsControl ItemsSource="{Binding DataContext.Tools.Rows, RelativeSource={RelativeSource AncestorType=UserControl}}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,8" Padding="16,14" CornerRadius="8" BorderThickness="1"
+                                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <ui:SymbolIcon Symbol="Toolbox24" FontSize="20" VerticalAlignment="Top" Margin="0,2,14,0" />
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Title}" FontSize="14" />
+                                                <TextBlock Style="{StaticResource CardHint}" Text="{Binding Description}" />
+                                                <TextBlock Style="{StaticResource CardHint}" Text="{Binding Status}" />
+                                                <TextBlock FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" Text="{Binding UpdateText}"
+                                                           Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                                           Visibility="{Binding UpdateText, Converter={StaticResource NullToCollapsed}}" />
+                                            </StackPanel>
+                                        </Grid>
+
+                                        <Grid Margin="34,12,0,0" IsEnabled="{Binding IsIdle}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ui:TextBox PlaceholderText="Default (the copy that came with the program)" Text="{Binding PathText, UpdateSourceTrigger=LostFocus}" />
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="8,0,0,0">
+                                                <ui:Button Content="Browse…" Command="{Binding BrowseCommand}" Margin="0,0,6,0" />
+                                                <ui:Button Content="Default" ToolTip="Back to the default location" Command="{Binding ResetCommand}" Margin="0,0,6,0" />
+                                                <ui:Button Content="Check" ToolTip="Look for a newer version" Command="{Binding CheckCommand}" Margin="0,0,6,0" />
+                                                <ui:Button Content="{Binding ActionText}" Appearance="Primary" Command="{Binding UpdateCommand}"
+                                                           Visibility="{Binding HasUpdate, Converter={StaticResource B2V}}" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,8" DataContext="{Binding DataContext.Tools, RelativeSource={RelativeSource AncestorType=UserControl}}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Look for newer versions of these programs" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="About once a day. ShadeNet asks before it installs anything, and never touches a copy you chose yourself." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding CheckForUpdates, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ShieldCheckmark24}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Mark files as downloaded from the internet" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Lets Windows SmartScreen check programs and documents before they run, as a browser would." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding WriteMarkOfTheWeb, Mode=TwoWay}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+                <!-- ================= Categories ================= -->
+                <StackPanel DataContext="{Binding Downloads}" Visibility="{Binding DataContext.IsCategories, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="File types and folders" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource CardHint}" Margin="2,0,0,12"
+                               Text="A download goes to the category whose file types list its extension. Leave a folder empty to use the default under the download folder." />
+
+                    <ItemsControl ItemsSource="{Binding Categories}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,8" Padding="16,12" CornerRadius="8"
+                                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" />
+
+                                        <Grid Grid.Row="0" Grid.Column="1">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ui:TextBox Grid.Column="0" PlaceholderText="File types, e.g. mp4 mkv avi"
+                                                     IsEnabled="{Binding IsEditable}"
+                                                     Text="{Binding ExtensionsText, UpdateSourceTrigger=LostFocus}" />
+                                            <ui:Button Grid.Column="1" Margin="8,0,0,0" ToolTip="Remove this category"
+                                                       Icon="{ui:SymbolIcon Delete24}" Command="{Binding RemoveCommand}"
+                                                       Visibility="{Binding IsCustom, Converter={StaticResource B2V}}" />
+                                        </Grid>
+
+                                        <Grid Grid.Row="1" Grid.Column="1" Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <ui:TextBox Grid.Column="0" PlaceholderText="{Binding FolderHint}"
+                                                     Text="{Binding FolderText, UpdateSourceTrigger=LostFocus}" />
+                                            <ui:Button Grid.Column="1" Margin="8,0,0,0" Content="Browse…" Command="{Binding BrowseCommand}" />
+                                            <ui:Button Grid.Column="2" Margin="8,0,0,0" Content="Reset" ToolTip="Back to the built-in file types and folder"
+                                                       Command="{Binding ResetCommand}" />
+                                        </Grid>
+
+                                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource CardError}"
+                                                   Text="{Binding Error}"
+                                                   Visibility="{Binding Error, Converter={StaticResource NullToCollapsed}}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="Add a category" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
+                    <Border Padding="16,12" CornerRadius="8"
+                            Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox Grid.Column="0" PlaceholderText="Name" Text="{Binding NewCategoryName, UpdateSourceTrigger=PropertyChanged}" />
+                                <ui:TextBox Grid.Column="1" Margin="8,0,0,0" PlaceholderText="File types, e.g. psd ai sketch"
+                                         Text="{Binding NewCategoryExtensions, UpdateSourceTrigger=PropertyChanged}" />
+                                <ui:Button Grid.Column="2" Margin="8,0,0,0" Content="Add" Appearance="Primary"
+                                           Icon="{ui:SymbolIcon Add24}" Command="{Binding AddCategoryCommand}" />
+                            </Grid>
+                            <TextBlock Style="{StaticResource CardError}" Text="{Binding NewCategoryError}"
+                                       Visibility="{Binding NewCategoryError, Converter={StaticResource NullToCollapsed}}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ================= Queue ================= -->
+                <StackPanel DataContext="{Binding Queue}" Visibility="{Binding DataContext.IsQueue, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Running downloads" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon TaskListSquareLtr24}" Margin="0,0,0,24">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Downloads at the same time" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="The rest wait in the Queued list, in the order you set there, and start as others finish." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center"
+                                 Text="{Binding MaxConcurrentJobs, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <TextBlock Text="Schedule" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon CalendarClock24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Run the queue on a schedule" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="{Binding ScheduleSummary}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding ScheduleEnabled, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <Border Margin="0,0,0,24" Padding="16,12" CornerRadius="8"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            IsEnabled="{Binding ScheduleEnabled}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="From" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <ui:TextBox Width="72" HorizontalContentAlignment="Center" Text="{Binding StartText, UpdateSourceTrigger=LostFocus}" />
+                                <TextBlock Text="to" VerticalAlignment="Center" Margin="12,0,8,0" />
+                                <ui:TextBox Width="72" HorizontalContentAlignment="Center" Text="{Binding StopText, UpdateSourceTrigger=LostFocus}" />
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource CardError}" Text="{Binding TimeError}"
+                                       Visibility="{Binding TimeError, Converter={StaticResource NullToCollapsed}}" />
+                            <ItemsControl ItemsSource="{Binding Days}" Margin="0,12,0,0" Focusable="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox Content="{Binding Label}" IsChecked="{Binding IsOn, Mode=TwoWay}" Margin="0,0,14,0" MinWidth="0" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <TextBlock Text="When everything is finished" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Power24}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Then" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Applies to this session only and is never saved. A 60 second countdown with a Cancel button comes first." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox Width="230" ItemsSource="{Binding FinishChoices}" DisplayMemberPath="Label"
+                                  SelectedItem="{Binding SelectedFinish, Mode=TwoWay}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+                <!-- ================= Network ================= -->
+                <StackPanel DataContext="{Binding Network}" Visibility="{Binding DataContext.IsNetwork, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Proxy" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Router24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="How to reach the internet" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Windows uses the proxy set in Windows. None goes direct. Manual uses the address below." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton GroupName="proxy" Style="{StaticResource SegmentRadio}" MinWidth="72"
+                                             IsChecked="{Binding ProxySystem, Mode=TwoWay}" Content="Windows" />
+                                <RadioButton GroupName="proxy" Style="{StaticResource SegmentRadio}" MinWidth="72"
+                                             IsChecked="{Binding ProxyNone, Mode=TwoWay}" Content="None" />
+                                <RadioButton GroupName="proxy" Style="{StaticResource SegmentRadio}" MinWidth="72"
+                                             IsChecked="{Binding ProxyManual, Mode=TwoWay}" Content="Manual" />
+                            </StackPanel>
+                        </Border>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon PlugConnected24}" Margin="0,0,0,24"
+                                    IsEnabled="{Binding ProxyManual}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Proxy address" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardError}" Text="{Binding ProxyError}"
+                                           Visibility="{Binding ProxyError, Converter={StaticResource NullToCollapsed}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="260" PlaceholderText="host:port"
+                                 Text="{Binding ProxyAddress, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <TextBlock Text="Connections" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Timer24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Connect time-out (seconds)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="How long to wait for a site to answer before trying again (3 to 120)." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center"
+                                 Text="{Binding ConnectTimeoutSeconds, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowRepeatAll24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Retries" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="How often a broken connection is retried before the download fails (0 to 50)." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center"
+                                 Text="{Binding MaxRetries, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Person24}" Margin="0,0,0,24">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Browser identity (User-Agent)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Sent to sites unless the browser extension supplies the browser's own." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:TextBox Width="300" Text="{Binding UserAgent, UpdateSourceTrigger=LostFocus}" Margin="0,0,8,0" />
+                            <ui:Button Content="Reset" Command="{Binding ResetUserAgentCommand}" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <TextBlock Text="Connections per site" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource CardHint}" Margin="2,0,0,12"
+                               Text="Some sites ban you for using many connections. A limit here caps the total open to that site (and its sub-domains), however many downloads there are." />
+
+                    <ItemsControl ItemsSource="{Binding HostLimits}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,0,0,6" Padding="16,8" CornerRadius="8"
+                                        Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Host}" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                            <Run Text="{Binding Limit, Mode=OneWay}" /><Run Text=" connections" />
+                                        </TextBlock>
+                                        <ui:Button Grid.Column="2" ToolTip="Remove" Icon="{ui:SymbolIcon Delete24}"
+                                                   Command="{Binding DataContext.RemoveHostLimitCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                   CommandParameter="{Binding}" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border Margin="0,6,0,0" Padding="16,12" CornerRadius="8"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox PlaceholderText="files.example.com" Text="{Binding NewHost, UpdateSourceTrigger=PropertyChanged}" />
+                                <ui:TextBox Grid.Column="1" Width="60" Margin="8,0,0,0" HorizontalContentAlignment="Center"
+                                         Text="{Binding NewHostLimit, UpdateSourceTrigger=PropertyChanged}" />
+                                <ui:Button Grid.Column="2" Margin="8,0,0,0" Content="Add" Appearance="Primary"
+                                           Icon="{ui:SymbolIcon Add24}" Command="{Binding AddHostLimitCommand}" />
+                            </Grid>
+                            <TextBlock Style="{StaticResource CardError}" Text="{Binding HostError}"
+                                       Visibility="{Binding HostError, Converter={StaticResource NullToCollapsed}}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <!-- ================= Browser ================= -->
+                <StackPanel Visibility="{Binding IsBrowser, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Browser integration" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Globe24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Browser extension" FontSize="14" />
+                                <TextBlock Text="{Binding IntegrationStatus}" Style="{StaticResource CardHint}" />
+                                <TextBlock Text="{Binding IntegrationError}" Style="{StaticResource CardError}"
+                                           Visibility="{Binding IntegrationError, Converter={StaticResource NullToCollapsed}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button Content="Set up" Appearance="Primary" Icon="{ui:SymbolIcon PlugConnected24}"
+                                       Command="{Binding InstallIntegrationCommand}" Margin="0,0,8,0" />
+                            <ui:Button Content="Remove" Icon="{ui:SymbolIcon PlugDisconnected24}"
+                                       Command="{Binding UninstallIntegrationCommand}" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <Border Margin="0,0,0,8" Padding="16,14" CornerRadius="8"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                            Visibility="{Binding NeedsExtensionInstall, Converter={StaticResource B2V}}">
+                        <StackPanel>
+                            <TextBlock Text="Add the extension to your browser (once)" FontWeight="SemiBold" />
+                            <TextBlock TextWrapping="Wrap" Margin="0,6,0,0" FontSize="12"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}">
+                                1. Open the extensions page and turn on Developer mode.  2. Choose Load unpacked.  3. Select this folder:
+                            </TextBlock>
+                            <ui:TextBox Text="{Binding ExtensionFolder, Mode=OneWay}" IsReadOnly="True" Margin="0,8,0,0" FontSize="12" />
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <ui:Button Content="Open extensions page" Icon="{ui:SymbolIcon Open24}"
+                                           Command="{Binding OpenExtensionsPageCommand}" Margin="0,0,8,0" />
+                                <ui:Button Content="Show folder" Icon="{ui:SymbolIcon FolderOpen24}"
+                                           Command="{Binding OpenExtensionFolderCommand}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowDownload24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Take over downloads from the browser" FontSize="14" />
+                                <TextBlock Text="Off: the browser keeps every download." Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding BrowserEnabled, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon WindowApps24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="When a download is taken over" FontSize="14" />
+                                <TextBlock Text="Ask first shows the Add dialog with the browser's sign-in already filled in." Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton GroupName="capture" Style="{StaticResource SegmentRadio}"
+                                             IsChecked="{Binding CaptureShowsDialog, Mode=TwoWay}" Content="Ask first" />
+                                <RadioButton GroupName="capture" Style="{StaticResource SegmentRadio}"
+                                             IsChecked="{Binding CaptureStartsImmediately, Mode=TwoWay}" Content="Start right away" />
+                            </StackPanel>
+                        </Border>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Prohibited24}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Leave these sites to the browser" FontSize="14" />
+                                <TextBlock Text="One address per line; sub-domains are included." Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="260" MinHeight="64" MaxHeight="120" AcceptsReturn="True" TextWrapping="Wrap"
+                                 VerticalScrollBarVisibility="Auto"
+                                 Text="{Binding ExcludedHostsText, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+                <!-- ================= Appearance ================= -->
+                <StackPanel Visibility="{Binding IsAppearance, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon PaintBrush24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="App theme" FontSize="14" />
+                                <TextBlock Text="System follows Windows and changes with it, live." Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+
+                        <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton GroupName="theme" Style="{StaticResource SegmentRadio}"
+                                             IsChecked="{Binding IsSystem, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="Desktop24" FontSize="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="System" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="theme" Style="{StaticResource SegmentRadio}"
+                                             IsChecked="{Binding IsLight, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="WeatherSunny24" FontSize="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="Light" />
+                                    </StackPanel>
+                                </RadioButton>
+                                <RadioButton GroupName="theme" Style="{StaticResource SegmentRadio}"
+                                             IsChecked="{Binding IsDark, Mode=TwoWay}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <ui:SymbolIcon Symbol="WeatherMoon24" FontSize="16" Margin="0,0,7,0" />
+                                        <TextBlock Text="Dark" />
+                                    </StackPanel>
+                                </RadioButton>
+                            </StackPanel>
+                        </Border>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Color24}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Accent colour" FontSize="14" />
+                                <TextBlock Text="Follows your Windows accent colour." Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <Ellipse Width="22" Height="22" Fill="{DynamicResource AccentFillColorDefaultBrush}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+                <!-- ================= About ================= -->
+                <StackPanel Visibility="{Binding IsAbout, Converter={StaticResource B2V}}">
+                    <TextBlock Text="About" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Info24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="ShadeNet Downloader" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}">
+                                    <Run Text="Version " /><Run Text="{Binding Version, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Folder24}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Data folder" FontSize="14" />
+                                <TextBlock Text="{Binding DataFolder}" Style="{StaticResource CardHint}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:Button Content="Open" Icon="{ui:SymbolIcon FolderOpen24}" Command="{Binding OpenDataFolderCommand}" />
+                    </ui:CardControl>
+                </StackPanel>
+
+            </Grid>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

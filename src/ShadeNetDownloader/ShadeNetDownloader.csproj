@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0-windows</TargetFramework>
+        <UseWPF>true</UseWPF>
+        <RootNamespace>ShadeNetDownloader</RootNamespace>
+        <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="WPF-UI" Version="4.3.0" />
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+        <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.13" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="ShadeNetDownloader.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\ShadeNet.Core\ShadeNet.Core.csproj" />
+        <ProjectReference Include="..\ShadeNet.Bridge\ShadeNet.Bridge.csproj" />
+        <!-- Built first; its output is copied next to the app (see CopyNativeHost). Not used as a library. -->
+        <ProjectReference Include="..\ShadeNet.NativeHost\ShadeNet.NativeHost.csproj" ReferenceOutputAssembly="false" />
+    </ItemGroup>
+
+    <!-- The tray icon loads this file at run time (Shell_NotifyIcon needs an HICON). -->
+    <ItemGroup>
+        <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- yt-dlp and ffmpeg (tools\get-tools.ps1) travel with the app when they have been fetched; the installer ships them. -->
+    <ItemGroup>
+        <Content Include="..\..\tools\yt-dlp\yt-dlp.exe" Condition="Exists('..\..\tools\yt-dlp\yt-dlp.exe')" Link="tools\yt-dlp\yt-dlp.exe" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\tools\ffmpeg\ffmpeg.exe" Condition="Exists('..\..\tools\ffmpeg\ffmpeg.exe')" Link="tools\ffmpeg\ffmpeg.exe" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- The browser extension travels with the app: Settings → Browser integration points the user at this folder. -->
+    <ItemGroup>
+        <Content Include="..\..\extension\chromium\**\*" Exclude="..\..\extension\chromium\test\**;..\..\extension\chromium\node_modules\**"
+                 Link="browser\chromium\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    </ItemGroup>
+
+    <!-- The native messaging host the browser starts; the installer registers its path. -->
+    <Target Name="CopyNativeHost" AfterTargets="Build">
+        <ItemGroup>
+            <NativeHostFiles Include="..\ShadeNet.NativeHost\bin\$(Configuration)\net10.0\**\*" />
+        </ItemGroup>
+        <Copy SourceFiles="@(NativeHostFiles)" DestinationFolder="$(OutDir)NativeHost\%(RecursiveDir)" SkipUnchangedFiles="true" />
+    </Target>
+
+</Project>
