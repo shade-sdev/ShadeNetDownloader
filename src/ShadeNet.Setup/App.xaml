@@ -11,7 +11,6 @@
             <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="ResizeMode" Value="NoResize" />
-            <Setter Property="WindowStartupLocation" Value="CenterScreen" />
             <Setter Property="SizeToContent" Value="Height" />
         </Style>
 
