@@ -82,6 +82,14 @@ public partial class App : Application
             case SetupMode.UninstallStage2:
                 Quit(Stage2(options));
                 break;
+
+            case SetupMode.Update when options.Silent:
+                Quit(RunSilent(() => ApplyUpdate(options)));
+                break;
+
+            case SetupMode.Update:
+                new SetupWindow(options).Show();
+                break;
         }
     }
 
@@ -106,7 +114,50 @@ public partial class App : Application
         }
     }
 
-    static void StartApp(InstallOptions options)
+    /// <summary>Waits (a little) for the program that is being replaced to end: it is the one that started the update, then quit.</summary>
+    public static void WaitForProcess(int processId)
+    {
+        if (processId <= 0) return;
+        try
+        {
+            Process.GetProcessById(processId).WaitForExit(30000);
+        }
+        catch (ArgumentException)
+        {
+            // already gone
+        }
+    }
+
+    /// <summary>The update without a window: wait for the program to end, replace its files, start it again when asked.</summary>
+    static void ApplyUpdate(InstallOptions options)
+    {
+        if (string.IsNullOrEmpty(options.PackagePath) || !File.Exists(options.PackagePath))
+            throw new SetupException("The update package is missing.", 4);
+
+        WaitForProcess(options.WaitForProcessId);
+        using (var package = File.OpenRead(options.PackagePath))
+            new InstallEngine(options, Log).Update(package);
+        if (options.LaunchAfter) StartApp(options);
+    }
+
+    /// <summary>The update runs as a copy of the uninstaller in the temp folder (the original is one of the files it replaces): that copy is removed when it is done.</summary>
+    protected override void OnExit(ExitEventArgs e)
+    {
+        base.OnExit(e);
+        try
+        {
+            var me = Environment.ProcessPath;
+            if (me != null && Path.GetFileName(me).StartsWith("ShadeNetUpdate-", StringComparison.OrdinalIgnoreCase)
+                && Path.GetFullPath(me).StartsWith(Path.GetFullPath(Path.GetTempPath()), StringComparison.OrdinalIgnoreCase))
+                Process.Start(new ProcessStartInfo("cmd.exe", $"/c ping 127.0.0.1 -n 3 >nul & del /f /q \"{me}\"") { CreateNoWindow = true, UseShellExecute = false });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            // a stray file in temp
+        }
+    }
+
+    public static void StartApp(InstallOptions options)
     {
         if (File.Exists(options.AppExe))
             Process.Start(new ProcessStartInfo(options.AppExe) { UseShellExecute = false, WorkingDirectory = options.InstallDir });

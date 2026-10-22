@@ -3,7 +3,17 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.0.0</Version>
     <Authors>ShadeNet</Authors>
+
+    <!-- Versions: MAJOR.MINOR is chosen here, by hand, when a release deserves a bigger number. The patch number is the release
+         number: the release workflow (tools/ci/next-version.ps1) takes the next free tag v<MAJOR.MINOR>.N and builds with
+         -p:Version=<MAJOR.MINOR>.N. A build on your own computer is MAJOR.MINOR.0. -->
+    <VersionMajorMinor>1.0</VersionMajorMinor>
+    <Version Condition="'$(Version)' == ''">$(VersionMajorMinor).0</Version>
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
+    <!-- where the program looks for newer versions (owner/name); the release workflow stamps the repository it runs in -->
+    <UpdateRepository Condition="'$(UpdateRepository)' == ''">shade-sdev/ShadeNetDownloader</UpdateRepository>
   </PropertyGroup>
 </Project>

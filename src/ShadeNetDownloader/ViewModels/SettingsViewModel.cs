@@ -33,7 +33,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel(SettingsService settings, AppThemeService theme,
         BrowserIntegrationInstaller? installer = null, IBrowserBridge? bridge = null,
         DownloadManager? manager = null, FinishWatcher? finish = null, StartupRegistration? startup = null,
-        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null)
+        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null)
     {
         _settings = settings;
         _theme = theme;
@@ -60,6 +60,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         var tools = toolManager ?? new ToolManager(settings.Current.Engine, Path.Combine(settings.DataDir, "tools"));
         Tools = new ToolsSettingsViewModel(settings, tools, toolUpdates ?? new ToolUpdateService(tools, settings, new ToastService()), ApplyEngine);
 
+        if (appUpdates != null) Updates = new UpdatesSettingsViewModel(settings, appUpdates);
+
         RefreshIntegration();
         if (_bridge != null) _bridge.StatusChanged += () => Application.Current?.Dispatcher.BeginInvoke(RefreshIntegration);
     }
@@ -71,6 +73,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>yt-dlp and ffmpeg: where they are, their versions, a different location, updates.</summary>
     public ToolsSettingsViewModel Tools { get; }
+
+    /// <summary>The newer-version check of ShadeNet itself (Settings > About); null in a view model made without the service.</summary>
+    public UpdatesSettingsViewModel? Updates { get; }
 
     /// <summary>Categories were added, removed or changed: the sidebar rebuilds its list.</summary>
     public event Action? CategoriesChanged;

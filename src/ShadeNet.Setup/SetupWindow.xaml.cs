@@ -15,6 +15,18 @@ public partial class SetupWindow : Window
         _options = options;
         InitializeComponent();
 
+        if (options.Mode == SetupMode.Update)
+        {
+            // an update has no questions: it works, then starts the program again
+            ChoicePanel.Visibility = Visibility.Collapsed;
+            ProgressPanel.Visibility = Visibility.Visible;
+            TitleText.Text = "Updating ShadeNet Downloader";
+            StatusText.Text = "Waiting for ShadeNet to close…";
+            VersionText.Text = "Please wait a moment";
+            Loaded += (_, _) => _ = RunUpdateAsync();
+            return;
+        }
+
         DirBox.Text = options.InstallDir;
         DesktopBox.IsChecked = options.DesktopShortcut;
         StartupBox.IsChecked = options.StartWithWindows;
@@ -29,6 +41,51 @@ public partial class SetupWindow : Window
             InstallButton.Content = "Update";
             IntroText.Text = $"Version {existing} is installed. Your downloads, settings and chosen locations are kept.";
         }
+    }
+
+    async Task RunUpdateAsync()
+    {
+        _cts = new CancellationTokenSource();
+        try
+        {
+            await Task.Run(() => App.WaitForProcess(_options.WaitForProcessId));
+            StatusText.Text = "Installing the new version…";
+            var progress = new Progress<double>(p => Bar.Value = p);
+            var version = await Task.Run(() =>
+            {
+                if (string.IsNullOrEmpty(_options.PackagePath) || !File.Exists(_options.PackagePath)) throw new SetupException("The update package is missing.", 4);
+                using var package = File.OpenRead(_options.PackagePath);
+                return new InstallEngine(_options, App.Log).Update(package, null, p => ((IProgress<double>)progress).Report(p), _cts.Token);
+            });
+
+            _installed = true;
+            Bar.Value = 1;
+            VersionText.Text = "Version " + version;
+            StatusText.Text = "Done. Starting ShadeNet Downloader…";
+            if (_options.LaunchAfter) App.StartApp(_options);
+            await Task.Delay(900);
+            Close();
+        }
+        catch (Exception ex) when (ex is SetupException or OperationCanceledException or IOException)
+        {
+            App.Log("update failed: " + ex.Message);
+            ShowUpdateFailed(ex is SetupException ? ex.Message : "The update could not be applied: " + ex.Message);
+        }
+        catch (Exception ex)
+        {
+            App.Log("update failed: " + ex);
+            ShowUpdateFailed("The update could not be applied: " + ex.Message);
+        }
+    }
+
+    /// <summary>The program was put back as it was; the way on is to start it again.</summary>
+    void ShowUpdateFailed(string message)
+    {
+        Show(message + " ShadeNet Downloader is unchanged.", failed: true);
+        RetryButton.Visibility = Visibility.Collapsed;
+        TitleText.Text = "The update did not work";
+        LaunchBox.Content = "Open ShadeNet Downloader again";
+        LaunchBox.Visibility = Visibility.Visible;
     }
 
     void OnBrowse(object sender, RoutedEventArgs e)
@@ -111,7 +168,7 @@ public partial class SetupWindow : Window
 
     void OnClose(object sender, RoutedEventArgs e)
     {
-        if (_installed && LaunchBox.IsChecked == true && File.Exists(_options.AppExe))
+        if ((_installed || _options.Mode == SetupMode.Update) && LaunchBox.IsChecked == true && File.Exists(_options.AppExe))
         {
             try
             {

@@ -729,6 +729,39 @@
                         </ui:CardControl.Header>
                     </ui:CardControl>
 
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,8" DataContext="{Binding DataContext.Updates, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Visibility="{Binding Converter={StaticResource NullToCollapsed}}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Updates" FontSize="14" />
+                                <TextBlock x:Name="UpdateStatus" Style="{StaticResource CardHint}" TextWrapping="Wrap" MaxWidth="380" Text="{Binding StatusText}"
+                                           AutomationProperties.AutomationId="UpdateStatus" />
+                                <ProgressBar Height="4" Margin="0,8,0,0" Minimum="0" Maximum="1" Value="{Binding ProgressValue, Mode=OneWay}"
+                                             Visibility="{Binding ShowProgress, Converter={StaticResource B2V}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <ui:Button Content="Check for updates" Command="{Binding CheckNowCommand}" IsEnabled="{Binding CanCheck}" Margin="0,0,6,0"
+                                       AutomationProperties.AutomationId="CheckForUpdates" />
+                            <ui:Button Content="{Binding InstallText}" Appearance="Primary" Command="{Binding InstallCommand}"
+                                       Visibility="{Binding CanInstall, Converter={StaticResource B2V}}" AutomationProperties.AutomationId="InstallUpdate" />
+                            <ui:Button Content="What's new" Command="{Binding OpenPageCommand}"
+                                       Visibility="{Binding CanOpenPage, Converter={StaticResource B2V}}" AutomationProperties.AutomationId="OpenReleasePage" />
+                        </StackPanel>
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Alert24}" Margin="0,0,0,8" DataContext="{Binding DataContext.Updates, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Visibility="{Binding Converter={StaticResource NullToCollapsed}}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Look for a newer ShadeNet automatically" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="About once a day. ShadeNet asks before it installs anything." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding CheckForUpdates, Mode=TwoWay}" AutomationProperties.Name="Look for a newer ShadeNet automatically" />
+                    </ui:CardControl>
+
                     <ui:CardControl Icon="{ui:SymbolIcon Folder24}">
                         <ui:CardControl.Header>
                             <StackPanel>

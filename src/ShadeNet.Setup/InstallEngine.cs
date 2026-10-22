@@ -13,7 +13,9 @@ public sealed class SetupException : Exception
     public int ExitCode { get; }
 }
 
-public sealed record InstallManifest(string Version, List<string> Files, string? StartMenuShortcut, string? DesktopShortcut);
+/// <param name="RegistryRoot">Only when it is not the real one (tests and dry runs): an update must write to the same place.</param>
+/// <param name="DataDir">Only when it is not the usual one.</param>
+public sealed record InstallManifest(string Version, List<string> Files, string? StartMenuShortcut, string? DesktopShortcut, string? RegistryRoot = null, string? DataDir = null);
 
 /// <summary>
 /// Installs and removes ShadeNet for the current user: no administrator rights, nothing machine-wide. It unpacks the program
@@ -86,7 +88,8 @@ public sealed class InstallEngine
         if (!_o.StartMenuShortcut) TryDelete(StartMenuShortcutPath);
         if (!_o.DesktopShortcut) TryDelete(DesktopShortcutPath);
 
-        var manifest = new InstallManifest(version, files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(), startMenu, desktop);
+        var manifest = new InstallManifest(version, files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList(), startMenu, desktop,
+            _o.RegistryRoot != "Software" ? _o.RegistryRoot : null, _o.DataDir != new InstallOptions().DataDir ? _o.DataDir : null);
         File.WriteAllText(ManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
 
         RegisterUninstallEntry(version, files);
@@ -147,6 +150,222 @@ public sealed class InstallEngine
             {
                 Thread.Sleep(250);
             }
+        }
+    }
+
+    // ================================================================================================================
+    // update
+    // ================================================================================================================
+
+    /// <summary>Where an update works: the new files are unpacked here first, and the files they replace wait here until it is certain.</summary>
+    public const string UpdateFolder = ".update";
+
+    static bool IsTools(string relative) => relative.StartsWith(@"tools\", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Replaces the installed program with the one in an update package. The package is unpacked and checked completely before
+    /// anything is touched; every replaced file is kept until the last one is in place, and a failure puts them all back, so an
+    /// update either completes or leaves the program as it was. tools\ (yt-dlp, ffmpeg: not in the package, they have their own
+    /// updates), shortcuts, start-up, the browser connection and the user's data are not touched. Returns the version now installed.
+    /// </summary>
+    public string Update(Stream package, string? versionHint = null, Action<double>? progress = null, CancellationToken ct = default)
+    {
+        var previous = ReadManifest() ?? throw new SetupException($"ShadeNet is not installed in \"{_o.InstallDir}\".", 6);
+        AdoptInstallSettings(_o, previous);
+
+        var staging = Path.Combine(_o.InstallDir, UpdateFolder);
+        RecoverInterruptedUpdate(staging);
+        EnsureNotRunning();
+
+        var fresh = Path.Combine(staging, "new");
+        var old = Path.Combine(staging, "old");
+        Directory.CreateDirectory(fresh);
+        Directory.CreateDirectory(old);
+        try
+        {
+            var files = ExtractToStaging(package, fresh, progress, ct);
+            if (!files.Contains(AppExe, StringComparer.OrdinalIgnoreCase))
+                throw new SetupException("The update package is damaged (the program is not in it).", 4);
+
+            var carried = previous.Files.Where(IsTools).Except(files, StringComparer.OrdinalIgnoreCase).ToList();
+            var stale = previous.Files.Except(files, StringComparer.OrdinalIgnoreCase).Where(f => !IsTools(f)).ToList();
+            Swap(files, stale, fresh, old);
+
+            var version = InstalledProgramVersion() ?? versionHint ?? previous.Version;
+            var all = files.Concat(carried).OrderBy(f => f, StringComparer.OrdinalIgnoreCase).ToList();
+            var manifest = new InstallManifest(version, all, previous.StartMenuShortcut, previous.DesktopShortcut,
+                _o.RegistryRoot != "Software" ? _o.RegistryRoot : null, _o.DataDir != new InstallOptions().DataDir ? _o.DataDir : null);
+            File.WriteAllText(ManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(Path.Combine(staging, "committed"), version);   // from here an interruption must not undo anything
+
+            RegisterUninstallEntry(version, all);
+            _log($"updated {previous.Version} -> {version} in {_o.InstallDir}");
+            return version;
+        }
+        finally
+        {
+            TryDeleteFolder(staging);
+        }
+    }
+
+    /// <summary>The update runs in a copy of the uninstaller that knows nothing of how the program was installed: it reads it from the manifest.</summary>
+    internal static void AdoptInstallSettings(InstallOptions options, InstallManifest manifest)
+    {
+        if (manifest.RegistryRoot != null && options.RegistryRoot == "Software") options.RegistryRoot = manifest.RegistryRoot;
+        if (manifest.DataDir != null && options.DataDir == new InstallOptions().DataDir) options.DataDir = manifest.DataDir;
+    }
+
+    string? InstalledProgramVersion()
+    {
+        try
+        {
+            return FileVersionInfo.GetVersionInfo(_o.AppExe).ProductVersion?.Split('+')[0];
+        }
+        catch (Exception ex) when (ex is IOException or FileNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Unpacks the whole package into a folder of its own, checking every name; nothing of the installation is touched.</summary>
+    List<string> ExtractToStaging(Stream package, string destination, Action<double>? progress, CancellationToken ct)
+    {
+        var root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var files = new List<string>();
+
+        ZipArchive zip;
+        try
+        {
+            zip = new ZipArchive(package, ZipArchiveMode.Read, leaveOpen: true);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new SetupException("The update package is damaged (it is not a valid zip file).", 4, ex);
+        }
+
+        using (zip)
+        {
+            var entries = zip.Entries.Where(e => e.Name.Length > 0).ToList();
+            var total = Math.Max(1, entries.Sum(e => e.Length));
+            long done = 0;
+
+            foreach (var entry in entries)
+            {
+                ct.ThrowIfCancellationRequested();
+                var relative = entry.FullName.Replace('/', '\\');
+                var target = Path.GetFullPath(Path.Combine(destination, relative));
+                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                    || relative.StartsWith(UpdateFolder, StringComparison.OrdinalIgnoreCase)
+                    || relative.Equals(ManifestName, StringComparison.OrdinalIgnoreCase))
+                    throw new SetupException("The update package is damaged (a file is where it must not be).", 4);
+
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                    entry.ExtractToFile(target, overwrite: true);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+                {
+                    throw new SetupException($"The update package is damaged or cannot be unpacked (\"{entry.FullName}\": {ex.Message}).", 4, ex);
+                }
+
+                files.Add(relative);
+                done += entry.Length;
+                progress?.Invoke(done / (double)total);
+            }
+        }
+
+        return files;
+    }
+
+    /// <summary>Puts the new files in place, keeping each replaced file; any failure puts every one back.</summary>
+    void Swap(List<string> files, List<string> stale, string fresh, string old)
+    {
+        var steps = new List<(string Relative, bool HadOld, bool Placed)>();
+        try
+        {
+            foreach (var relative in files)
+            {
+                var target = Path.Combine(_o.InstallDir, relative);
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                var hadOld = File.Exists(target);
+                if (hadOld) MoveFile(target, Path.Combine(old, relative));
+                steps.Add((relative, hadOld, false));
+                MoveFile(Path.Combine(fresh, relative), target);
+                steps[^1] = (relative, hadOld, true);
+            }
+
+            foreach (var relative in stale)
+            {
+                var target = Path.Combine(_o.InstallDir, relative);
+                if (!File.Exists(target)) continue;
+                MoveFile(target, Path.Combine(old, relative));
+                steps.Add((relative, true, false));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            foreach (var (relative, hadOld, placed) in Enumerable.Reverse(steps))
+            {
+                var target = Path.Combine(_o.InstallDir, relative);
+                try
+                {
+                    if (placed) File.Delete(target);
+                    if (hadOld) File.Move(Path.Combine(old, relative), target, overwrite: true);
+                }
+                catch (Exception undo) when (undo is IOException or UnauthorizedAccessException)
+                {
+                    _log($"could not put {relative} back: {undo.Message}");
+                }
+            }
+
+            throw new SetupException($"The update could not be applied ({ex.Message}). The previous version was put back.", 5, ex);
+        }
+    }
+
+    static void MoveFile(string from, string to)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+        Replace(from, to);   // retries for a moment: a virus scanner or a browser may hold the file
+    }
+
+    /// <summary>
+    /// An earlier update that was cut off (power, a killed process) left its backup: when it had not reached the point of no return
+    /// the old files are put back, so the program is whole again before this update starts.
+    /// </summary>
+    void RecoverInterruptedUpdate(string staging)
+    {
+        if (!Directory.Exists(staging)) return;
+        var old = Path.Combine(staging, "old");
+        if (!File.Exists(Path.Combine(staging, "committed")) && Directory.Exists(old))
+        {
+            foreach (var file in Directory.GetFiles(old, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    MoveFile(file, Path.Combine(_o.InstallDir, Path.GetRelativePath(old, file)));
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _log($"could not undo an interrupted update ({file}): {ex.Message}");
+                }
+            }
+
+            _log("an interrupted update was undone");
+        }
+
+        TryDeleteFolder(staging);
+    }
+
+    static void TryDeleteFolder(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // a leftover folder is better than a failed update
         }
     }
 

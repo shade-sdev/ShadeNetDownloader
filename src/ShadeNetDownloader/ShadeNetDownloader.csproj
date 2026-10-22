@@ -16,6 +16,8 @@
 
     <ItemGroup>
         <InternalsVisibleTo Include="ShadeNetDownloader.Tests" />
+        <!-- where "Check for updates" looks (stamped by the release build: -p:UpdateRepository=owner/name) -->
+        <AssemblyMetadata Include="UpdateRepository" Value="$(UpdateRepository)" />
     </ItemGroup>
 
     <ItemGroup>
