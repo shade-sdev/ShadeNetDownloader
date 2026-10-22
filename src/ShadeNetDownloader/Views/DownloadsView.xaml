@@ -85,7 +85,7 @@
                                        VerticalAlignment="Center" />
 
                             <!-- status chip -->
-                            <Border x:Name="Chip" Grid.Column="1" Margin="12,0,0,0" Padding="9,2" CornerRadius="99"
+                            <Border x:Name="Chip" Grid.Column="1" Margin="12,0,0,0" Padding="9,2" CornerRadius="{StaticResource RadiusBadge}"
                                     Background="{DynamicResource SubtleFillColorSecondaryBrush}">
                                 <TextBlock x:Name="ChipText" Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />

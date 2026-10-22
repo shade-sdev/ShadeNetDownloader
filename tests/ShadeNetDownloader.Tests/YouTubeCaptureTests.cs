@@ -35,6 +35,9 @@ public class YouTubeCaptureTests
 
         // "media" used to be turned into "download" here
         Assert.Equal("media", CaptureProcessor.Sanitize(new CaptureRequest { Url = "https://x.example/play", Source = "media" })!.Source);
+        Assert.Equal("video", CaptureProcessor.Sanitize(new CaptureRequest { Url = "https://x.example/clip.mp4", Source = "video" })!.Source);
+        Assert.Equal("page", CaptureProcessor.Sanitize(new CaptureRequest { Url = "https://www.facebook.com/watch/?v=1", Source = "page" })!.Source);
+        Assert.Equal("download", CaptureProcessor.Sanitize(new CaptureRequest { Url = "https://x.example/clip.mp4", Source = "anything-else" })!.Source);
     }
 
     [Fact]

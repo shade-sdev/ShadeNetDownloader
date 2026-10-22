@@ -8,6 +8,7 @@ using ShadeNet.TestServer;
 // ShadeNet CLI - a thin console front end over ShadeNet.Core for trying the engine without the UI.
 //   probe <url>                         what the server says about the file
 //   get <url> [-o dir] [-c n]           download (default: 1 connection)
+//   direct <url> [-o dir] [-c n] [--chunk mb] [--ua text]   download through the STREAM engine (what yt-dlp results use)
 //   selftest                            start a local test server and verify downloads byte for byte
 //   segtest                             segmentation scenarios: speed-up, takeover, corruption, liars
 //   resumetest                          pause/resume, restart, hard kill, changed file, expired link
@@ -37,6 +38,8 @@ switch (args[0])
         return await ProbeCommand(args[1], args.Length >= 4 && args[2] == "--cookie" ? args[3] : null);
     case "get" when args.Length >= 2:
         return await GetCommand(args);
+    case "direct" when args.Length >= 2:
+        return await DirectCommand(args);
     case "selftest":
         return await SelfTest();
     case "serve":
@@ -89,6 +92,62 @@ static async Task<int> GetCommand(string[] args)
     Console.WriteLine();
 
     var job = await Download(manager, url, probe, connections, live: true);
+    return job.State == DownloadState.Completed ? 0 : 2;
+}
+
+/// <summary>The stream engine on one plain file (picture only): parallel byte ranges, then ffmpeg. For comparing it with "get".</summary>
+static async Task<int> DirectCommand(string[] args)
+{
+    var url = args[1];
+    var dir = Path.Combine(Path.GetTempPath(), "shadenet-direct");
+    var connections = 8;
+    var chunkMb = 4;
+    string? ua = null;
+    string? audio = null;
+    var trace = args.Contains("--trace");
+    for (var i = 2; i < args.Length - 1; i++)
+    {
+        if (args[i] == "-o") dir = args[i + 1];
+        if (args[i] == "-c") connections = int.Parse(args[i + 1]);
+        if (args[i] == "--chunk") chunkMb = int.Parse(args[i + 1]);
+        if (args[i] == "--ua") ua = args[i + 1];
+        if (args[i] == "--audio") audio = args[i + 1];
+    }
+
+    Directory.CreateDirectory(dir);
+    var manager = NewManager(dir, connections);
+    manager.Settings.StreamChunkBytes = chunkMb * 1024 * 1024;
+
+    var done = new TaskCompletionSource<JobSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
+    var sw = Stopwatch.StartNew();
+    TimeSpan? lastTransfer = null;
+    long lastBytes = 0;
+    var peak = 0.0;
+    var maxConnections = 0;
+    manager.JobUpdated += s =>
+    {
+        if (trace) Console.WriteLine($"  t={sw.Elapsed.TotalSeconds,5:0.00}s {s.State,-12} {Fmt(s.Downloaded),9} of {(s.Total is { } tt ? Fmt(tt) : "?"),9}  speed {Fmt((long)s.Speed),9}/s  conns {s.Connections}  parts {s.PartsDone}/{s.Parts} {s.Note}");
+        if (s.State == DownloadState.Downloading)
+        {
+            lastTransfer = sw.Elapsed;
+            lastBytes = s.Downloaded;
+            peak = Math.Max(peak, s.Speed);
+            maxConnections = Math.Max(maxConnections, s.Connections);
+        }
+
+        if (s.State is DownloadState.Completed or DownloadState.Failed) done.TrySetResult(s);
+    };
+
+    var job = manager.Add(new AddDownloadRequest
+    {
+        Url = url, FileName = "direct-" + Guid.NewGuid().ToString("N")[..6] + ".mp4", MaxConnections = connections, UserAgent = ua,
+        Stream = new StreamChoice(Direct: true, AudioUrl: audio), Mode = AddMode.Start,
+    });
+    await done.Task.WaitAsync(TimeSpan.FromMinutes(10));
+    var total = sw.Elapsed;
+    Console.WriteLine($"{job.State}: workers {connections}, piece {chunkMb} MB | transfer {lastTransfer?.TotalSeconds:0.0}s for {Fmt(lastBytes)} = {Fmt((long)(lastBytes / Math.Max(0.1, (lastTransfer ?? total).TotalSeconds)))}/s avg, peak {Fmt((long)peak)}/s, max conns shown {maxConnections} | total {total.TotalSeconds:0.0}s");
+    if (job.Error != null) Console.WriteLine("  error: " + job.Error);
+    try { File.Delete(job.TargetPath); } catch { }
     return job.State == DownloadState.Completed ? 0 : 2;
 }
 

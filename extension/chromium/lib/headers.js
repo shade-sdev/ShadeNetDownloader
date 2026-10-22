@@ -11,9 +11,11 @@ export class HeaderRecorder {
     this.now = now;
 
     const events = chromeApi?.webRequest?.onBeforeSendHeaders;
+    const own = chromeApi?.runtime?.id ? `chrome-extension://${chromeApi.runtime.id}` : null;
     if (events?.addListener) {
       events.addListener(
-        (details) => this.record(details.url, details.requestHeaders),
+        // the extension's own looks at a playlist are not what the site's player sent: they must not replace it
+        (details) => { if (!(own && details.initiator === own)) this.record(details.url, details.requestHeaders); },
         { urls: ['<all_urls>'] },
         ['requestHeaders', 'extraHeaders'],
       );

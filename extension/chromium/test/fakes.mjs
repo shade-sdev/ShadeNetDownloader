@@ -12,7 +12,10 @@ export class FakePort {
     this.onMessage = new FakeEvent();
     this.onDisconnect = new FakeEvent();
     this.sent = [];
+    this.disconnected = false;
   }
+
+  disconnect() { this.disconnected = true; }
 
   postMessage(message) {
     this.sent.push(message);
@@ -29,6 +32,8 @@ export class FakeApp {
     this.settings = { enabled: true, excludedHosts: [], minSizeBytes: 0, appVersion: '9.9' };
     this.captures = [];
     this.available = true;               // false: connectNative works but the host reports an error and closes
+    this.running = true;                 // false: the app is closed; a hello that may launch it starts it, one that may not is told so
+    this.launches = 0;
     this.answerHello = true;
     this.capture = (message) => ({ accepted: true, reason: 'added' });   // overridable per test
     this.ports = [];
@@ -48,6 +53,15 @@ export class FakeApp {
 
   async receive(port, message) {
     if (!this.available) return;
+    if (message.type === 'hello' && !this.running) {
+      if (message.launch === false) {
+        await port.deliver({ type: 'host-error', code: 'app-not-running', message: 'ShadeNet Downloader is not running.' });
+        await port.close();
+        return;
+      }
+      this.running = true;
+      this.launches++;
+    }
     if (message.type === 'hello' && this.answerHello) {
       await port.deliver({ type: 'hello-ack', ...this.settings });
     } else if (message.type === 'capture') {
@@ -59,7 +73,7 @@ export class FakeApp {
 }
 
 export function fakeChrome(app, { storage = {}, cookies = {}, downloads = {} } = {}) {
-  const calls = { pause: [], resume: [], cancel: [], erase: [], badge: [] };
+  const calls = { pause: [], resume: [], cancel: [], erase: [], badge: [], titles: [], nudges: [] };
   const store = { ...storage };
 
   const chrome = {
@@ -97,6 +111,7 @@ export function fakeChrome(app, { storage = {}, cookies = {}, downloads = {} } =
     action: {
       setBadgeText: ({ text }) => { calls.badge.push(text); },
       setBadgeBackgroundColor: () => {},
+      setTitle: ({ title }) => { calls.titles.push(title); },
     },
     webRequest: { onBeforeSendHeaders: new FakeEvent(), onHeadersReceived: new FakeEvent() },
     tabs: {
@@ -104,6 +119,8 @@ export function fakeChrome(app, { storage = {}, cookies = {}, downloads = {} } =
       onRemoved: new FakeEvent(),
       active: { id: 7, title: 'My Holiday Video', url: 'https://site.example/watch/1' },
       query: async () => [chrome.tabs.active],
+      get: async (id) => (id === chrome.tabs.active.id ? chrome.tabs.active : undefined),
+      sendMessage: async (id, message) => { calls.nudges.push([id, message.type]); },
     },
   };
 

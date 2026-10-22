@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>WinExe</OutputType>
+        <TargetFramework>net10.0-windows</TargetFramework>
+        <UseWPF>true</UseWPF>
+        <RootNamespace>ShadeNet.Setup</RootNamespace>
+        <AssemblyName>ShadeNetSetup</AssemblyName>
+        <ApplicationIcon>..\ShadeNetDownloader\Assets\app.ico</ApplicationIcon>
+        <Product>ShadeNet Downloader</Product>
+        <Description>Setup for ShadeNet Downloader</Description>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Using Include="System.IO" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <InternalsVisibleTo Include="ShadeNet.Setup.Tests" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Resource Include="..\ShadeNetDownloader\Assets\app.ico" Link="app.ico" />
+    </ItemGroup>
+
+    <!--
+        The program itself travels inside the installer as one zip (tools\build-release.ps1 makes it and passes -p:PayloadZip=...).
+        The same project built WITHOUT a payload is the uninstaller that ends up in the installed folder.
+    -->
+    <ItemGroup Condition="'$(PayloadZip)' != '' And Exists('$(PayloadZip)')">
+        <EmbeddedResource Include="$(PayloadZip)" LogicalName="payload.zip" />
+    </ItemGroup>
+
+</Project>

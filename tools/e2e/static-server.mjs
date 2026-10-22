@@ -16,7 +16,7 @@ const server = http.createServer(async (req, res) => {
   if (delay > 0 && file.endsWith('.ts')) await new Promise((r) => setTimeout(r, delay));
 
   const size = fs.statSync(file).size;
-  const types = { '.m3u8': 'application/vnd.apple.mpegurl', '.mpd': 'application/dash+xml', '.html': 'text/html; charset=utf-8', '.vtt': 'text/vtt', '.js': 'text/javascript' };
+  const types = { '.m3u8': 'application/vnd.apple.mpegurl', '.mpd': 'application/dash+xml', '.html': 'text/html; charset=utf-8', '.vtt': 'text/vtt', '.js': 'text/javascript', '.mp4': 'video/mp4' };
   const type = types[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
   const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '');
   if (range) {

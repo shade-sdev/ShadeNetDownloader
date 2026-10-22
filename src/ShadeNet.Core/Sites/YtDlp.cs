@@ -20,7 +20,7 @@ public sealed record YtDlpInfo(string Title, double Seconds, bool IsLive, IReadO
 /// <c>yt-dlp</c>, which follows the site's changes. ShadeNet's own engine then does the downloading (parallel ranges,
 /// speed limits, pause and resume, joining with ffmpeg); yt-dlp is only asked "what is behind this page?".
 /// </summary>
-public static class YtDlp
+public static partial class YtDlp
 {
     static readonly string Exe = OperatingSystem.IsWindows() ? "yt-dlp.exe" : "yt-dlp";
 
@@ -90,8 +90,10 @@ public static class YtDlp
     }
 
     static string HintFor(string reason) =>
-        reason.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || reason.Contains("bot", StringComparison.OrdinalIgnoreCase)
-            ? " (YouTube wants a signed-in browser for this video.)"
+        reason.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase)
+            ? " (yt-dlp does not know this site, so ShadeNet cannot read this page.)"
+            : reason.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || reason.Contains("bot", StringComparison.OrdinalIgnoreCase)
+            ? " (The site wants a signed-in browser for this video.)"
             : reason.Contains("not available", StringComparison.OrdinalIgnoreCase) || reason.Contains("Unable to extract", StringComparison.OrdinalIgnoreCase)
                 ? " (yt-dlp may be out of date: Settings > Downloads > Update.)"
                 : "";
@@ -178,7 +180,7 @@ public static class YtDlp
         using (doc)
         {
             var root = doc.RootElement;
-            var title = Str(root, "title") ?? "video";
+            var title = CleanTitle(Str(root, "title") ?? "video");
             var seconds = root.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number ? d.GetDouble() : 0;
             var live = root.TryGetProperty("is_live", out var l) && l.ValueKind == JsonValueKind.True;
 
@@ -195,7 +197,21 @@ public static class YtDlp
         }
     }
 
-    sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent)
+    /// <summary>Social sites put counters and their own name around a title: "119 reactions · 1.4K shares | Name on Reels | Facebook".</summary>
+    public static string CleanTitle(string title)
+    {
+        var t = Counters().Replace(title, "");
+        t = SiteSuffix().Replace(t, "");
+        return t.Trim().Length > 0 ? t.Trim() : title;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*[\d.,]+\s*[KMB]?\s+(views?|reactions?|likes?)(\s*[·•]\s*[\d.,]+\s*[KMB]?\s+(shares?|reactions?|comments?|likes?|views?))*\s*\|\s*", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex Counters();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\s*\|\s*(Facebook|Instagram|TikTok)\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex SiteSuffix();
+
+    sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent, double Quality = 0)
     {
         public bool HasVideo => VCodec != "none" && VCodec.Length > 0;
         public bool HasAudio => ACodec != "none" && ACodec.Length > 0;
@@ -208,8 +224,14 @@ public static class YtDlp
             if (string.IsNullOrEmpty(url)) return null;
             string? ua = null;
             if (f.TryGetProperty("http_headers", out var h) && h.ValueKind == JsonValueKind.Object && Str(h, "User-Agent") is { Length: > 0 } agent) ua = agent;
-            return new Format(Str(f, "format_id") ?? "", url, Str(f, "protocol") ?? "", Str(f, "ext") ?? "", Str(f, "vcodec") ?? "none", Str(f, "acodec") ?? "none",
-                (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua);
+            var ext = Str(f, "ext") ?? "";
+            var vcodec = Str(f, "vcodec");
+            var acodec = Str(f, "acodec");
+            // Some sites (Facebook: "hd - unknown") say nothing about the codecs. A progressive file in a video container is then
+            // what yt-dlp itself would pick as "best": picture and sound together.
+            if (vcodec == null && acodec == null && ext is "mp4" or "webm" or "mkv" or "mov" or "flv" or "m4v") (vcodec, acodec) = ("unknown", "unknown");
+            return new Format(Str(f, "format_id") ?? "", url, Str(f, "protocol") ?? "", ext, vcodec ?? "none", acodec ?? "none",
+                (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua, Num(f, "quality"));
         }
     }
 
@@ -248,10 +270,12 @@ public static class YtDlp
         if (options.Count == 0)
         {
             // nothing is split: picture and sound already together
-            foreach (var group in files.Where(f => f.HasVideo && f.HasAudio).GroupBy(f => f.Height))
+            // (a site that does not say how tall a file is, Facebook's "hd" and "sd", is told apart by its own name, best first)
+            foreach (var group in files.Where(f => f.HasVideo && f.HasAudio).GroupBy(f => f.Height > 0 ? f.Height.ToString() : f.Id).OrderByDescending(g => g.Max(x => x.Height)).ThenByDescending(g => g.Max(x => x.Quality)))
             {
                 var f = group.OrderByDescending(x => x.Tbr).First();
-                options.Add(new YtDlpOption($"{f.Height}p · {f.Ext}" + (f.Size > 0 ? $" · about {FormatSize(f.Size)}" : ""), f.Height, f.Url, null,
+                var name = f.Height > 0 ? $"{f.Height}p" : f.Id.Length > 0 ? f.Id.ToUpperInvariant() : "video";
+                options.Add(new YtDlpOption($"{name} · {f.Ext}" + (f.Size > 0 ? $" · about {FormatSize(f.Size)}" : ""), f.Height, f.Url, null,
                     f.Ext is "mp4" or "mkv" or "webm" ? (f.Ext == "webm" ? ".mkv" : "." + f.Ext) : ".mp4", f.Size, f.UserAgent, false));
             }
         }

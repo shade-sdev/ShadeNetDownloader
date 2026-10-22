@@ -35,4 +35,6 @@ public sealed class AppCaptureUi : ICaptureUi
 
     /// <summary>Also brings the window back from the tray when it was hidden there.</summary>
     public void BringToFront() => _shell.BringToFront();
+
+    public void Quit() => _shell.Exit();
 }

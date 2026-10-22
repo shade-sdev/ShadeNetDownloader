@@ -87,6 +87,31 @@ public class YtDlpTests
         Assert.Equal(JobErrorKind.Tool, Assert.Throws<DownloadException>(() => YtDlp.ParseInfo("not json")).Kind);
     }
 
+    [Fact]
+    public void Facebook_files_that_say_nothing_about_their_codecs_are_picture_and_sound_together_best_first()
+    {
+        // the real shape of yt-dlp's answer for a public Facebook video: no codecs, no height, only "hd" and "sd"
+        var info = YtDlp.ParseInfo("""
+            {"title":"119 reactions · 1.4K shares | How to Share With Just Friends | Facebook","duration":74.3,
+             "formats":[
+              {"format_id":"sd","quality":-3,"url":"https://video.example/sd.mp4","protocol":"https","ext":"mp4","video_ext":"mp4","audio_ext":"none","http_headers":{"User-Agent":"facebookexternalhit/1.1"}},
+              {"format_id":"hd","quality":-2,"url":"https://video.example/hd.mp4","protocol":"https","ext":"mp4","video_ext":"mp4","audio_ext":"none","http_headers":{"User-Agent":"facebookexternalhit/1.1"}}]}
+            """);
+
+        Assert.Equal("How to Share With Just Friends", info.Title);
+        Assert.Equal(new[] { "HD · mp4", "SD · mp4" }, info.Options.Select(o => o.Label).ToArray());
+        Assert.Equal("https://video.example/hd.mp4", info.Options[0].VideoUrl);
+        Assert.All(info.Options, o => { Assert.Null(o.AudioUrl); Assert.Equal(".mp4", o.Extension); Assert.Equal("facebookexternalhit/1.1", o.UserAgent); });
+    }
+
+    [Theory]
+    [InlineData("119 reactions · 1.4K shares | Asif Nawab Butt on Reels", "Asif Nawab Butt on Reels")]
+    [InlineData("2.8M views · 10K reactions | How to Share With Just Friends | Facebook", "How to Share With Just Friends")]
+    [InlineData("How to Share With Just Friends", "How to Share With Just Friends")]
+    [InlineData("My: Holiday/Video | Notes", "My: Holiday/Video | Notes")]
+    [InlineData("12 views | ", "12 views | ")]   // nothing would be left: keep what the site said
+    public void Counters_and_the_site_name_are_taken_off_a_title(string raw, string expected) => Assert.Equal(expected, YtDlp.CleanTitle(raw));
+
     [Theory]
     [InlineData("https://www.youtube.com/watch?v=aqz-KE-bpKQ&t=3s", true)]
     [InlineData("https://youtu.be/aqz-KE-bpKQ", true)]

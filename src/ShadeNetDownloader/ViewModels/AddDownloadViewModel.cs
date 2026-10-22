@@ -98,6 +98,9 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
     HlsStreamInfo? _stream;
     StreamChoice? _direct;
 
+    /// <summary>The sound's own playlist when the page's player asked for picture and sound separately (sent by the extension).</summary>
+    string? SoundPlaylist => _capture is { Source: "media", AudioUrl: { Length: > 0 } sound } && Links.Count > 0 && IsCapturedLink(Links[0]) ? sound : null;
+
     public ObservableCollection<QualityOption> Qualities { get; } = new();
 
     [ObservableProperty] QualityOption? _selectedQuality;
@@ -253,7 +256,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 return;
             }
 
-            if (YtDlp.IsSupportedPage(url))
+            if (YtDlp.IsSupportedPage(url) || (IsCapturedLink(url) && _capture!.Source == "page"))
             {
                 await ShowYtDlpAsync(url, cts).ConfigureAwait(true);
                 return;
@@ -283,7 +286,9 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             _probe = result;
             Run(() =>
             {
-                if (!_nameEdited) FileName = result.FileName;
+                // a video the page's own button sent is named after the video; the address only has the CDN's hash
+                var named = captured && _capture!.Source == "video" && !string.IsNullOrWhiteSpace(_capture.FileName);
+                if (!_nameEdited) FileName = named ? FileNameHelper.Sanitize(_capture!.FileName!) : result.FileName;
                 SizeText = result.TotalSize is { } t ? ByteFormat.Size(t) : "Unknown size";
                 TypeText = result.ContentType ?? "";
                 Resumable = result.AcceptsRanges;
@@ -330,7 +335,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         catch (DownloadException ex)
         {
             ProbeError = ex.Message;
-            ProbeHint = "ShadeNet asks yt-dlp what is behind a YouTube page. Keep yt-dlp up to date (Settings > Downloads > Update).";
+            ProbeHint = "ShadeNet asks yt-dlp what is behind a video page. Keep yt-dlp up to date (Settings > Downloads > Update). Videos that need a sign-in, or that the site protects, cannot be read.";
             ProbeState = ProbeState.Failed;
             return;
         }
@@ -358,7 +363,11 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         Run(() =>
         {
             if (!_nameEdited) FileName = FileNameHelper.Sanitize(info.Title) + SelectedQuality!.Source!.Extension;
-            TypeText = info.IsLive ? "Live stream (YouTube)" : "YouTube video";
+            var site = Uri.TryCreate(url, UriKind.Absolute, out var page) ? page.Host.ToLowerInvariant() : "";
+            var youtube = site.Contains("youtube", StringComparison.Ordinal) || site == "youtu.be";
+            if (site.StartsWith("www.", StringComparison.Ordinal)) site = site[4..];
+            TypeText = youtube ? (info.IsLive ? "Live stream (YouTube)" : "YouTube video")
+                : info.IsLive ? $"Live stream ({site})" : $"Video from {site}";
             Resumable = true;
         });
         Refine(FileName);
@@ -550,7 +559,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             Mode = mode,
             Stream = single && _direct != null ? _direct
                 : source != null ? SelectedQuality!.Choice
-                : single && IsStream ? (SelectedQuality?.Choice ?? new StreamChoice()) with { Subtitles = IncludeSubtitles, EmbedSubtitles = IncludeSubtitles && EmbedSubtitles }
+                : single && IsStream ? (SelectedQuality?.Choice ?? new StreamChoice()) with { Subtitles = IncludeSubtitles, EmbedSubtitles = IncludeSubtitles && EmbedSubtitles, AudioUrl = SoundPlaylist }
                 : !single && DownloadManager.IsStreamAddress(url) ? new StreamChoice() : null,
         }, single && !IsStream ? _probe : null)).ToList();
     }

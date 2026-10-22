@@ -67,6 +67,9 @@ if ($Tool -in "ffmpeg", "all") {
     Expand-Archive $zip $extract
     New-Item -ItemType Directory $dir -Force | Out-Null
     Copy-Item (Get-ChildItem $extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName (Join-Path $dir "ffmpeg.exe") -Force
+    # the LGPL asks for its text to be passed on with the program
+    $license = Get-ChildItem $extract -Recurse -Filter LICENSE.txt | Select-Object -First 1
+    if ($license) { Copy-Item $license.FullName (Join-Path $dir "LICENSE.txt") -Force }
     Remove-Item $zip, $extract -Recurse -Force
     Write-Host "  $(& (Join-Path $dir 'ffmpeg.exe') -version | Select-Object -First 1)"
     # the build's date, from the release page, is what "a newer build exists" is measured against

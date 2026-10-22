@@ -29,6 +29,9 @@ public interface ICaptureUi
     void Notify(string message, ToastKind kind);
 
     void BringToFront();
+
+    /// <summary>Quit the program for real (not just hide it in the tray).</summary>
+    void Quit();
 }
 
 /// <summary>
@@ -144,8 +147,9 @@ public sealed class CaptureProcessor
         }
 
         // 3. a new download
-        // A YouTube page is not a file: yt-dlp has to say what is behind it, which takes seconds, so the dialog does that.
-        if (ShadeNet.Core.Sites.YtDlp.IsSupportedPage(capture.Url))
+        // A video page (YouTube, or any page the extension sends as "page": its video is not a file with an address,
+        // Facebook's for example) is not a file: yt-dlp has to say what is behind it, which takes seconds, so the dialog does that.
+        if (capture.Source == "page" || ShadeNet.Core.Sites.YtDlp.IsSupportedPage(capture.Url))
         {
             _ui.ShowCapture(capture);
             _ui.BringToFront();
@@ -160,8 +164,9 @@ public sealed class CaptureProcessor
             var job = _manager.Add(new AddDownloadRequest
             {
                 Stream = isTracks ? new StreamChoice(Direct: true, AudioUrl: capture.AudioUrl, Seconds: capture.Duration ?? 0)
-                    : isStream ? new StreamChoice() : null,
-                FileName = isStream && !string.IsNullOrWhiteSpace(capture.FileName) ? capture.FileName : null,
+                    : isStream ? new StreamChoice(AudioUrl: capture.Source == "media" ? capture.AudioUrl : null) : null,
+                // a stream, and a video file the page's own button sent, are named after the video, not after the address
+                FileName = (isStream || capture.Source == "video") && !string.IsNullOrWhiteSpace(capture.FileName) ? capture.FileName : null,
                 Url = capture.Url,
                 Referer = capture.Referrer,
                 Cookies = capture.Cookies,
@@ -238,9 +243,12 @@ public sealed class CaptureProcessor
         string? fileName = string.IsNullOrWhiteSpace(request.FileName) ? null : FileNameHelper.Sanitize(request.FileName);
         long? size = request.Size is > 0 ? request.Size : null;
 
-        // "media": a stream the extension saw playing; "tracks": picture and sound the player fetched as separate files
-        var source = request.Source is "contextmenu" or "media" or "tracks" ? request.Source : "download";
-        string? audioUrl = source == "tracks" && IsWebUrl(request.AudioUrl) ? request.AudioUrl : null;
+        // "media": a stream the extension saw playing; "tracks": picture and sound the player fetched as separate files;
+        // "video": a plain video file the page plays, sent with the video's name;
+        // "page": the address of a page whose video has no address of its own (yt-dlp is asked about it)
+        var source = request.Source is "contextmenu" or "media" or "tracks" or "video" or "page" ? request.Source : "download";
+        // (the sound as a second playlist belongs to a "media" stream; as a second file, to "tracks")
+        string? audioUrl = source is "tracks" or "media" && IsWebUrl(request.AudioUrl) ? request.AudioUrl : null;
         long? audioSize = audioUrl != null && request.AudioSize is > 0 ? request.AudioSize : null;
         double? duration = source == "tracks" && request.Duration is > 0 and < 7 * 24 * 3600 ? request.Duration : null;
 

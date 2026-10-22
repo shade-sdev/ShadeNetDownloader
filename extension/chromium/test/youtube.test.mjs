@@ -66,6 +66,9 @@ test('a file with picture and sound together needs no second track', () => {
 test('labels, titles and containers', () => {
   assert.equal(describeTracks({ video: parsePlayback(video), audio: parsePlayback(audio) }), '1080p + 128 kbit/s sound');
   assert.equal(cleanTitle('(2) My: Holiday/Video? - YouTube'), 'My Holiday Video');
+  assert.equal(cleanTitle('How to share with just friends. | Facebook'), 'How to share with just friends.');
+  assert.equal(cleanTitle('Sunrise - Instagram'), 'Sunrise');
+  assert.equal(cleanTitle('Facebook marketing | tips'), 'Facebook marketing tips');
   assert.equal(cleanTitle(''), 'video');
   assert.equal(extensionFor({ video: parsePlayback(video), audio: parsePlayback(audio) }), '.mp4');
   assert.equal(extensionFor({ video: parsePlayback(video.replace('video%2Fmp4', 'video%2Fwebm')), audio: parsePlayback(audio) }), '.mkv');
@@ -141,7 +144,7 @@ test('a YouTube tab lists its page; "Download" sends the page address without an
   assert.equal(result.accepted, true);
   const capture = t.app.captures[0];
   assert.equal(capture.url, 'https://www.youtube.com/watch?v=abc');
-  assert.equal(capture.source, 'media');
+  assert.equal(capture.source, 'page');
   assert.equal(capture.fileName, 'My Holiday Video');
   assert.equal(capture.cookies, undefined);                        // the sign-in stays in the browser
   assert.equal((await t.controller.sendMedia('https://evil.example/x')).accepted, false);

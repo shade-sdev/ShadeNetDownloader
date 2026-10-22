@@ -1,0 +1,33 @@
+ShadeNet Downloader: third-party software
+==========================================
+
+ShadeNet Downloader ships with, and uses, the programs and libraries below. Each keeps its own licence.
+
+Programs that are started by ShadeNet (they are separate programs, not linked into it)
+--------------------------------------------------------------------------------------
+
+yt-dlp
+    Finds the video files behind web pages such as YouTube.
+    https://github.com/yt-dlp/yt-dlp
+    Licence: The Unlicense (public domain dedication).
+
+FFmpeg (LGPL build)
+    Joins downloaded video and audio into one file without re-encoding.
+    https://ffmpeg.org
+    Licence: GNU Lesser General Public License, version 2.1 or later. The licence text is in tools\ffmpeg\LICENSE.txt
+    next to the program. This build is the LGPL variant published by https://github.com/BtbN/FFmpeg-Builds ;
+    its source code and build scripts are available from FFmpeg (https://ffmpeg.org/download.html#get-sources) and that
+    project. FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
+    You can replace this ffmpeg with another build at any time: Settings > Downloads > Helper programs.
+
+Libraries inside ShadeNet Downloader
+------------------------------------
+
+.NET runtime and Windows Presentation Foundation   MIT        https://github.com/dotnet/runtime , https://github.com/dotnet/wpf
+WPF-UI                                             MIT        https://github.com/lepoco/wpfui
+CommunityToolkit.Mvvm                              MIT        https://github.com/CommunityToolkit/dotnet
+Microsoft.Extensions.* (Hosting, Logging, ...)     MIT        https://github.com/dotnet/runtime
+Microsoft.Data.Sqlite and SQLitePCLRaw             MIT        https://github.com/dotnet/efcore , https://github.com/ericsink/SQLitePCL.raw
+SQLite                                             Public domain   https://sqlite.org
+
+The browser extension (browser\chromium) uses no third-party code.

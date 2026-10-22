@@ -72,6 +72,29 @@ public class YtDlpDialogTests
     }
 
     [Fact]
+    public async Task A_page_the_extension_sends_is_resolved_by_yt_dlp_whatever_the_site()
+    {
+        // Facebook's player hands the browser a buffer, not an address: only the page can be given to yt-dlp
+        const string facebook = "https://www.facebook.com/facebook/videos/10153231379946729/";
+        using var dir = new TempDir();
+        using var manager = new DownloadManager(new EngineSettings { DownloadRoot = dir.Path, UseCategoryFolders = false });
+        var asked = new List<string>();
+        var capture = new CaptureInfo(facebook, facebook, null, null, new Dictionary<string, string>(), "How to Share", null, "page", null, null, null);
+        using var vm = new AddDownloadViewModel(manager, null, capture, (url, _) =>
+        {
+            asked.Add(url);
+            return Task.FromResult(Info());
+        });
+
+        await WaitFor(() => vm.ProbeState == ProbeState.Ready, "yt-dlp's answer");
+
+        Assert.Equal(new[] { facebook }, asked);
+        Assert.True(vm.HasQualities);
+        Assert.Equal("Video from facebook.com", vm.TypeText);
+        Assert.Equal("https://v.example/v1080", vm.Build(AddMode.Hold).Single().Request.Url);   // the file, not the page
+    }
+
+    [Fact]
     public async Task A_name_the_user_typed_is_kept_when_the_quality_changes()
     {
         using var dir = new TempDir();

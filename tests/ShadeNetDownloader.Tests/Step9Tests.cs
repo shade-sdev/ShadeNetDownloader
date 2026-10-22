@@ -134,6 +134,8 @@ sealed class FakeShell : IAppShell
     public List<string> Shown { get; } = new();
 
     public void BringToFront() => BroughtToFront++;
+    public int Exits;
+    public void Exit() => Exits++;
 
     public void ShowInFolder(string path) => Shown.Add(path);
 }

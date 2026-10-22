@@ -278,4 +278,46 @@ public class StreamUiTests
         Assert.Equal(1080, job.Hls!.Height);
         Assert.True(File.Exists(job.TargetPath));
     }
+
+    [Fact]
+    public async Task The_sound_s_own_playlist_from_the_browser_reaches_the_job_in_immediate_mode()
+    {
+        using var dir = new TempDir();
+        using var server = Server();
+        using var manager = new DownloadManager(new EngineSettings { DownloadRoot = dir.Path, UseCategoryFolders = false, WriteMarkOfTheWeb = false, FfmpegPath = Path.Combine(dir.Path, "none.exe") });
+        var settings = new BrowserSettings { Mode = CaptureMode.StartImmediately };
+        var processor = new CaptureProcessor(manager, () => settings, new FakeCaptureUi());
+        var sound = server.Base + "/movies/holiday/audio.m3u8";
+
+        await processor.HandleAsync(new CaptureRequest { Id = "m2", Url = server.Base + "/movies/holiday/master.m3u8", Source = "media", FileName = "Split", AudioUrl = sound });
+
+        Assert.Equal(sound, Assert.Single(manager.Jobs).Hls!.AudioUrl);
+        Assert.False(manager.Jobs.Single().Hls!.Direct);   // a playlist to be read, not a file
+    }
+
+    [Fact]
+    public void Only_a_stream_or_picture_and_sound_files_may_carry_a_sound_address()
+    {
+        string? Audio(string source, string? audio) => CaptureProcessor.Sanitize(new CaptureRequest { Url = "https://x.example/v.m3u8", Source = source, AudioUrl = audio })!.AudioUrl;
+
+        Assert.Equal("https://x.example/a.m3u8", Audio("media", "https://x.example/a.m3u8"));
+        Assert.Equal("https://x.example/a.m4a", Audio("tracks", "https://x.example/a.m4a"));
+        Assert.Null(Audio("download", "https://x.example/a.m3u8"));
+        Assert.Null(Audio("media", "javascript:alert(1)"));
+    }
+
+    [Fact]
+    public async Task The_dialog_adds_the_sound_playlist_to_the_stream_it_builds()
+    {
+        using var dir = new TempDir();
+        using var server = Server();
+        using var manager = new DownloadManager(new EngineSettings { DownloadRoot = dir.Path, UseCategoryFolders = false, WriteMarkOfTheWeb = false });
+        var sound = server.Base + "/movies/holiday/audio.m3u8";
+        var capture = new CaptureInfo(server.Base + "/movies/holiday/master.m3u8", null, null, null, new Dictionary<string, string>(), "Split", null, "media", sound);
+        using var vm = new AddDownloadViewModel(manager, null, capture);
+
+        await WaitFor(() => vm.ProbeState == ProbeState.Ready, "the stream to be read");
+
+        Assert.Equal(sound, vm.Build(AddMode.Hold).Single().Request.Stream!.AudioUrl);
+    }
 }

@@ -19,6 +19,8 @@ sealed class FakeCaptureUi : ICaptureUi
     public void ShowCapture(CaptureInfo capture) => Shown.Add(capture);
     public void Notify(string message, ToastKind kind) => Notices.Add(message);
     public void BringToFront() => BroughtToFront++;
+    public int Quits;
+    public void Quit() => Quits++;
 }
 
 public class CaptureProcessorTests
@@ -183,6 +185,46 @@ public class CaptureProcessorTests
         Assert.Equal("Browser-UA/1", job.UserAgent);
         Assert.Equal("Bearer t", job.Headers["Authorization"]);
         Assert.Empty(e.Ui.Shown);
+    }
+
+    [Fact]
+    public async Task A_video_file_sent_by_the_pages_button_is_saved_under_the_name_of_the_video()
+    {
+        using var e = new Env();
+        e.Settings.Mode = CaptureMode.StartImmediately;
+
+        var result = await e.Processor.HandleAsync(new CaptureRequest
+        {
+            Id = "v1", Url = "http://127.0.0.1:9/media/clip.mp4", Source = "video", FileName = "Holiday in Lisbon.mp4", Referrer = "http://127.0.0.1:9/page",
+        });
+
+        Assert.True(result.Accepted);
+        Assert.Equal("Holiday in Lisbon.mp4", Assert.Single(e.Manager.Jobs).FileName);
+    }
+
+    [Fact]
+    public async Task A_video_page_from_the_extension_opens_the_dialog_even_in_immediate_mode()
+    {
+        // the video has no address of its own (Facebook's player): yt-dlp has to be asked, which the dialog does
+        using var e = new Env();
+        e.Settings.Mode = CaptureMode.StartImmediately;
+
+        var result = await e.Processor.HandleAsync(new CaptureRequest { Id = "p1", Url = "http://127.0.0.1:9/some/video/page", Source = "page", FileName = "A video" });
+
+        Assert.True(result.Accepted);
+        Assert.Empty(e.Manager.Jobs);
+        Assert.Equal("page", Assert.Single(e.Ui.Shown).Source);
+    }
+
+    [Fact]
+    public async Task A_plain_link_keeps_the_name_the_address_gives_it_even_when_the_browser_suggests_another()
+    {
+        using var e = new Env();
+        e.Settings.Mode = CaptureMode.StartImmediately;
+
+        await e.Processor.HandleAsync(new CaptureRequest { Id = "c1", Url = "http://127.0.0.1:9/media/clip.mp4", Source = "contextmenu", FileName = "Something else.mp4" });
+
+        Assert.Equal("clip.mp4", Assert.Single(e.Manager.Jobs).FileName);
     }
 
     [Fact]
@@ -554,6 +596,22 @@ public class BrowserIntegrationInstallerTests
     }
 
     [Fact]
+    public void A_self_contained_host_needs_no_DOTNET_ROOT_launcher()
+    {
+        using var e = new Env();
+        Assert.False(e.Installer.HostIsSelfContained);
+
+        // the released program carries its own runtime next to the host (NativeHost\hostfxr.dll)
+        Directory.CreateDirectory(Path.Combine(e.App.Path, "NativeHost"));
+        File.WriteAllBytes(Path.Combine(e.App.Path, "NativeHost", "hostfxr.dll"), [0]);
+        Assert.True(e.Installer.HostIsSelfContained);
+
+        e.Installer.Install();
+        var path = JsonDocument.Parse(File.ReadAllText(e.Installer.ManifestPath)).RootElement.GetProperty("path").GetString()!;
+        Assert.Equal(e.Installer.HostExecutable, path);   // the browser starts the host directly, no .cmd in between
+    }
+
+    [Fact]
     public void Install_can_be_repeated_and_Uninstall_removes_everything()
     {
         using var e = new Env();
@@ -677,6 +735,22 @@ public class SettingsBrowserTests
 
 public class AddDialogCaptureTests
 {
+    [Fact]
+    public async Task A_video_file_from_the_pages_button_is_offered_under_the_name_of_the_video_not_the_addresss()
+    {
+        using var dir = new TempDir();
+        using var server = new AddDialogTests.GatedServer();
+        using var manager = new DownloadManager(new ShadeNet.Core.Engine.EngineSettings { DownloadRoot = dir.Path });
+
+        var capture = new CaptureInfo(server.BaseUrl + "/files/AQO00w7gkHtB.mp4", server.BaseUrl + "/page", "session=ok", "Browser-UA/1",
+            new Dictionary<string, string>(), "How to share with just friends.mp4", null, "video");
+        using var vm = new AddDownloadViewModel(manager, null, capture);
+
+        for (var i = 0; i < 100 && vm.ProbeState != ProbeState.Ready; i++) await Task.Delay(50);
+        Assert.Equal(ProbeState.Ready, vm.ProbeState);
+        Assert.Equal("How to share with just friends.mp4", vm.FileName);
+    }
+
     [Fact]
     public async Task A_captured_link_opens_with_the_browsers_session_and_probes_with_it()
     {

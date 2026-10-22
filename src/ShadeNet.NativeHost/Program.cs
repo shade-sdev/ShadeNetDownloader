@@ -35,18 +35,46 @@ internal static class Program
             }
         }
 
+        // The extension's first frame is its hello. It may say `"launch": false` ("is the app there? do not start it"): the
+        // toolbar popup asks that to show the state without waking an app the user closed. A browser that sends nothing
+        // for a moment is treated as wanting the app (what the host always did).
+        // (A read on the console's stdin cannot be cancelled reliably, so it is raced against a timer; a frame that comes
+        // later is picked up by the relay below.)
+        byte[]? hello = null;
+        var allowLaunch = true;
+        Task<byte[]?>? firstRead = Framing.ReadAsync(stdin, BridgeProtocol.MaxFromBrowserBytes);
+        if (await Task.WhenAny(firstRead, Task.Delay(TimeSpan.FromSeconds(3))) == firstRead)
+        {
+            hello = await firstRead;
+            if (hello == null)
+            {
+                log.Write("browser closed before saying hello");
+                return 0;
+            }
+
+            allowLaunch = WantsLaunch(hello);
+            firstRead = null;
+        }
+        else
+        {
+            log.Write("no hello from the browser in time");
+        }
+
         var pipeName = BridgeProtocol.PipeName();
-        await using var app = await ConnectToAppAsync(pipeName, log);
+        await using var app = await ConnectToAppAsync(pipeName, log, allowLaunch);
         if (app == null)
         {
-            log.Write("app unavailable");
-            await ToBrowser(new HostError { Code = "app-unavailable", Message = "ShadeNet Downloader is not running and could not be started." });
+            log.Write(allowLaunch ? "app unavailable" : "app not running (not asked to start it)");
+            await ToBrowser(allowLaunch
+                ? new HostError { Code = "app-unavailable", Message = "ShadeNet Downloader is not running and could not be started." }
+                : new HostError { Code = "app-not-running", Message = "ShadeNet Downloader is not running." });
             return 2;
         }
 
         try
         {
             await app.SendAsync(new HostHello { Origin = args.FirstOrDefault(a => a.StartsWith("chrome-extension://", StringComparison.Ordinal)) });
+            if (hello != null) await app.SendRawAsync(hello, CancellationToken.None);
 
             using var done = new CancellationTokenSource();
 
@@ -54,7 +82,10 @@ internal static class Program
             {
                 while (true)
                 {
-                    var frame = await Framing.ReadAsync(stdin, BridgeProtocol.MaxFromBrowserBytes, done.Token);
+                    var frame = firstRead != null
+                        ? await firstRead.WaitAsync(done.Token)   // the read that was still waiting when the app was connected
+                        : await Framing.ReadAsync(stdin, BridgeProtocol.MaxFromBrowserBytes, done.Token);
+                    firstRead = null;
                     if (frame == null) return "browser closed";
                     await app.SendRawAsync(frame, done.Token);
                 }
@@ -101,12 +132,12 @@ internal static class Program
     }
 
     /// <summary>Connects to the running app; if there is none, starts it (like IDM's host does) and waits for its pipe.</summary>
-    static async Task<BridgeConnection?> ConnectToAppAsync(string pipeName, HostLog log)
+    static async Task<BridgeConnection?> ConnectToAppAsync(string pipeName, HostLog log, bool allowLaunch)
     {
         var connection = await BridgeClient.TryConnectAsync(pipeName, TimeSpan.FromMilliseconds(400));
         if (connection != null) return connection;
 
-        if (Environment.GetEnvironmentVariable("SHADENET_HOST_NO_LAUNCH") == "1") return null;
+        if (!allowLaunch || Environment.GetEnvironmentVariable("SHADENET_HOST_NO_LAUNCH") == "1") return null;
         if (!TryLaunchApp(log)) return null;
 
         var deadline = DateTime.UtcNow.AddSeconds(25);
@@ -118,6 +149,22 @@ internal static class Program
         }
 
         return null;
+    }
+
+    /// <summary>False only when the hello carries <c>"launch": false</c>; anything unreadable keeps the old behaviour (start the app).</summary>
+    static bool WantsLaunch(byte[] hello)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(hello);
+            return !(doc.RootElement.ValueKind == JsonValueKind.Object
+                     && doc.RootElement.TryGetProperty("launch", out var launch)
+                     && launch.ValueKind == JsonValueKind.False);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
     }
 
     static bool TryLaunchApp(HostLog log)

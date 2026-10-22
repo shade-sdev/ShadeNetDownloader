@@ -21,6 +21,9 @@ public interface IAppShell
 
     void BringToFront();
 
+    /// <summary>Really quit: downloads are paused and saved, then the program ends.</summary>
+    void Exit();
+
     /// <summary>Open Explorer with the file selected. Never <em>runs</em> the file: a download is not trusted.</summary>
     void ShowInFolder(string path);
 }

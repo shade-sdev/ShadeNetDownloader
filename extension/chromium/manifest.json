@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ShadeNet Downloader Integration",
   "description": "Sends downloads from your browser to ShadeNet Downloader, with the cookies and referrer the site needs.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "minimum_chrome_version": "109",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw1y7mX/+r2fEAai3aZDj/loEqfZPgOWrnwPOZAjRruTYfyT2s8YaTi34nE9zqHtyk8ViI7E5nzjWZ4hrfgUi5p7hEutrorv5EhELnBdTdM7q9OUoLspZVzkZ8jd2fDhBYgOPME8clh/+lLHE4otBWczK06X/+zNiWUlqzqJeuWKl8oCOXdT6gs6M3fnrtEsMfiJGLlkYu9LXMowVGyk0727lHYvcJL12LHKO/MrzYGI5PZJ8qTFKcxrhT6c+6+4vNIdvV8AkGVF+AhrJYPyRV9ETxLgmBGLQXHgQDaRtqeSBhYYJocuGuNKiR6MA1EqQoVdBfAIIYyzOt34AxBRdTQIDAQAB",
   "background": { "service_worker": "background.js", "type": "module" },
@@ -12,6 +12,9 @@
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "permissions": ["downloads", "cookies", "webRequest", "contextMenus", "nativeMessaging", "storage"],
-  "host_permissions": ["<all_urls>"]
+  "permissions": ["downloads", "cookies", "webRequest", "contextMenus", "nativeMessaging", "storage", "declarativeNetRequestWithHostAccess"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "all_frames": true, "run_at": "document_idle" }
+  ]
 }

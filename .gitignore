@@ -11,3 +11,4 @@ extension/node_modules/
 .idea
 .git
 docs/
+dist/

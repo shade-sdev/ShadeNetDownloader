@@ -77,6 +77,9 @@ public static class MessageTypes
 
     // second app instance → running app
     public const string Activate = "activate";
+
+    /// <summary>"Really quit" (the installer asks a running ShadeNet to end before it replaces or removes files).</summary>
+    public const string Quit = "quit";
 }
 
 /// <summary>Why a capture was or was not taken over; sent back as <see cref="CaptureResult.Reason"/>.</summary>

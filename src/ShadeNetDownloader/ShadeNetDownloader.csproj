@@ -32,8 +32,9 @@
 
     <!-- yt-dlp and ffmpeg (tools\get-tools.ps1) travel with the app when they have been fetched; the installer ships them. -->
     <ItemGroup>
-        <Content Include="..\..\tools\yt-dlp\yt-dlp.exe" Condition="Exists('..\..\tools\yt-dlp\yt-dlp.exe')" Link="tools\yt-dlp\yt-dlp.exe" CopyToOutputDirectory="PreserveNewest" />
-        <Content Include="..\..\tools\ffmpeg\ffmpeg.exe" Condition="Exists('..\..\tools\ffmpeg\ffmpeg.exe')" Link="tools\ffmpeg\ffmpeg.exe" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\tools\yt-dlp\*" Link="tools\yt-dlp\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\tools\ffmpeg\*" Link="tools\ffmpeg\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\tools\THIRD-PARTY-NOTICES.txt" Link="licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <!-- The browser extension travels with the app: Settings → Browser integration points the user at this folder. -->

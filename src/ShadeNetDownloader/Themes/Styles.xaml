@@ -56,7 +56,7 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
                             <Border x:Name="Badge" Grid.Column="2" MinWidth="22" Height="18" Padding="6,0"
-                                    CornerRadius="9" VerticalAlignment="Center"
+                                    CornerRadius="{StaticResource RadiusBadge}" VerticalAlignment="Center"
                                     Background="{DynamicResource SubtleFillColorTertiaryBrush}">
                                 <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
@@ -136,9 +136,9 @@
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
-    <!-- ===== Small pill (speed readout, feature chips) ===== -->
+    <!-- ===== Small badge (speed readout, feature chips): a rounded rectangle ===== -->
     <Style x:Key="Pill" TargetType="Border">
-        <Setter Property="CornerRadius" Value="99" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
         <Setter Property="Padding" Value="12,4" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />

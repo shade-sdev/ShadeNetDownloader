@@ -15,7 +15,8 @@
     <CornerRadius x:Key="RadiusSm">4</CornerRadius>
     <CornerRadius x:Key="RadiusMd">8</CornerRadius>
     <CornerRadius x:Key="RadiusLg">12</CornerRadius>
-    <CornerRadius x:Key="RadiusPill">99</CornerRadius>
+    <!-- small status badges and count badges: a rounded rectangle, not an oval -->
+    <CornerRadius x:Key="RadiusBadge">5</CornerRadius>
 
     <sys:Double x:Key="FontCaption">12</sys:Double>
     <sys:Double x:Key="FontBody">14</sys:Double>

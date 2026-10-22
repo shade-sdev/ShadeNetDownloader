@@ -281,6 +281,14 @@ internal sealed class HlsRunner : IJobRunner
         {
             video = (HlsMediaPlaylist)playlist;
             videoUrl = video.Url;
+
+            // Picture and sound as two playlists of their own (a player that asks for them separately, with no master playlist):
+            // the extension names the sound's playlist, and it is downloaded as the second track and joined.
+            if (!string.IsNullOrEmpty(Data.AudioUrl) && Uri.TryCreate(Data.AudioUrl, UriKind.Absolute, out var soundUrl))
+            {
+                audioUrl = soundUrl;
+                audio = await LoadMediaAsync(http, soundUrl, ct).ConfigureAwait(false);
+            }
         }
 
         var live = video.IsLive;
@@ -979,7 +987,9 @@ internal sealed class HlsRunner : IJobRunner
                 // the transfer will report it
             }
 
-            if (total is not { } size || size <= 2 * chunk) continue;
+            // Even a file smaller than one piece is asked for by range: some sites (YouTube) answer a request for a whole file at a
+            // few tens of KB/s, and a ranged one at full speed. Without ranges (no size known) the whole file is all there is.
+            if (total is not { } size || size <= 0) continue;
 
             var pieces = new List<HlsSegment>();
             for (long offset = 0; offset < size; offset += chunk)

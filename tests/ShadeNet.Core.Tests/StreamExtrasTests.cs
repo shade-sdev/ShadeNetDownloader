@@ -541,6 +541,51 @@ public class DashFfmpegTests
         var (decodeCode, decodeLog) = await Hls.Ffmpeg.RunAsync(Ffmpeg, new[] { "-v", "error", "-i", job.TargetPath, "-f", "null", "-" }, CancellationToken.None);
         Assert.True(decodeCode == 0 && decodeLog.Length == 0, "the joined file does not decode cleanly: " + decodeLog);
     }
+
+    [Fact]
+    public async Task Picture_and_sound_as_two_separate_playlists_become_one_playable_mp4()
+    {
+        // a player that asks for the picture's playlist and the sound's playlist on its own, with no master playlist above them:
+        // the extension names the sound's playlist, and the app downloads both and joins them
+        if (Ffmpeg == null) return;
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        var folder = Path.Combine(h.Root, "made");
+        Directory.CreateDirectory(Path.Combine(folder, "v"));
+        Directory.CreateDirectory(Path.Combine(folder, "a"));
+
+        foreach (var (dir, map, codec) in new[] { ("v", "0:v", new[] { "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-g", "50" }), ("a", "1:a", new[] { "-c:a", "aac" }) })
+        {
+            var arguments = new List<string>
+            {
+                "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=duration=6:size=320x240:rate=25", "-f", "lavfi", "-i", "sine=frequency=440:duration=6", "-map", map,
+            };
+            arguments.AddRange(codec);
+            arguments.AddRange(new[] { "-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod", "-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", "init.mp4", "index.m3u8" });
+            var (code, log) = await Hls.Ffmpeg.RunAsync(Ffmpeg, arguments, CancellationToken.None, workingDirectory: Path.Combine(folder, dir));
+            Assert.True(code == 0, "ffmpeg could not make the test stream: " + log);
+            foreach (var file in Directory.GetFiles(Path.Combine(folder, dir))) server.Files[$"/{dir}/" + Path.GetFileName(file)] = File.ReadAllBytes(file);
+        }
+
+        var m = h.NewManager(connections: 4, tweak: s => s.WriteMarkOfTheWeb = false);
+        var job = m.Add(new AddDownloadRequest
+        {
+            Url = server.Url("/v/index.m3u8"), FileName = "split.mp4", Mode = AddMode.Start,
+            Stream = new StreamChoice(AudioUrl: server.Url("/a/index.m3u8")),
+        });
+        await Finished(job, 90);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        var info = new ProcessStartInfo(Ffmpeg, $"-hide_banner -i \"{job.TargetPath}\"") { RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+        using var p = Process.Start(info)!;
+        var text = await p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        Assert.Contains("Video: h264", text);
+        Assert.Contains("Audio: aac", text);
+        Assert.Contains("Duration: 00:00:06", text);
+        var (decodeCode, decodeLog) = await Hls.Ffmpeg.RunAsync(Ffmpeg, new[] { "-v", "error", "-i", job.TargetPath, "-f", "null", "-" }, CancellationToken.None);
+        Assert.True(decodeCode == 0 && decodeLog.Length == 0, "the joined file does not decode cleanly: " + decodeLog);
+    }
 }
 
 // ================================================================================================================
@@ -844,5 +889,31 @@ public class DirectTracksTests
         Assert.Contains("Duration: 00:00:06", text);
         var (decodeCode, decodeLog) = await Hls.Ffmpeg.RunAsync(ffmpeg, new[] { "-v", "error", "-i", job.TargetPath, "-f", "null", "-" }, CancellationToken.None);
         Assert.True(decodeCode == 0 && decodeLog.Length == 0, decodeLog);
+    }
+
+    [Fact]
+    public async Task A_small_file_is_still_asked_for_by_range_because_some_sites_throttle_a_whole_file_request()
+    {
+        // YouTube answers a request for a whole file at a few tens of KB/s, and a ranged request at full speed. A 1.5 MB sound
+        // track (smaller than a piece) used to be requested whole and took 45 s after the picture had arrived in one second.
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        var body = HlsServer.Bytes("small", 0, 1_500_000);
+        server.Files["/videoplayback_small"] = body;
+        var requests = new System.Collections.Concurrent.ConcurrentBag<string?>();
+        server.Intercept = ctx =>
+        {
+            if (ctx.Request.Url!.AbsolutePath == "/videoplayback_small") requests.Add(ctx.Request.Headers["Range"]);
+            return false;
+        };
+        var m = Manager(h, withFfmpeg: false);
+
+        var job = m.Add(new AddDownloadRequest { Url = server.Url("/videoplayback_small"), FileName = "small.mp4", Mode = AddMode.Start, Stream = new StreamChoice(Direct: true) });
+        await Finished(job, 60);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.All(requests, range => Assert.False(string.IsNullOrEmpty(range), "a request for the whole file went out without a Range"));
+        Assert.Contains("bytes=0-1499999", requests);   // one ranged piece for the whole (small) file
+        Assert.Equal(body, File.ReadAllBytes(job.TargetPath));
     }
 }

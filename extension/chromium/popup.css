@@ -21,6 +21,7 @@ p { margin: 0; }
 .ok { color: var(--ok); }
 .bad { color: var(--bad); }
 .switch { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); cursor: pointer; }
+.switch + .switch { border-top: 0; }
 .note { margin-top: 10px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 h2 { margin: 14px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 ul { list-style: none; margin: 0; padding: 0; }

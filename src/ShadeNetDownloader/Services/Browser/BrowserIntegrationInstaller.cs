@@ -50,6 +50,9 @@ public sealed class BrowserIntegrationInstaller
     public string ManifestPath => Path.Combine(HostDirectory, BridgeProtocol.HostName + ".json");
     public string HostExecutable => Path.Combine(_appDir, "NativeHost", "ShadeNet.NativeHost.exe");
     public string ExtensionFolder => Path.Combine(_appDir, "browser", "chromium");
+
+    /// <summary>The host carries its own .NET runtime (hostfxr next to it): it runs on a computer that has none installed.</summary>
+    public bool HostIsSelfContained => File.Exists(Path.Combine(_appDir, "NativeHost", "hostfxr.dll"));
     string HostConfigPath => Path.Combine(_dataDir, "host.json");
     string LauncherPath => Path.Combine(HostDirectory, "ShadeNetHost.cmd");
 
@@ -75,7 +78,8 @@ public sealed class BrowserIntegrationInstaller
             throw new FileNotFoundException("The browser host is missing from this installation.", HostExecutable);
 
         Directory.CreateDirectory(HostDirectory);
-        var dotnetRoot = NeedsDotnetRoot() ? CurrentDotnetRoot() : null;
+        // A self-contained host (the released program) brings its own runtime; only a framework-dependent one needs DOTNET_ROOT.
+        var dotnetRoot = !HostIsSelfContained && NeedsDotnetRoot() ? CurrentDotnetRoot() : null;
 
         // How the host finds the app if it is not running (and with which runtime).
         File.WriteAllText(HostConfigPath, JsonSerializer.Serialize(

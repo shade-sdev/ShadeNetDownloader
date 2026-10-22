@@ -206,6 +206,18 @@ public class PipeTests
         await server.DisposeAsync();
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(6), $"took {sw.Elapsed}");
     }
+
+    [Fact]
+    public async Task Disposing_the_server_twice_is_harmless()
+    {
+        // Regression: the program's shutdown reaches DisposeAsync from two places; the second call threw
+        // ObjectDisposedException and the process never ended (found by asking a running program to quit).
+        var server = new BridgeServer(UniquePipe(), c => Task.CompletedTask);
+        server.Start();
+
+        await server.DisposeAsync();
+        await server.DisposeAsync();
+    }
 }
 
 /// <summary>The real host executable, driven exactly like a browser drives it: framed JSON on stdin/stdout.</summary>
@@ -300,6 +312,7 @@ public class NativeHostProcessTests
     public async Task Without_an_app_the_host_tells_the_browser_instead_of_hanging()
     {
         using var host = StartHost("ShadeNetTest." + Guid.NewGuid().ToString("N"), ("SHADENET_HOST_NO_LAUNCH", "1"));
+        await SendToHost(host, new { type = "hello" });
 
         var frame = await Framing.ReadAsync(host.StandardOutput.BaseStream, 1 << 20).WaitAsync(TimeSpan.FromSeconds(20));
         var error = BridgeMessage.Parse(frame!)!.As<HostError>()!;
@@ -308,6 +321,56 @@ public class NativeHostProcessTests
         Assert.Equal("app-unavailable", error.Code);
         Assert.True(host.WaitForExit(10_000));
         Assert.Equal(2, host.ExitCode);
+    }
+
+    [Fact]
+    public async Task A_hello_that_says_launch_false_asks_whether_the_app_is_there_without_starting_it()
+    {
+        // the toolbar popup does this on every open: a user who closed ShadeNet must not get it back for looking
+        var data = Path.Combine(Path.GetTempPath(), "shadenet-host-probe-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(data);
+            File.WriteAllText(Path.Combine(data, "host.json"), "{\"appPath\":\"" + FindHost().Replace("\\", "\\\\") + "\"}");   // would start (the wrong program) if it tried
+
+            using var host = StartHost("ShadeNetTest." + Guid.NewGuid().ToString("N"), ("SHADENET_DATA_DIR", data));
+            await SendToHost(host, new { type = "hello", launch = false });
+
+            var frame = await Framing.ReadAsync(host.StandardOutput.BaseStream, 1 << 20).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("app-not-running", BridgeMessage.Parse(frame!)!.As<HostError>()!.Code);
+            Assert.True(host.WaitForExit(10_000));
+
+            var log = File.ReadAllText(Path.Combine(data, "host.log"));
+            Assert.DoesNotContain("launched", log);
+        }
+        finally
+        {
+            try { Directory.Delete(data, true); } catch { /* the log may still be open for a moment */ }
+        }
+    }
+
+    [Fact]
+    public async Task The_first_frame_reaches_the_app_after_the_introduction()
+    {
+        var pipe = "ShadeNetTest." + Guid.NewGuid().ToString("N");
+        var received = new List<BridgeMessage>();
+        await using var server = new BridgeServer(pipe, async c =>
+        {
+            while (await c.ReadAsync() is { } m) lock (received) received.Add(m);
+        });
+        server.Start();
+
+        using var host = StartHost(pipe);
+        await SendToHost(host, new { type = "hello", browser = "chromium", launch = false });
+        await Task.Delay(1000);
+
+        lock (received)
+        {
+            Assert.Equal(new[] { MessageTypes.HostHello, MessageTypes.Hello }, received.Select(m => m.Type).ToArray());
+        }
+
+        host.StandardInput.Close();
+        host.WaitForExit(10_000);
     }
 
     [Fact]

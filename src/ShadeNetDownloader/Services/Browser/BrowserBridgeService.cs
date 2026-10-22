@@ -74,6 +74,18 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
         return true;
     }
 
+    /// <summary>Asks a running instance to quit for real. <c>false</c> when none is running.</summary>
+    public static async Task<bool> QuitRunningInstanceAsync(string? pipeName = null)
+    {
+        pipeName ??= BridgeProtocol.PipeName();
+        if (!File.Exists(@"\\.\pipe\" + pipeName)) return false;
+
+        await using var connection = await BridgeClient.TryConnectAsync(pipeName, TimeSpan.FromMilliseconds(800));
+        if (connection == null) return false;
+        await connection.SendAsync(new { type = MessageTypes.Quit });
+        return true;
+    }
+
     /// <summary>Settings changed in the app: tell every connected extension.</summary>
     public async Task PushSettingsAsync()
     {
@@ -140,6 +152,10 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
 
                     case MessageTypes.Activate:
                         _ui.BringToFront();
+                        break;
+
+                    case MessageTypes.Quit:
+                        _ui.Quit();
                         break;
                 }
             }

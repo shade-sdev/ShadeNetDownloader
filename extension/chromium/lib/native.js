@@ -1,6 +1,7 @@
-// The connection to the native messaging host (and through it, the app). It is opened lazily, when there is something
-// to hand over, because opening it can start the app: a user who closed ShadeNet must not have it relaunched by every
-// browser start. The app answering our `hello` is what proves that the whole chain works.
+// The connection to the native messaging host (and through it, the app). Opening it for real work (a download to hand
+// over) starts the app if it is not running. Looking whether the app is there (`probe`) never does: the hello then says
+// `launch: false`, so a user who closed ShadeNet does not get it back because the browser started or a popup was opened.
+// The app answering our `hello` is what proves that the whole chain works.
 
 export const HOST_NAME = 'com.shadenet.downloader';
 
@@ -15,6 +16,8 @@ export class NativeLink {
     this.timers = timers;
     this.port = null;
     this.connected = false;      // true once the app has answered our hello
+    this.portLaunch = true;      // whether the open port may start the app
+    this.lastCode = '';          // the host's last error code ('app-not-running': nothing wrong, the app is simply closed)
     this.lastError = '';
     this.appVersion = '';
     this.pending = new Map();    // capture id -> { resolve, reject, timer }
@@ -29,9 +32,42 @@ export class NativeLink {
   /** Resolves true when the app is reachable (starting it if needed, within `timeoutMs`), false otherwise. */
   async ensureConnected(timeoutMs = 10000) {
     if (this.connected && this.port) return true;
-    if (!this.port) this.open();
-    if (!this.port) return false;
+    if (this.port && !this.portLaunch) this.abandon();   // a look-only connection cannot start the app
+    if (!this.port) this.open(true);
+    return this.waitForHello(timeoutMs);
+  }
 
+  /** Resolves true when the app is running and answers; false (quickly) when it is not. Never starts the app. */
+  async probe(timeoutMs = 4000) {
+    if (this.connected && this.port) return true;
+    if (!this.port) this.open(false);
+    return this.waitForHello(timeoutMs);
+  }
+
+  /** Gives up the port that is open, without waiting for it. */
+  abandon() {
+    const port = this.port;
+    this.port = null;
+    this.connected = false;
+    try {
+      port?.disconnect?.();
+    } catch {
+      // already gone
+    }
+    this.resolveWaiters(false);
+  }
+
+  resolveWaiters(value) {
+    const waiters = this.helloWaiters;
+    this.helloWaiters = [];
+    for (const w of waiters) {
+      this.timers.clearTimeout(w.timer);
+      w.resolve(value);
+    }
+  }
+
+  waitForHello(timeoutMs) {
+    if (!this.port) return Promise.resolve(false);
     return new Promise((resolve) => {
       const waiter = { resolve };
       waiter.timer = this.timers.setTimeout(() => {
@@ -43,9 +79,11 @@ export class NativeLink {
     });
   }
 
-  open() {
+  open(launch = true) {
     try {
       this.lastError = '';
+      this.lastCode = '';
+      this.portLaunch = launch;
       const port = this.chrome.runtime.connectNative(HOST_NAME);
       this.port = port;
       port.onMessage.addListener((message) => this.onMessage(message));
@@ -54,6 +92,7 @@ export class NativeLink {
         type: 'hello',
         browser: 'chromium',
         extensionVersion: this.chrome.runtime.getManifest?.().version ?? '',
+        launch,
       });
     } catch (error) {
       this.port = null;
@@ -73,12 +112,8 @@ export class NativeLink {
         if (message.type === 'hello-ack') {
           this.connected = true;
           this.lastError = '';
-          const waiters = this.helloWaiters;
-          this.helloWaiters = [];
-          for (const w of waiters) {
-            this.timers.clearTimeout(w.timer);
-            w.resolve(true);
-          }
+          this.lastCode = '';
+          this.resolveWaiters(true);
         }
         this.handlers.onStatus?.();
         break;
@@ -94,7 +129,9 @@ export class NativeLink {
       }
 
       case 'host-error':
-        this.lastError = message.message || message.code || 'The native host reported an error.';
+        this.lastCode = message.code || '';
+        // a closed app is not an error: the popup says so in its own words
+        this.lastError = message.code === 'app-not-running' ? '' : message.message || message.code || 'The native host reported an error.';
         this.handlers.onStatus?.();
         break;
 
@@ -106,7 +143,7 @@ export class NativeLink {
   onDisconnect(port) {
     if (port !== this.port) return;
     const reason = this.chrome.runtime.lastError?.message;
-    if (reason && !this.lastError) this.lastError = reason;
+    if (reason && !this.lastError && this.lastCode !== 'app-not-running') this.lastError = reason;
     this.port = null;
     this.connected = false;
 
@@ -116,12 +153,7 @@ export class NativeLink {
     }
     this.pending.clear();
 
-    const waiters = this.helloWaiters;
-    this.helloWaiters = [];
-    for (const w of waiters) {
-      this.timers.clearTimeout(w.timer);
-      w.resolve(false);
-    }
+    this.resolveWaiters(false);
     this.handlers.onStatus?.();
   }
 
@@ -144,8 +176,10 @@ export class NativeLink {
     });
   }
 
+  /** 'connected', 'not-running' (the app is closed: nothing is wrong), 'error' (see lastError) or 'unknown' (not looked yet). */
   status() {
-    return { connected: this.connected, lastError: this.lastError, appVersion: this.appVersion };
+    const state = this.connected ? 'connected' : this.lastCode === 'app-not-running' ? 'not-running' : this.lastError ? 'error' : 'unknown';
+    return { connected: this.connected, state, lastError: this.lastError, appVersion: this.appVersion };
   }
 }
 

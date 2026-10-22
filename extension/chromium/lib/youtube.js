@@ -123,7 +123,7 @@ export function isVideoPage(url) {
 export function cleanTitle(title) {
   return String(title || 'video')
     .replace(/^\(\d+\)\s*/, '')                // "(3) " unread counter
-    .replace(/\s+-\s+YouTube$/i, '')
+    .replace(/\s+[|–—-]\s+(YouTube|Facebook|Instagram|TikTok|Vimeo|Reddit|Dailymotion|Twitch)$/i, '')   // the site's name after the title
     .replace(/[\\/:*?"<>|]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim() || 'video';

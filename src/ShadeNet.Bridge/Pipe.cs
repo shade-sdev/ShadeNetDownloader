@@ -156,8 +156,14 @@ public sealed class BridgeServer : IAsyncDisposable
         await pipe.DisposeAsync().ConfigureAwait(false);
     }
 
+    int _disposed;
+
     public async ValueTask DisposeAsync()
     {
+        // Shutdown reaches this from more than one place (the host's service container and the app's own exit); the second
+        // call must be a no-op, not an ObjectDisposedException that keeps the process from ending.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+
         await _stop.CancelAsync().ConfigureAwait(false);
         if (_acceptLoop != null)
         {

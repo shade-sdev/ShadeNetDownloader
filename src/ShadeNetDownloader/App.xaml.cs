@@ -42,6 +42,14 @@ public partial class App : Application
             return;
         }
 
+        // "ShadeNetDownloader.exe --quit": ends a running instance for real (what the installer uses before it replaces files)
+        if (e.Args.Contains("--quit"))
+        {
+            Task.Run(() => BrowserBridgeService.QuitRunningInstanceAsync()).GetAwaiter().GetResult();
+            Shutdown();
+            return;
+        }
+
         // One instance per user (and per data folder): a second launch, such as the browser host starting the app
         // while it is already running, just brings the first one forward.
         // (on a pool thread: waiting here for work that wants to resume on this UI thread would never finish)

@@ -1,0 +1,64 @@
+<Window x:Class="ShadeNet.Setup.SetupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Style="{StaticResource SetupWindow}" Width="540" Title="ShadeNet Downloader Setup"
+        Icon="pack://application:,,,/app.ico">
+    <Grid Margin="28,24,28,22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+            <Image Source="pack://application:,,,/app.ico" Width="48" Height="48" Margin="0,0,16,0" />
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock x:Name="TitleText" FontSize="22" FontWeight="SemiBold" Text="Install ShadeNet Downloader" />
+                <TextBlock x:Name="VersionText" Foreground="{StaticResource Muted}" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 1. the choices -->
+        <StackPanel Grid.Row="1" x:Name="ChoicePanel">
+            <TextBlock x:Name="IntroText" TextWrapping="Wrap" Foreground="{StaticResource Muted}"
+                       Text="Everything is included, with yt-dlp and ffmpeg. No administrator rights are needed: it is installed for you only." />
+
+            <TextBlock Text="Install in" Margin="0,16,0,4" FontWeight="SemiBold" />
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="DirBox" />
+                <Button Grid.Column="1" Content="Browse…" Click="OnBrowse" MinWidth="80" />
+            </Grid>
+
+            <CheckBox x:Name="DesktopBox" Content="A shortcut on the desktop" IsChecked="True" Margin="0,14,0,0" />
+            <CheckBox x:Name="StartupBox" Content="Start ShadeNet with Windows (hidden in the notification area)" />
+            <CheckBox x:Name="BrowserBox" Content="Set up the browser connection (Chrome, Edge, Brave)" IsChecked="True" />
+            <TextBlock Margin="22,2,0,0" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                       Text="Then add the extension once in your browser; Settings &gt; Browser shows how." />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
+                <Button x:Name="InstallButton" Content="Install" Style="{StaticResource Primary}" Click="OnInstall" IsDefault="True" />
+                <Button Content="Cancel" Click="OnCancel" IsCancel="True" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 2. working -->
+        <StackPanel Grid.Row="1" x:Name="ProgressPanel" Visibility="Collapsed">
+            <TextBlock x:Name="StatusText" Text="Installing…" Margin="0,8,0,10" />
+            <ProgressBar x:Name="Bar" Height="8" Minimum="0" Maximum="1" />
+        </StackPanel>
+
+        <!-- 3. done / failed -->
+        <StackPanel Grid.Row="1" x:Name="DonePanel" Visibility="Collapsed">
+            <TextBlock x:Name="DoneText" TextWrapping="Wrap" Margin="0,8,0,0" />
+            <CheckBox x:Name="LaunchBox" Content="Open ShadeNet Downloader" IsChecked="True" Margin="0,16,0,0" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+                <Button x:Name="RetryButton" Content="Try again" Click="OnRetry" Visibility="Collapsed" />
+                <Button x:Name="CloseButton" Content="Close" Style="{StaticResource Primary}" Click="OnClose" />
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>
