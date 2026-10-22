@@ -153,9 +153,21 @@ public sealed class AppUpdateService
         try
         {
             Set(AppUpdateState.Downloading, () => { Progress = 0; Error = null; });
-            var package = await _updates.DownloadAsync(update, new Progress<double>(p => Set(AppUpdateState.Downloading, () => Progress = p)), ct).ConfigureAwait(false);
+            // Progress<T> delivers its reports on another thread, possibly after the download has ended: a late report must not
+            // pull the state back from "starting" to "downloading".
+            var progress = new Progress<double>(p =>
+            {
+                lock (_gate)
+                {
+                    if (State != AppUpdateState.Downloading) return;
+                    Progress = p;
+                }
 
-            Set(AppUpdateState.Starting);
+                Changed?.Invoke();
+            });
+            var package = await _updates.DownloadAsync(update, progress, ct).ConfigureAwait(false);
+
+            Set(AppUpdateState.Starting, () => Progress = 1);
             _applier.Start(package);   // from here the setup program waits for this program to end
             _exit();
         }
