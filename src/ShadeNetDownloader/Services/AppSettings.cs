@@ -29,6 +29,16 @@ public sealed class AppSettings
     public GeneralSettings General { get; set; } = new();
     public ScheduleSettings Schedule { get; set; } = new();
     public ToolSettings Tools { get; set; } = new();
+    public UpdateSettings Updates { get; set; } = new();
+}
+
+/// <summary>ShadeNet itself: whether it looks for a newer version (it always asks before installing one).</summary>
+public sealed class UpdateSettings
+{
+    public bool CheckForUpdates { get; set; } = true;
+
+    /// <summary>When the last automatic check ran: at most one a day.</summary>
+    public DateTimeOffset? LastCheck { get; set; }
 }
 
 /// <summary>yt-dlp and ffmpeg: whether ShadeNet looks for newer versions (it always asks before installing one).</summary>

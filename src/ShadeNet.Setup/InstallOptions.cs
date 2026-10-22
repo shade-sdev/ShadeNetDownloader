@@ -9,6 +9,13 @@ public enum SetupMode
 
     /// <summary>The copy that does the work (it runs from a temp folder, so the install folder can be deleted completely).</summary>
     UninstallStage2,
+
+    /// <summary>
+    /// Replaces the files of an installed program with a newer version from an update package (a zip without yt-dlp and ffmpeg).
+    /// The program starts this from a copy of the uninstaller in the temp folder, then quits; shortcuts, start-up and the
+    /// browser connection stay as the user set them, and so does everything in the data folder.
+    /// </summary>
+    Update,
 }
 
 /// <summary>What to install and where. Everything that touches the system can be pointed elsewhere, so tests never touch the real one.</summary>
@@ -48,6 +55,9 @@ public sealed class InstallOptions
     /// <summary>A zip to install instead of the one inside the setup program (tests, and "setup from a folder").</summary>
     public string? PayloadPath { get; set; }
 
+    /// <summary>With <see cref="SetupMode.Update"/>: the update package.</summary>
+    public string? PackagePath { get; set; }
+
     /// <summary>Used by <see cref="SetupMode.UninstallStage2"/>: wait for this process (the first stage) to end first.</summary>
     public int WaitForProcessId { get; set; }
 
@@ -81,6 +91,7 @@ public sealed class InstallOptions
                 case "--dir" or "/dir": o.InstallDir = Next(ref i) ?? o.InstallDir; break;
                 case "--uninstall" or "/uninstall": o.Mode = SetupMode.Uninstall; break;
                 case "--uninstall-stage2": o.Mode = SetupMode.UninstallStage2; break;
+                case "--update": o.Mode = SetupMode.Update; o.PackagePath = Next(ref i); break;
                 case "--wait-for": int.TryParse(Next(ref i), out var pid); o.WaitForProcessId = pid; break;
                 case "--no-desktop-shortcut": o.DesktopShortcut = false; break;
                 case "--no-start-menu-shortcut": o.StartMenuShortcut = false; break;

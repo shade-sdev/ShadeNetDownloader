@@ -1,0 +1,95 @@
+# Every merge to master is a release.
+#
+#   version   MAJOR.MINOR from Directory.Build.props, patch = the next free tag v<MAJOR.MINOR>.N  (tools/ci/next-version.ps1)
+#   artifacts ShadeNetDownloader-Setup-<v>.exe     the installer
+#             ShadeNetDownloader-Update-<v>.zip    the update only (the program without yt-dlp and ffmpeg)
+#             update.json                          what an installed program reads: newest version, package, SHA-256
+#             SHA256SUMS.txt
+#
+# An installed ShadeNet looks at releases/latest/download/update.json about once a day, asks its user, downloads the update
+# package, checks its SHA-256 and replaces its own files (src/ShadeNet.Setup, "Update" mode).
+#
+# To skip a release for one merge, put [skip ci] in the commit message. To make a bigger version, change VersionMajorMinor in
+# Directory.Build.props; the patch number starts again at 1.
+
+name: Release
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the tag and the release
+
+# two merges close together release one after the other, never at the same time (the second needs the first's tag)
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the tags decide the next version
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Set up Node.js (the browser extension's tests)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Next version
+        id: version
+        shell: pwsh
+        run: ./tools/ci/next-version.ps1 -Output $env:GITHUB_OUTPUT
+
+      - name: Helper programs that ship with the program (yt-dlp, ffmpeg)
+        shell: pwsh
+        run: ./tools/get-tools.ps1 -Tool all
+
+      - name: A full ffmpeg for the tests (the bundled LGPL build has no x264 encoder)
+        shell: pwsh
+        run: choco install ffmpeg --no-progress -y
+
+      - name: Tests
+        shell: pwsh
+        run: ./tools/ci/test.ps1
+
+      - name: Build the release
+        shell: pwsh
+        run: ./tools/build-release.ps1 -Version "${{ steps.version.outputs.version }}" -UpdateRepository "${{ github.repository }}" -SkipTests
+
+      - name: Check what was built
+        shell: pwsh
+        run: ./tools/ci/check-release.ps1 -Version "${{ steps.version.outputs.version }}"
+
+      # A draft first: assets are uploaded while nobody can see the release, then it is published in one step, so a program that
+      # looks at "latest" never finds a release without its update.json.
+      - name: Publish the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          gh release create "v$v" `
+            "dist/ShadeNetDownloader-Setup-$v.exe" `
+            "dist/ShadeNetDownloader-Update-$v.zip" `
+            "dist/update.json" `
+            "dist/SHA256SUMS.txt" `
+            --draft --target "${{ github.sha }}" --title "ShadeNet Downloader $v" --generate-notes
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          gh release edit "v$v" --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit 1 }

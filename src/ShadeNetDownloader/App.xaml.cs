@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Threading;
 using Microsoft.Extensions.DependencyInjection;
@@ -106,6 +107,14 @@ public partial class App : Application
         services.AddSingleton<ShadeNet.Core.Tools.IToolUpdates>(sp =>
             new ShadeNet.Core.Tools.ToolManager(sp.GetRequiredService<SettingsService>().Current.Engine, Path.Combine(sp.GetRequiredService<SettingsService>().DataDir, "tools")));
         services.AddSingleton<ToolUpdateService>();
+
+        // ShadeNet's own updates: the release workflow publishes update.json and the update package next to the installer
+        services.AddSingleton<ShadeNet.Core.Updates.IAppUpdates>(sp => CreateAppUpdater(settings));
+        services.AddSingleton<IAppUpdateApplier>(_ => new UpdateApplier());
+        services.AddSingleton(sp => new AppUpdateService(
+            sp.GetRequiredService<ShadeNet.Core.Updates.IAppUpdates>(), settings, sp.GetRequiredService<ToastService>(),
+            sp.GetRequiredService<IAppUpdateApplier>(), () => sp.GetRequiredService<AppController>().Exit(),
+            activeDownloads: () => sp.GetRequiredService<DownloadManager>().Jobs.Count(j => j.IsActive)));
         services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<DownloadManager>(), () => settings.Current.Schedule));
         services.AddSingleton(sp => new NotificationService(
             sp.GetRequiredService<DownloadManager>(), () => settings.Current.General,
@@ -159,6 +168,16 @@ public partial class App : Application
         _timers.Add(firstLook);
         _timers.Add(new DispatcherTimer(TimeSpan.FromHours(3), DispatcherPriority.Background, async (_, _) => await toolUpdates.CheckDueAsync(), Dispatcher));
 
+        // a newer ShadeNet: the first look a minute after start-up, then about once a day (at most); it asks before it installs
+        var appUpdates = sp.GetRequiredService<AppUpdateService>();
+        var firstAppLook = new DispatcherTimer(TimeSpan.FromSeconds(60), DispatcherPriority.Background, async (t, _) =>
+        {
+            ((DispatcherTimer)t!).Stop();
+            await appUpdates.CheckDueAsync();
+        }, Dispatcher);
+        _timers.Add(firstAppLook);
+        _timers.Add(new DispatcherTimer(TimeSpan.FromHours(3), DispatcherPriority.Background, async (_, _) => await appUpdates.CheckDueAsync(), Dispatcher));
+
         // Started by Windows or by the browser extension: go straight to the tray (or the taskbar without one).
         if (e.Args.Contains("--minimized"))
         {
@@ -170,6 +189,28 @@ public partial class App : Application
     }
 
     readonly List<DispatcherTimer> _timers = new();
+
+    /// <summary>
+    /// Where newer versions are looked for: the repository stamped into this build (the release workflow passes its own).
+    /// SHADENET_UPDATE_URL points the look at an update.json on this computer, for tests; any other address is ignored.
+    /// </summary>
+    static ShadeNet.Core.Updates.IAppUpdates CreateAppUpdater(SettingsService settings)
+    {
+        var repository = typeof(App).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "UpdateRepository")?.Value ?? "shade-sdev/ShadeNetDownloader";
+        var current = typeof(App).Assembly.GetName().Version ?? new Version(1, 0, 0);
+        var folder = Path.Combine(settings.DataDir, "updates");
+
+        Uri? local = Uri.TryCreate(Environment.GetEnvironmentVariable("SHADENET_UPDATE_URL"), UriKind.Absolute, out var url) ? url : null;
+        try
+        {
+            return new ShadeNet.Core.Updates.AppUpdater(repository, current, folder, settings.Current.Engine, local);
+        }
+        catch (ArgumentException) when (local != null)
+        {
+            return new ShadeNet.Core.Updates.AppUpdater(repository, current, folder, settings.Current.Engine);
+        }
+    }
 
     protected override void OnExit(ExitEventArgs e)
     {
