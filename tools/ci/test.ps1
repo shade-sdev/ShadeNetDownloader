@@ -20,9 +20,9 @@ function Run([string]$what, [scriptblock]$cmd) {
     if ($LASTEXITCODE -ne 0) { throw "$what failed (exit $LASTEXITCODE)" }
 }
 
-Run "installer tests" { dotnet test tests\ShadeNet.Setup.Tests -c Release --nologo -v q }
-Run "browser bridge tests" { dotnet test tests\ShadeNet.Bridge.Tests -c Release --nologo -v q }
-Run "program tests" { dotnet test tests\ShadeNetDownloader.Tests -c Release --nologo -v q }
-Run "engine tests" { dotnet test tests\ShadeNet.Core.Tests -c Release --nologo -v q --filter "Category!=Slow" }
+Run "installer tests" { dotnet test tests\ShadeNet.Setup.Tests -c Release --nologo -v q --logger "console;verbosity=minimal" }
+Run "browser bridge tests" { dotnet test tests\ShadeNet.Bridge.Tests -c Release --nologo -v q --logger "console;verbosity=minimal" }
+Run "program tests" { dotnet test tests\ShadeNetDownloader.Tests -c Release --nologo -v q --logger "console;verbosity=minimal" }
+Run "engine tests" { dotnet test tests\ShadeNet.Core.Tests -c Release --nologo -v q --logger "console;verbosity=minimal" --filter "Category!=Slow" }
 Run "browser extension tests" { Push-Location extension\chromium; try { node --test "test/*.test.mjs" } finally { Pop-Location } }
 Write-Host "`nall tests passed" -ForegroundColor Green

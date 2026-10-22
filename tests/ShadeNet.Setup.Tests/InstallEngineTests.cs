@@ -224,17 +224,16 @@ public sealed class InstallEngineTests : IDisposable
         var engine = new InstallEngine(options);
         engine.Install(Zip(V1), "1.0.0");
 
-        // a stand-in for the running program: a copy of cmd.exe under the program's name, inside the installed folder
-        File.Copy(Path.Combine(Environment.SystemDirectory, "PING.EXE"), options.AppExe, overwrite: true);
-        using var running = Process.Start(new ProcessStartInfo(options.AppExe, "-n 30 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+        // the running program, which ignores the request to quit (a stand-in of our own, started for real in the installed folder)
+        using var running = new StandInProgram(options.InstallDir, obeysQuit: false);
 
         var ex = Assert.Throws<SetupException>(() => engine.Install(Zip(("ShadeNetDownloader.exe", "app v2"), ("Uninstall.exe", "u")), "2.0.0"));
 
+        Assert.False(running.Process.HasExited);                                                  // it was asked, and carried on: that is the case
         Assert.Equal(3, ex.ExitCode);
         Assert.Contains("still running", ex.Message);
         Assert.Equal("1.0.0", engine.InstalledVersion);                                           // nothing was replaced
         Assert.True(File.Exists(Path.Combine(options.InstallDir, "old-only.dll")));
-        running.Kill();
     }
 
     [Fact]
@@ -244,11 +243,11 @@ public sealed class InstallEngineTests : IDisposable
         var engine = new InstallEngine(options);
         engine.Install(Zip(V1), "1.0.0");
 
-        File.Copy(Path.Combine(Environment.SystemDirectory, "PING.EXE"), options.AppExe, overwrite: true);
-        using var running = Process.Start(new ProcessStartInfo(options.AppExe, "-n 3 127.0.0.1") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true })!;
+        using var running = new StandInProgram(options.InstallDir, obeysQuit: true);
 
         engine.Install(Zip(("ShadeNetDownloader.exe", "app v2"), ("Uninstall.exe", "u")), "2.0.0");
 
+        Assert.True(running.Process.HasExited);                                                   // "--quit" reached it, and it ended
         Assert.Equal("app v2", File.ReadAllText(options.AppExe));
         Assert.Equal("2.0.0", engine.InstalledVersion);
     }
