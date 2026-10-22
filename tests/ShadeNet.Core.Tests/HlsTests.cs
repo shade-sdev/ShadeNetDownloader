@@ -389,7 +389,7 @@ public class HlsDownloadTests
         Assert.Equal(expected, File.ReadAllBytes(job.TargetPath));
         Assert.Equal(expected.Length, job.TotalSize);
         Assert.False(Directory.Exists(job.WorkFolder), "the pieces are removed once joined");
-        Assert.Empty(Directory.GetFiles(job.SaveDirectory).Where(f => f != job.TargetPath));
+        Assert.Equal(job.TargetPath, Assert.Single(Directory.GetFiles(job.SaveDirectory)));   // nothing but the finished file is left
     }
 
     [Fact]

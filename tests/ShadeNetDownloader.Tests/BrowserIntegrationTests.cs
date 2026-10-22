@@ -654,7 +654,7 @@ public class BrowserIntegrationInstallerTests
         var hash = System.Security.Cryptography.SHA256.HashData(Convert.FromBase64String(key));
         var id = string.Concat(hash.Take(16).Select(b => $"{(char)('a' + (b >> 4))}{(char)('a' + (b & 15))}"));
 
-        Assert.Equal(id, BrowserIntegrationInstaller.ExtensionId);
+        Assert.Equal(BrowserIntegrationInstaller.ExtensionId, id);
     }
 }
 

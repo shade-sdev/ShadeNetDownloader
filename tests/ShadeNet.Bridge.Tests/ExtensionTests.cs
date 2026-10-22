@@ -6,7 +6,7 @@ namespace ShadeNet.Bridge.Tests;
 public class ExtensionTests
 {
     [Fact]
-    public void The_extensions_unit_tests_pass()
+    public async Task The_extensions_unit_tests_pass()
     {
         string? folder = null;
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null && folder == null; dir = dir.Parent)
@@ -36,7 +36,17 @@ public class ExtensionTests
 
         var output = process.StandardOutput.ReadToEndAsync();
         var errors = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(120_000), "node did not finish");
-        Assert.True(process.ExitCode == 0, output.Result + errors.Result);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        try
+        {
+            await process.WaitForExitAsync(limit.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            Assert.Fail("node did not finish");
+        }
+
+        Assert.True(process.ExitCode == 0, await output + await errors);
     }
 }
