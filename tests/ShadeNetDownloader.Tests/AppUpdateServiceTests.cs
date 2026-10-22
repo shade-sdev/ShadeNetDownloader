@@ -236,6 +236,26 @@ public class AppUpdateServiceTests
         Assert.Equal(1, e.Service.Progress);
     }
 
+    [Fact]
+    public async Task A_late_progress_report_never_pulls_the_state_back_from_starting_to_downloading()
+    {
+        // Progress<T> delivers on another thread, so a report can arrive after the download has ended: whatever the timing, the
+        // update that was handed over stays "starting" and ends at 100 % (found on a CI runner, where the timing differed)
+        for (var i = 0; i < 300; i++)
+        {
+            using var e = new Env();
+            e.Updates.Offer = FakeAppUpdates.Newer();
+            await e.Service.CheckNowAsync();
+
+            await e.Service.InstallAsync();
+            for (var wait = 0; wait < 5; wait++) await Task.Yield();       // give any late report the chance to land
+
+            Assert.Equal(AppUpdateState.Starting, e.Service.State);
+            Assert.Equal(1, e.Service.Progress);
+            Assert.Equal(1, e.Exits);
+        }
+    }
+
     // ---- the Settings part ----
 
     [Fact]

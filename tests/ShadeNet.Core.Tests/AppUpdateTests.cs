@@ -18,6 +18,17 @@ public class AppUpdateTests : IDisposable
         try { Directory.Delete(_folder, recursive: true); } catch { /* temp */ }
     }
 
+    /// <summary>Progress that is recorded where it is reported: Progress&lt;T&gt; delivers on another thread, which no test can wait for reliably.</summary>
+    sealed class Reports : IProgress<double>
+    {
+        public List<double> Values { get; } = new();
+
+        public void Report(double value)
+        {
+            lock (Values) Values.Add(value);
+        }
+    }
+
     static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
     static string Manifest(string version, byte[] package, string name = "ShadeNetDownloader-Update-{v}.zip", string? sha = null, long? size = null) =>
@@ -124,16 +135,15 @@ public class AppUpdateTests : IDisposable
         var (package, name) = Publish("1.0.4", bytes: 400_000);
         using var updater = Updater();
         var update = (await updater.CheckAsync(default))!;
-        var reported = new List<double>();
+        var reported = new Reports();
 
-        var file = await updater.DownloadAsync(update, new Progress<double>(reported.Add), default);
-        await Task.Delay(50);   // Progress<T> posts to the thread pool
+        var file = await updater.DownloadAsync(update, reported, default);
 
         Assert.Equal(Path.Combine(_folder, "updates", "1.0.4", name), file);
         Assert.Equal(package, File.ReadAllBytes(file));
         Assert.False(File.Exists(file + ".part"));
-        Assert.Equal(1, reported.Max());
-        Assert.True(reported.Count >= 2);
+        Assert.Equal(1, reported.Values.Max());
+        Assert.True(reported.Values.Count >= 2);
     }
 
     [Fact]
