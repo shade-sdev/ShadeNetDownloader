@@ -49,7 +49,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         Func<string, CancellationToken, Task<YtDlpInfo>>? resolver = null)
     {
         _manager = manager;
-        _resolver = resolver ?? ((url, ct) => DefaultResolveAsync(manager.Settings, url, ct));
+        _resolver = resolver ?? ((url, ct) => DefaultResolveAsync(manager.Settings, url, PageSignIn(url), ct));
         _connections = Math.Clamp(manager.Settings.DefaultConnections, 1, 32);
         _saveFolder = manager.Settings.ResolveCategoryFolder(CategoryResolver.General);
         _category = CategoryResolver.General;
@@ -312,12 +312,27 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         }
     }
 
-    static Task<YtDlpInfo> DefaultResolveAsync(ShadeNet.Core.Engine.EngineSettings settings, string url, CancellationToken ct)
+    /// <summary>The browser's sign-in for the page the browser handed over (and for no other address), when the app was allowed to receive it.</summary>
+    string? PageSignIn(string url) =>
+        _capture is { Source: "page", Cookies: { Length: > 0 } cookies } && string.Equals(_capture.Url, url, StringComparison.OrdinalIgnoreCase) ? cookies : null;
+
+    /// <summary>
+    /// yt-dlp is asked without the sign-in first: most pages need none, and an account's cookies are not something to hand out without a
+    /// reason. Only when it cannot read the page is it asked again with them (a live stream, a private video).
+    /// </summary>
+    static async Task<YtDlpInfo> DefaultResolveAsync(ShadeNet.Core.Engine.EngineSettings settings, string url, string? signIn, CancellationToken ct)
     {
         var exe = settings.FindYtDlp()
                   ?? throw new DownloadException(JobErrorKind.Tool,
                       "yt-dlp was not found. Run tools\\get-tools.ps1, or choose its location in Settings > Downloads.");
-        return YtDlp.ResolveAsync(exe, url, ct);
+        try
+        {
+            return await YtDlp.ResolveAsync(exe, url, ct).ConfigureAwait(false);
+        }
+        catch (DownloadException ex) when (signIn != null && ex.Kind == JobErrorKind.Tool && !ex.Message.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
+        {
+            return await YtDlp.ResolveAsync(exe, url, ct, cookies: signIn).ConfigureAwait(false);
+        }
     }
 
     /// <summary>A YouTube page: yt-dlp says which files are behind it; the qualities become the quality list.</summary>

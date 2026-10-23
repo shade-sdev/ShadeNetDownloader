@@ -162,6 +162,9 @@ public sealed record BridgeSettings
 
     /// <summary>Downloads known to be smaller than this stay with the browser (0 = take everything).</summary>
     public long MinSizeBytes { get; init; }
+
+    /// <summary>The extension sends the page site's sign-in along with a video page, so that yt-dlp can read what needs one (most live streams).</summary>
+    public bool PageSignIn { get; init; } = true;
 }
 
 public sealed record HostHello

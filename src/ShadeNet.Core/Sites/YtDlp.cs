@@ -79,9 +79,70 @@ public static partial class YtDlp
 
     // ---- asking yt-dlp ----
 
-    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null)
+    /// <param name="cookies">The browser's sign-in for the page's site, as a <c>Cookie</c> header value. It goes to yt-dlp in a temporary file that is
+    /// deleted when yt-dlp is done, and only this once: a live stream or a private video cannot be read without a signed-in session.</param>
+    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null, string? cookies = null)
     {
-        var (code, output, error) = await RunAsync(exe, new[] { "-J", "--no-playlist", "--no-warnings", "--no-update", pageUrl }, ct, timeout ?? TimeSpan.FromSeconds(120))
+        var arguments = new List<string> { "-J", "--no-playlist", "--no-warnings", "--no-update" };
+        string? cookieFile = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(cookies) && WriteCookieFile(pageUrl, cookies) is { } file)
+            {
+                cookieFile = file;
+                arguments.AddRange(new[] { "--cookies", file });
+            }
+
+            arguments.Add(pageUrl);
+            return await ResolveCoreAsync(exe, arguments, ct, timeout).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (cookieFile != null)
+            {
+                try
+                {
+                    File.Delete(cookieFile);
+                }
+                catch (IOException)
+                {
+                    // the user's temp folder: it is cleaned up with it
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A cookie file in the Netscape format yt-dlp reads, for the whole site of <paramref name="pageUrl"/> (its sub-domains too: TikTok's
+    /// live API is on another host). <c>null</c> when the address or the cookies cannot be used.
+    /// </summary>
+    internal static string? WriteCookieFile(string pageUrl, string cookies)
+    {
+        if (!Uri.TryCreate(pageUrl, UriKind.Absolute, out var page) || page.Scheme != Uri.UriSchemeHttps && page.Scheme != Uri.UriSchemeHttp) return null;
+
+        var domain = Util.HostNames.IsIp(page.Host) ? page.Host : "." + Util.HostNames.RegistrableDomain(page.Host);
+        var expires = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeSeconds();   // the file lives for one run; the jar needs a date in the future
+        var lines = new List<string> { "# Netscape HTTP Cookie File" };
+        foreach (var pair in cookies.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            var name = pair[..eq].Trim();
+            var value = pair[(eq + 1)..].Trim();
+            if (name.Any(c => c <= ' ' || c == 127) || value.Any(c => c < ' ' || c == 127)) continue;   // a tab or a line break would break the file
+            lines.Add($"{domain}\t{(domain.StartsWith('.') ? "TRUE" : "FALSE")}\t/\t{(page.Scheme == Uri.UriSchemeHttps ? "TRUE" : "FALSE")}\t{expires}\t{name}\t{value}");
+        }
+
+        if (lines.Count == 1) return null;
+
+        var path = Path.Combine(Path.GetTempPath(), "shadenet-" + Guid.NewGuid().ToString("N")[..12] + ".cookies.txt");
+        File.WriteAllLines(path, lines, new UTF8Encoding(false));
+        return path;
+    }
+
+    static async Task<YtDlpInfo> ResolveCoreAsync(string exe, IEnumerable<string> arguments, CancellationToken ct, TimeSpan? timeout)
+    {
+        var (code, output, error) = await RunAsync(exe, arguments, ct, timeout ?? TimeSpan.FromSeconds(120))
             .ConfigureAwait(false);
 
         if (code != 0)
@@ -97,6 +158,8 @@ public static partial class YtDlp
     static string HintFor(string reason) =>
         reason.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase)
             ? " (yt-dlp does not know this site, so ShadeNet cannot read this page.)"
+            : reason.Contains("not currently live", StringComparison.OrdinalIgnoreCase) || reason.Contains("is not live", StringComparison.OrdinalIgnoreCase)
+            ? " (If it is live, the site may only show it to a signed-in browser: sign in there, and keep \"Use my browser's sign-in for video pages\" on in Settings > Browser.)"
             : reason.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || reason.Contains("bot", StringComparison.OrdinalIgnoreCase)
             ? " (The site wants a signed-in browser for this video.)"
             : reason.Contains("not available", StringComparison.OrdinalIgnoreCase) || reason.Contains("Unable to extract", StringComparison.OrdinalIgnoreCase)

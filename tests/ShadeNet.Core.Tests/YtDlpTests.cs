@@ -148,6 +148,33 @@ public class YtDlpTests
     }
 
     [Fact]
+    public void The_browsers_sign_in_is_written_as_a_cookie_file_for_the_whole_site()
+    {
+        var path = YtDlp.WriteCookieFile("https://www.tiktok.com/@someone/live", "sessionid=abc; ttwid=x%7Cy; bad=a\tb; =novalue");
+        try
+        {
+            var lines = File.ReadAllLines(path!);
+            Assert.Equal("# Netscape HTTP Cookie File", lines[0]);
+            Assert.Equal(3, lines.Length);                                              // the cookie with a tab in it, and the one without a name, are left out
+            var fields = lines[1].Split('\t');
+            Assert.Equal(new[] { ".tiktok.com", "TRUE", "/", "TRUE" }, fields[..4]);      // the site and its sub-domains (the live API is on another host), https only
+            Assert.True(long.Parse(fields[4]) > DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            Assert.Equal(("sessionid", "abc"), (fields[5], fields[6]));
+            Assert.EndsWith("ttwid\tx%7Cy", lines[2]);
+        }
+        finally
+        {
+            if (path != null) File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("not an address", "a=b")]
+    [InlineData("https://www.tiktok.com/x", "")]
+    [InlineData("https://www.tiktok.com/x", "novalue")]
+    public void Nothing_is_written_when_there_is_nothing_to_use(string page, string cookies) => Assert.Null(YtDlp.WriteCookieFile(page, cookies));
+
+    [Fact]
     public void Formats_without_headers_or_cookies_carry_none()
     {
         Assert.All(YtDlp.ParseInfo(Sample).Options, o => Assert.Equal((null, null, null), (o.Referer, o.Cookies, o.Headers)));

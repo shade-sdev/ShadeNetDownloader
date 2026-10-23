@@ -175,6 +175,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    public bool PageSignIn
+    {
+        get => Browser.PageSignIn;
+        set
+        {
+            if (Browser.PageSignIn == value) return;
+            Browser.PageSignIn = value;
+            OnPropertyChanged();
+            BrowserSettingsChanged();
+        }
+    }
+
     public bool CaptureShowsDialog
     {
         get => Browser.Mode == CaptureMode.ShowDialog;

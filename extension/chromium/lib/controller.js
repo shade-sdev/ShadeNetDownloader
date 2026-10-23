@@ -13,7 +13,7 @@ import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVi
 import { browserTimers } from './native.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
 
-export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0 };
+export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0, pageSignIn: true };
 
 const CONNECT_TIMEOUT_MS = 10000;   // the app may have to be started
 const ANSWER_TIMEOUT_MS = 8000;
@@ -159,6 +159,7 @@ export class Controller {
       enabled: message.enabled !== false,
       excludedHosts: Array.isArray(message.excludedHosts) ? message.excludedHosts : [],
       minSizeBytes: Number.isFinite(message.minSizeBytes) ? message.minSizeBytes : 0,
+      pageSignIn: message.pageSignIn !== false,
     };
   }
 
@@ -560,14 +561,18 @@ export class Controller {
   }
 
   /**
-   * The address of a video page goes to the app, which shows its Add dialog and asks yt-dlp. No cookies travel with it:
-   * the page's address is all the app needs, and your sign-in stays in the browser.
+   * The address of a video page goes to the app, which shows its Add dialog and asks yt-dlp. Live streams and private videos can
+   * only be read by a signed-in session, so the page's own site's cookies go along (the switch in the app's Settings > Browser turns
+   * that off); the app gives them to yt-dlp in a temporary file and never to the file servers.
    */
   async sendPage(tab, page) {
     try {
       if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      const cookies = this.appSettings.pageSignIn
+        ? cookiesToHeader(await this.safely(() => this.chrome.cookies.getAll({ url: page.url })))
+        : '';
       const message = buildCapture({
-        id: this.link.newId(), url: page.url, referrer: tab.url, userAgent: this.userAgent, fileName: page.title || cleanTitle(tab.title), source: 'page',
+        id: this.link.newId(), url: page.url, referrer: tab.url, cookies, userAgent: this.userAgent, fileName: page.title || cleanTitle(tab.title), source: 'page',
       });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`page sent: accepted=${result?.accepted} reason=${result?.reason}`);

@@ -658,6 +658,17 @@
                         <ui:ToggleSwitch IsChecked="{Binding BrowserEnabled, Mode=TwoWay}" />
                     </ui:CardControl>
 
+                    <ui:CardControl Icon="{ui:SymbolIcon PersonKey24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Use my browser's sign-in for video pages" FontSize="14" />
+                                <TextBlock Text="Live streams and private videos need a signed-in session. The page's own site sign-in goes to yt-dlp in a temporary file that is deleted right after; nothing else leaves your browser."
+                                           Style="{StaticResource CardHint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding PageSignIn, Mode=TwoWay}" />
+                    </ui:CardControl>
+
                     <ui:CardControl Icon="{ui:SymbolIcon WindowApps24}" Margin="0,0,0,8">
                         <ui:CardControl.Header>
                             <StackPanel>

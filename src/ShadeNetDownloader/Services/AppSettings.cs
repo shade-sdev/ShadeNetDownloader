@@ -72,6 +72,12 @@ public sealed class BrowserSettings
 
     /// <summary>Downloads known to be smaller than this stay with the browser (0 = take everything).</summary>
     public long MinSizeBytes { get; set; }
+
+    /// <summary>
+    /// A video page the extension hands over comes with the browser's cookies for that site, which go to yt-dlp (a temporary file, deleted
+    /// right after): live streams and private videos can only be read by a signed-in session.
+    /// </summary>
+    public bool PageSignIn { get; set; } = true;
 }
 
 /// <summary>Window, tray and notification behaviour.</summary>

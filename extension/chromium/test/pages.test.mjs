@@ -8,9 +8,9 @@ import { NativeLink } from '../lib/native.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from '../lib/sites.js';
 import { FakeApp, fakeChrome, manualTimers } from './fakes.mjs';
 
-function setup(tab) {
+function setup(tab, cookies = {}) {
   const app = new FakeApp();
-  const fake = fakeChrome(app);
+  const fake = fakeChrome(app, { cookies });
   Object.assign(fake.chrome.tabs.active, tab);
   const timers = manualTimers();
   let controller;
@@ -38,7 +38,7 @@ test('a Facebook video page whose player uses a buffer gets a button that sends 
   assert.equal(capture.url, FB);
   assert.equal(capture.source, 'page');
   assert.equal(capture.fileName, 'How to Share');
-  assert.equal(capture.cookies, undefined);   // the browser's sign-in stays in the browser
+  assert.equal(capture.cookies, undefined);   // (this browser has none for the site)
 });
 
 test('in a feed the address of the video\'s own post is used, not the feed\'s', async () => {
@@ -178,4 +178,30 @@ test('live addresses look like one video; the bare /live front door of a site do
   assert.equal(looksLikeOneVideo('https://x.com/i/broadcasts/1yNGaQZEoQBGj'), true);
   assert.equal(looksLikeOneVideo('https://www.tiktok.com/live'), false);
   assert.equal(looksLikeOneVideo('https://www.twitch.tv/live/'), false);
+});
+
+// ---- the sign-in of the page's own site goes to the app for yt-dlp (lives and private videos need one) ----
+
+const LIVE_PAGE = 'https://www.tiktok.com/@scout2015/live';
+const SIGNED_IN = { [LIVE_PAGE]: [{ name: 'sessionid', value: 'abc' }, { name: 'ttwid', value: 'xyz' }] };
+
+test('a video page is sent with the browser\'s cookies for that site', async () => {
+  const t = setup({ title: 'Live', url: LIVE_PAGE }, SIGNED_IN);
+  await t.controller.onPageVideos(from(t, LIVE_PAGE), [liveVideo()]);
+
+  const sent = await t.controller.sendMedia(LIVE_PAGE, t.chrome.tabs.active);
+
+  assert.equal(sent.accepted, true);
+  assert.equal(t.app.captures[0].source, 'page');
+  assert.equal(t.app.captures[0].cookies, 'sessionid=abc; ttwid=xyz');
+});
+
+test('with the switch off in the app no cookie leaves the browser for a page', async () => {
+  const t = setup({ title: 'Live', url: LIVE_PAGE }, SIGNED_IN);
+  t.app.settings.pageSignIn = false;   // what the app tells the extension when it connects
+  await t.controller.onPageVideos(from(t, LIVE_PAGE), [liveVideo()]);
+
+  await t.controller.sendMedia(LIVE_PAGE, t.chrome.tabs.active);
+
+  assert.equal(t.app.captures[0].cookies, undefined);
 });
