@@ -94,6 +94,7 @@ Write-Host ("{0} files, {1:N0} MB" -f (Get-ChildItem $app -Recurse -File).Count,
 $builtVersion = (Get-Item (Join-Path $app "ShadeNetDownloader.exe")).VersionInfo.ProductVersion
 if (-not $builtVersion.StartsWith($version)) { throw "the program says it is version $builtVersion, not $version" }
 
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 function New-Zip([string]$path, [string]$from, [scriptblock]$include) {
     $zip = [IO.Compression.ZipFile]::Open($path, [IO.Compression.ZipArchiveMode]::Create)
