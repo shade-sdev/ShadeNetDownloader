@@ -6,6 +6,10 @@ the session cookie is sent, for example).
 
 ## Install (once)
 
+When ShadeNet is installed with its setup program, the last page of setup walks through steps 2 and 3 below: it opens
+the installed browser on its extensions page and puts the folder path on the clipboard. (Browsers do not let a program add
+an extension for the user, so the click on *Load unpacked* stays with them.)
+
 1. In ShadeNet: **Settings → Browser integration → Set up**. This registers the native messaging host for Chrome, Edge,
    Brave and Chromium under *HKEY_CURRENT_USER* (no administrator rights).
 2. In your browser open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**.

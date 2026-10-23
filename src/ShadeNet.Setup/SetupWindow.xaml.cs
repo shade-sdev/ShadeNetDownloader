@@ -131,6 +131,7 @@ public partial class SetupWindow : Window
             });
             _installed = true;
             Show("ShadeNet Downloader is installed. You can start it from the Start menu" + (_options.DesktopShortcut ? " or the desktop." : "."), failed: false);
+            ShowExtensionGuide();
         }
         catch (OperationCanceledException)
         {
@@ -151,10 +152,71 @@ public partial class SetupWindow : Window
     {
         ProgressPanel.Visibility = Visibility.Collapsed;
         DonePanel.Visibility = Visibility.Visible;
+        ExtensionPanel.Visibility = Visibility.Collapsed;
         DoneText.Text = message;
         LaunchBox.Visibility = failed ? Visibility.Collapsed : Visibility.Visible;
         RetryButton.Visibility = failed ? Visibility.Visible : Visibility.Collapsed;
         TitleText.Text = failed ? "Setup stopped" : "All done";
+    }
+
+    /// <summary>The browser keeps the last step for the user: show it right here, with the folder already on the clipboard.</summary>
+    void ShowExtensionGuide()
+    {
+        var folder = ExtensionGuide.FolderFor(_options);
+        if (!_options.BrowserIntegration || !Directory.Exists(folder)) return;
+
+        ExtensionFolderBox.Text = folder;
+        ExtensionNote.Text = CopyToClipboard(folder) ? "The folder is copied: press Ctrl+V in the box that opens." : "";
+
+        BrowserButtons.Children.Clear();
+        var browsers = ExtensionGuide.Installed();
+        foreach (var browser in browsers)
+        {
+            var button = new Button { Content = "Open " + browser.Name, Tag = browser, Margin = new Thickness(0, 6, 8, 0), Style = browsers[0] == browser ? (Style)FindResource("Primary") : null };
+            button.Click += OnOpenBrowser;
+            BrowserButtons.Children.Add(button);
+        }
+
+        if (browsers.Count == 0)
+            ExtensionNote.Text = "No Chrome, Edge or Brave was found. Open your browser, type chrome://extensions (or edge://extensions) in the address bar and follow steps 2 and 3. " + ExtensionNote.Text;
+
+        ExtensionPanel.Visibility = Visibility.Visible;
+    }
+
+    void OnOpenBrowser(object sender, RoutedEventArgs e)
+    {
+        var browser = (ExtensionBrowser)((Button)sender).Tag;
+        if (!ExtensionGuide.TryOpen(browser))
+            ExtensionNote.Text = $"{browser.Name} could not be started. Open it yourself and type {browser.ExtensionsAddress} in the address bar.";
+    }
+
+    void OnCopyExtensionFolder(object sender, RoutedEventArgs e) =>
+        ExtensionNote.Text = CopyToClipboard(ExtensionFolderBox.Text) ? "Copied. Press Ctrl+V in the box that opens." : "Could not copy. Select the folder above and press Ctrl+C.";
+
+    void OnShowExtensionFolder(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(ExtensionFolderBox.Text) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            App.Log("could not open the extension folder: " + ex.Message);
+        }
+    }
+
+    /// <summary>Another program may hold the clipboard for a moment; the folder is also shown in the box, so a failed copy is not an error.</summary>
+    static bool CopyToClipboard(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+            return true;
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return false;
+        }
     }
 
     void OnRetry(object sender, RoutedEventArgs e)
