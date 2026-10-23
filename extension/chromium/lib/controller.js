@@ -548,7 +548,8 @@ export class Controller {
       // the player's own page (an iframe's address) is the referrer the pieces are expected with, not the outer page
       const referrerFallback = this.playerPage(tab, this.media.get(tab.id, url)?.referrer) || tab.url;
       const audioUrl = (await this.itemsFor(tab)).find((i) => i.url === url)?.audioUrl;   // the sound's own playlist, when it has one
-      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: 'media', audioUrl });
+      const recording = this.media.get(tab.id, url)?.kind === 'record';   // a live FLV pull: the app records it with ffmpeg
+      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`stream ${url} sent: accepted=${result?.accepted} reason=${result?.reason}`);
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');

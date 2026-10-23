@@ -256,6 +256,13 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            // an endless live response: nothing to ask the server (a request would sit on the stream for ever)
+            if (IsCapturedLink(url) && _capture!.Source == "record")
+            {
+                ShowRecording(_capture);
+                return;
+            }
+
             if (YtDlp.IsSupportedPage(url) || (IsCapturedLink(url) && _capture!.Source == "page"))
             {
                 await ShowYtDlpAsync(url, cts).ConfigureAwait(true);
@@ -387,6 +394,25 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         });
         Refine(FileName);
         UpdateStreamSize();
+        ProbeState = ProbeState.Ready;
+    }
+
+    /// <summary>A live stream the browser's player pulls as one endless response: ShadeNet records it with ffmpeg until it ends or is stopped.</summary>
+    void ShowRecording(CaptureInfo capture)
+    {
+        _direct = new StreamChoice(Subtitles: false, Record: true);
+        IsStream = true;
+        IsLiveStream = true;
+        var name = FileNameHelper.Sanitize(string.IsNullOrWhiteSpace(capture.FileName) ? "live" : capture.FileName!);
+        if (!name.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)) name += ".mkv";
+        Run(() =>
+        {
+            if (!_nameEdited) FileName = name;
+            SizeText = "Live: recorded until you stop it";
+            TypeText = "Live stream (recorded as it plays)";
+            Resumable = false;
+        });
+        Refine(FileName);
         ProbeState = ProbeState.Ready;
     }
 

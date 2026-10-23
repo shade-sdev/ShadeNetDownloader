@@ -160,10 +160,12 @@ public sealed class CaptureProcessor
         {
             // a video stream the extension found (or an .m3u8 address): the best quality, saved as one video file
             var isTracks = capture.Source == "tracks";
-            var isStream = isTracks || capture.Source == "media" || DownloadManager.IsStreamAddress(capture.Url);
+            var isRecord = capture.Source == "record";   // an endless live response (an FLV pull): ffmpeg records it
+            var isStream = isTracks || isRecord || capture.Source == "media" || DownloadManager.IsStreamAddress(capture.Url);
             var job = _manager.Add(new AddDownloadRequest
             {
                 Stream = isTracks ? new StreamChoice(Direct: true, AudioUrl: capture.AudioUrl, Seconds: capture.Duration ?? 0)
+                    : isRecord ? new StreamChoice(Subtitles: false, Record: true)
                     : isStream ? new StreamChoice(AudioUrl: capture.Source == "media" ? capture.AudioUrl : null) : null,
                 // a stream, and a video file the page's own button sent, are named after the video, not after the address
                 FileName = (isStream || capture.Source == "video") && !string.IsNullOrWhiteSpace(capture.FileName) ? capture.FileName : null,
@@ -245,8 +247,9 @@ public sealed class CaptureProcessor
 
         // "media": a stream the extension saw playing; "tracks": picture and sound the player fetched as separate files;
         // "video": a plain video file the page plays, sent with the video's name;
-        // "page": the address of a page whose video has no address of its own (yt-dlp is asked about it)
-        var source = request.Source is "contextmenu" or "media" or "tracks" or "video" or "page" ? request.Source : "download";
+        // "page": the address of a page whose video has no address of its own (yt-dlp is asked about it);
+        // "record": a live stream that is one endless response (an FLV pull), recorded as it arrives
+        var source = request.Source is "contextmenu" or "media" or "tracks" or "video" or "page" or "record" ? request.Source : "download";
         // (the sound as a second playlist belongs to a "media" stream; as a second file, to "tracks")
         string? audioUrl = source is "tracks" or "media" && IsWebUrl(request.AudioUrl) ? request.AudioUrl : null;
         long? audioSize = audioUrl != null && request.AudioSize is > 0 ? request.AudioSize : null;

@@ -56,8 +56,9 @@ public sealed class AddDownloadRequest
 /// <param name="Direct">No playlist: the job's address is the picture (or a file with both), downloaded as a whole in parallel ranges.</param>
 /// <param name="AudioUrl">With <paramref name="Direct"/>: the sound, kept apart, to be joined with the picture.</param>
 /// <param name="Seconds">With <paramref name="Direct"/>: the length, for progress.</param>
+/// <param name="Record">The address is one endless live response (an FLV pull), recorded with ffmpeg until it ends or the user stops it.</param>
 public sealed record StreamChoice(int Height = 0, long Bandwidth = 0, string? AudioName = null, bool Subtitles = true, bool EmbedSubtitles = false,
-    bool Direct = false, string? AudioUrl = null, double Seconds = 0);
+    bool Direct = false, string? AudioUrl = null, double Seconds = 0, bool Record = false);
 
 public enum AddMode
 {

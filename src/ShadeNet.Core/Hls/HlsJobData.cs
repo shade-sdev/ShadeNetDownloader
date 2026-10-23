@@ -33,6 +33,12 @@ public sealed class HlsJobData
     /// <summary>The stream is live: it is recorded until it ends or the user stops it.</summary>
     public bool Live { get; set; }
 
+    /// <summary>
+    /// The job's address is one endless response (a live FLV pull) that ffmpeg records as it arrives, not a playlist of pieces:
+    /// there are no segments, so nothing to resume; stopping the recording saves it.
+    /// </summary>
+    public bool Record { get; set; }
+
     // progress
     public long BytesDone { get; set; }
     public int Parts { get; set; }

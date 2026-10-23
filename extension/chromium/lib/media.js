@@ -34,6 +34,26 @@ export function worthALook(details, contentType) {
   return !type.startsWith('image/');   // no length given: text and plain bytes may be a playlist, an "image" of unknown size is a piece
 }
 
+const FLV_TYPES = ['video/x-flv', 'video/flv', 'application/x-flv'];
+
+/**
+ * A live stream delivered as one endless response (an FLV pull): FLV by its type or its address, and no length, because a response
+ * that never ends has none. (An FLV file has a length: that is a plain video file, not a recording.)
+ */
+export function looksLikeLiveFlv(details, contentType) {
+  if (!['xmlhttprequest', 'media', 'other', 'fetch'].includes(details?.type)) return false;
+  contentType ??= (details.responseHeaders || []).find((h) => h?.name?.toLowerCase() === 'content-type')?.value;
+  if (details.statusCode && details.statusCode !== 200) return false;
+  if ((details.responseHeaders || []).some((h) => h?.name?.toLowerCase() === 'content-length')) return false;
+  const type = String(contentType ?? '').split(';')[0].trim().toLowerCase();
+  if (FLV_TYPES.includes(type)) return true;
+  try {
+    return new URL(details.url).pathname.toLowerCase().endsWith('.flv') && (type === '' || type === 'application/octet-stream' || type === 'binary/octet-stream');
+  } catch {
+    return false;
+  }
+}
+
 /** The address or the content type says "HLS playlist" or "DASH manifest". */
 export function looksLikePlaylist(url, contentType) {
   if (typeof contentType === 'string') {
@@ -129,6 +149,16 @@ export class MediaTracker {
     if (!/^https?:/i.test(url)) return;
 
     const contentType = (details.responseHeaders || []).find((h) => h?.name?.toLowerCase() === 'content-type')?.value;
+
+    // a live FLV pull is never read (it does not end): the address is all there is, and the app records it
+    if (looksLikeLiveFlv(details, contentType)) {
+      if (!this.byTab.get(tabId)?.has(url)) {
+        this.add(tabId, url, { kind: 'record', live: true, children: [], duration: 0, maxHeight: 0, referrer: details.documentUrl || details.initiator || '' });
+      }
+
+      return;
+    }
+
     const named = looksLikePlaylist(url, contentType);
     if (!named) {
       if (!worthALook(details, contentType)) return;

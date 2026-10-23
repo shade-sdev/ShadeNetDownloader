@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPlaylist, looksLikePlaylist, MediaTracker } from '../lib/media.js';
+import { classifyPlaylist, looksLikeLiveFlv, looksLikePlaylist, MediaTracker } from '../lib/media.js';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
@@ -138,4 +138,43 @@ test('a live stream can be sent from the popup like any other', async () => {
   assert.equal((await t.controller.sendMedia(item.url)).accepted, true);
   assert.equal(t.app.captures[0].source, 'media');
   assert.ok(t.calls.badge.length > 0 || true);
+});
+
+// ---- a live stream that is one endless response (FLV): never read, recorded by the app ----
+
+const flv = (tabId, url, extra = {}) => ({
+  tabId, url, type: 'xmlhttprequest', statusCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'video/x-flv' }], ...extra,
+});
+
+test('an FLV response with no length is a live stream; an FLV file with a length is not', () => {
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://pull.example/stream.flv?k=1')), true);
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://pull.example/anything', { responseHeaders: [{ name: 'content-type', value: 'video/x-flv' }] })), true);
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://pull.example/stream.flv', { responseHeaders: [] })), true);      // named .flv, no type given
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://x.example/clip.flv', { responseHeaders: [{ name: 'Content-Type', value: 'video/x-flv' }, { name: 'Content-Length', value: '123456' }] })), false);
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://x.example/clip.flv', { responseHeaders: [{ name: 'Content-Type', value: 'text/html' }] })), false);
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://pull.example/stream.flv', { statusCode: 403 })), false);
+  assert.equal(looksLikeLiveFlv(flv(7, 'https://pull.example/stream.flv', { type: 'image' })), false);
+});
+
+test('the tracker lists a live FLV without ever reading it', async () => {
+  const fetched = [];
+  const tracker = new MediaTracker({ fetchText: async (u) => { fetched.push(u); return ''; } });
+
+  await tracker.consider(flv(7, 'https://pull.example/stream.flv?k=1'));
+
+  assert.deepEqual(fetched, []);   // a response that never ends cannot be read
+  const [item] = tracker.list(7);
+  assert.deepEqual([item.kind, item.live, item.url], ['record', true, 'https://pull.example/stream.flv?k=1']);
+});
+
+test('a live FLV is sent to the app as a recording, and the page route is not offered next to it', async () => {
+  const t = setup();
+  await t.chrome.webRequest.onHeadersReceived.emit(flv(7, 'https://pull.example/stream.flv?k=1'));
+
+  const { items } = await t.controller.listMedia();
+  assert.deepEqual(items.map((i) => [i.kind, i.live]), [['record', true]]);
+
+  assert.equal((await t.controller.sendMedia(items[0].url)).accepted, true);
+  assert.equal(t.app.captures[0].source, 'record');
+  assert.equal(t.app.captures[0].url, 'https://pull.example/stream.flv?k=1');
 });
