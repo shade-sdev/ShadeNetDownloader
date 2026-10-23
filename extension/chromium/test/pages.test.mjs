@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
-import { acceptPageAddress, embedWatchUrl, isPageSite, looksLikeOneVideo } from '../lib/sites.js';
+import { acceptPageAddress, embedWatchUrl, isPageSite, isPlaceholderVideo, looksLikeOneVideo } from '../lib/sites.js';
 import { FakeApp, fakeChrome, manualTimers } from './fakes.mjs';
 
 function setup(tab) {
@@ -122,4 +122,27 @@ test('the site list, one-video addresses and embeds', () => {
   assert.equal(embedWatchUrl('https://evil.example/embed/abcdefghijk'), null);
   assert.equal(acceptPageAddress('https://www.facebook.com/reel/1#x'), 'https://www.facebook.com/reel/1');
   assert.equal(acceptPageAddress('https://evil.example/reel/1'), '');
+});
+
+// ---- TikTok: a placeholder <video> next to the real one, whose picture comes through a buffer ----
+
+const TIKTOK = 'https://www.tiktok.com/@scout2015/video/6718335390845095173';
+const PLACEHOLDER = 'https://lf16-tiktok-web.tiktokcdn-us.com/obj/tiktok-web-tx/tiktok/webapp/main/webapp-desktop/playback1.mp4';
+
+test('TikTok\'s autoplay placeholder is not offered; the video page is', async () => {
+  const t = setup({ title: 'Scout | TikTok', url: TIKTOK });
+  const placeholder = { title: 'TikTok', src: PLACEHOLDER, blob: false, drm: false, permalink: '', duration: 0, width: 0, height: 0 };
+  const real = blobVideo({ title: 'Scramble up ur name', src: 'blob:https://www.tiktok.com/358b0f8f', permalink: TIKTOK });
+
+  const answer = await t.controller.onPageVideos(from(t, TIKTOK), [placeholder, real]);
+
+  assert.deepEqual(answer.items.map((i) => [i.kind, i.url]), [['page', TIKTOK]]);
+});
+
+test('only TikTok\'s own placeholder counts as one', () => {
+  assert.equal(isPlaceholderVideo(PLACEHOLDER), true);
+  assert.equal(isPlaceholderVideo(`${PLACEHOLDER}?x=1`), true);
+  assert.equal(isPlaceholderVideo('https://cdn.example/media/playback1.mp4'), false);
+  assert.equal(isPlaceholderVideo('https://lf16-tiktok-web.tiktokcdn-us.com/obj/tiktok-web-tx/video/real-clip.mp4'), false);
+  assert.equal(isPlaceholderVideo('not an address'), false);
 });

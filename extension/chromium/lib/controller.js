@@ -11,7 +11,7 @@ import {
 import { MediaTracker, looksLikePlaylist, pairStreams } from './media.js';
 import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVideoPage } from './youtube.js';
 import { browserTimers } from './native.js';
-import { acceptPageAddress, embedWatchUrl, isPageSite, looksLikeOneVideo } from './sites.js';
+import { acceptPageAddress, embedWatchUrl, isPageSite, isPlaceholderVideo, looksLikeOneVideo } from './sites.js';
 
 export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0 };
 
@@ -400,7 +400,7 @@ export class Controller {
     const found = [];
     for (const { videos } of this.pageVideos.get(tabId)?.values() ?? []) {
       for (const v of videos) {
-        if (typeof v.src !== 'string' || !/^https?:\/\//i.test(v.src) || looksLikePlaylist(v.src, '')) continue;
+        if (typeof v.src !== 'string' || !/^https?:\/\//i.test(v.src) || looksLikePlaylist(v.src, '') || isPlaceholderVideo(v.src)) continue;
         if (this.media.get(tabId, v.src) || found.some((f) => f.src === v.src)) continue;
         found.push(v);
       }

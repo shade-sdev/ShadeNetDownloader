@@ -36,13 +36,19 @@
     if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) return false;
     if (rect.bottom < 0 || rect.right < 0 || rect.top > innerHeight || rect.left > innerWidth) return false;
     const style = getComputedStyle(video);
-    return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    // TikTok plays its video with `opacity: 0` and shows the picture another way, so a see-through <video> that has data and
+    // fills the screen is still the video that plays. (A hidden player that has loaded nothing is not.)
+    return Number(style.opacity) !== 0 || video.readyState >= 2;
   }
 
   /** The name of a video: its own label, else the heading of the card it sits in, else what the page calls itself. */
   function titleFor(video, several) {
     const own = clean(video.getAttribute('aria-label') || video.getAttribute('title') || video.dataset?.title);
     if (own.length > 2 && !/^(video|video player|media player|player|youtube video player)$/i.test(own)) return own;
+
+    const described = tiktokDescription(video);
+    if (described) return described;
 
     if (several) {
       const card = video.closest('article, figure, li, [role="article"]');
@@ -60,6 +66,24 @@
     const pageTitle = clean(document.title);
     const social = clean(document.querySelector('meta[property="og:title"], meta[name="twitter:title"]')?.content);
     return social && pageTitle.includes(social) ? social : pageTitle || social;
+  }
+
+  // TikTok: the card around a video holds its description (the page's own title is the login box's while one is open)
+  function tiktokDescription(video) {
+    if (!/(^|\.)tiktok\.com$/.test(location.hostname)) return '';
+    for (let node = video.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
+      const text = clean(node.querySelector('[data-e2e="video-desc"]')?.textContent);
+      if (text) return text.slice(0, 120);
+    }
+    return '';
+  }
+
+  // TikTok's feed has no link to a video's own page near the video, but the player's wrapper is named after it
+  // (<div id="xgwrapper-0-7697839909842767111">), and TikTok and yt-dlp take /@/video/<id> without the author.
+  function tiktokPermalink(video) {
+    if (!/(^|\.)tiktok\.com$/.test(location.hostname)) return '';
+    const id = /^xgwrapper-\d+-(\d{8,})$/.exec(video.closest('[id^="xgwrapper-"]')?.id ?? '')?.[1];
+    return id ? `${location.origin}/@/video/${id}` : '';
   }
 
   function sourceOf(video) {
@@ -99,6 +123,8 @@
         }
       }
     }
+
+    if (!value) value = tiktokPermalink(video);
 
     permalinks.set(video, { at: Date.now(), value });
     return value;

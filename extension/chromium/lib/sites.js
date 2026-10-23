@@ -38,6 +38,18 @@ export function looksLikeOneVideo(url) {
   }
 }
 
+/**
+ * A short placeholder a player loads only so that the browser allows it to play later (TikTok's `.../webapp-desktop/playback1.mp4`).
+ * It is not a video anybody wants, and listing it would hide the real video's page.
+ */
+export function isPlaceholderVideo(url) {
+  try {
+    return /^\/obj\/tiktok-web[\w-]*\/.*\/playback\d*\.mp4$/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** A YouTube player embedded in another site's page (an iframe): its watch page, which is what yt-dlp reads. */
 export function embedWatchUrl(frameUrl) {
   try {
