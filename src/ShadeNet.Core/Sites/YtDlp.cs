@@ -14,8 +14,9 @@ namespace ShadeNet.Core.Sites;
 /// <param name="Referer">The page yt-dlp says the file must be asked for from (TikTok's servers answer 403 without it).</param>
 /// <param name="Cookies">The cookies yt-dlp collected for this file's address, as a <c>Cookie</c> header value (TikTok's servers want them too).
 /// These are what yt-dlp itself got from the site, not the user's browser session.</param>
+/// <param name="Headers">Any other header yt-dlp says the site's servers want for this file (the ones ShadeNet sets itself are left out).</param>
 public sealed record YtDlpOption(string Label, int Height, string VideoUrl, string? AudioUrl, string Extension, long Size, string? UserAgent, bool IsHls,
-    string? Referer = null, string? Cookies = null);
+    string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null);
 
 public sealed record YtDlpInfo(string Title, double Seconds, bool IsLive, IReadOnlyList<YtDlpOption> Options);
 
@@ -216,7 +217,7 @@ public static partial class YtDlp
     private static partial System.Text.RegularExpressions.Regex SiteSuffix();
 
     sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent, double Quality = 0,
-        string? Referer = null, string? Cookies = null)
+        string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null)
     {
         public bool HasVideo => VCodec != "none" && VCodec.Length > 0;
         public bool HasAudio => ACodec != "none" && ACodec.Length > 0;
@@ -228,10 +229,12 @@ public static partial class YtDlp
             var url = Str(f, "url");
             if (string.IsNullOrEmpty(url)) return null;
             string? ua = null, referer = null;
+            Dictionary<string, string>? extra = null;
             if (f.TryGetProperty("http_headers", out var h) && h.ValueKind == JsonValueKind.Object)
             {
                 if (Str(h, "User-Agent") is { Length: > 0 } agent) ua = agent;
                 if (Str(h, "Referer") is { Length: > 0 } page) referer = page;
+                extra = ExtraHeaders(h);
             }
             var ext = Str(f, "ext") ?? "";
             var vcodec = Str(f, "vcodec");
@@ -241,7 +244,7 @@ public static partial class YtDlp
             if (vcodec == null && acodec == null && ext is "mp4" or "webm" or "mkv" or "mov" or "flv" or "m4v") (vcodec, acodec) = ("unknown", "unknown");
             return new Format(Str(f, "format_id") ?? "", url, Str(f, "protocol") ?? "", ext, vcodec ?? "none", acodec ?? "none",
                 (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua, Num(f, "quality"),
-                referer, CookieHeaderFrom(Str(f, "cookies")));
+                referer, CookieHeaderFrom(Str(f, "cookies")), extra);
         }
     }
 
@@ -274,7 +277,7 @@ public static partial class YtDlp
             var codec = Preference(video) switch { 0 => "H.264", 1 => "VP9", _ => "AV1" };
             var size = video.Size + (audio?.Size ?? 0);
             var label = $"{video.Height}p{fps} · {codec}" + (size > 0 ? $" · about {FormatSize(size)}" : "");
-            options.Add(new YtDlpOption(label, video.Height, video.Url, audio?.Url, mp4 ? ".mp4" : ".mkv", size, video.UserAgent, false, video.Referer, video.Cookies));
+            options.Add(new YtDlpOption(label, video.Height, video.Url, audio?.Url, mp4 ? ".mp4" : ".mkv", size, video.UserAgent, false, video.Referer, video.Cookies, video.Headers));
         }
 
         if (options.Count == 0)
@@ -286,7 +289,7 @@ public static partial class YtDlp
                 var f = group.OrderByDescending(x => x.Tbr).First();
                 var name = f.Height > 0 ? $"{f.Height}p" : f.Id.Length > 0 ? f.Id.ToUpperInvariant() : "video";
                 options.Add(new YtDlpOption($"{name} · {f.Ext}" + (f.Size > 0 ? $" · about {FormatSize(f.Size)}" : ""), f.Height, f.Url, null,
-                    f.Ext is "mp4" or "mkv" or "webm" ? (f.Ext == "webm" ? ".mkv" : "." + f.Ext) : ".mp4", f.Size, f.UserAgent, false, f.Referer, f.Cookies));
+                    f.Ext is "mp4" or "mkv" or "webm" ? (f.Ext == "webm" ? ".mkv" : "." + f.Ext) : ".mp4", f.Size, f.UserAgent, false, f.Referer, f.Cookies, f.Headers));
             }
         }
 
@@ -298,12 +301,38 @@ public static partial class YtDlp
         formats.Where(f => f.IsHls && f.HasVideo).GroupBy(f => f.Height).Select(g =>
         {
             var f = g.OrderByDescending(x => x.Tbr).First();
-            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, f.Url, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies);
+            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, f.Url, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies, f.Headers);
         }).ToList();
 
     static string FormatSize(long bytes) =>
         bytes >= 1L << 30 ? (bytes / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GB"
         : (bytes / (double)(1L << 20)).ToString("0", CultureInfo.InvariantCulture) + " MB";
+
+    /// <summary>
+    /// The headers yt-dlp sends that ShadeNet does not set (or handle) itself: a site may want a custom one (an <c>Origin</c>, a token),
+    /// and a download that leaves it out is refused. The ones a request carries anyway, or that only make sense for yt-dlp's own request, stay out.
+    /// </summary>
+    static Dictionary<string, string>? ExtraHeaders(JsonElement headers)
+    {
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "User-Agent", "Referer", "Cookie", "Host", "Accept", "Accept-Language", "Accept-Encoding", "Connection", "Keep-Alive", "Upgrade-Insecure-Requests",
+            "Content-Length", "Content-Type", "Transfer-Encoding", "TE", "Range", "If-Range", "Expect",
+        };
+
+        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers.EnumerateObject())
+        {
+            if (found.Count >= 20 || header.Value.ValueKind != JsonValueKind.String) continue;
+            var name = header.Name;
+            var value = header.Value.GetString() ?? "";
+            if (skip.Contains(name) || name.StartsWith("Sec-Fetch-", StringComparison.OrdinalIgnoreCase)) continue;
+            if (name.Length == 0 || value.Length == 0 || value.Length > 2000 || name.Any(c => c <= ' ' || c == ':' || c > '~') || value.Any(c => c < ' ' || c == 127)) continue;
+            found[name] = value;
+        }
+
+        return found.Count == 0 ? null : found;
+    }
 
     static readonly string[] CookieAttributes = { "domain", "path", "expires", "max-age", "version", "samesite", "comment" };
 

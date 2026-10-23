@@ -47,7 +47,7 @@
     const own = clean(video.getAttribute('aria-label') || video.getAttribute('title') || video.dataset?.title);
     if (own.length > 2 && !/^(video|video player|media player|player|youtube video player)$/i.test(own)) return own;
 
-    const described = tiktokDescription(video);
+    const described = describedBySite(video);
     if (described) return described;
 
     if (several) {
@@ -68,22 +68,42 @@
     return social && pageTitle.includes(social) ? social : pageTitle || social;
   }
 
-  // TikTok: the card around a video holds its description (the page's own title is the login box's while one is open)
-  function tiktokDescription(video) {
-    if (!/(^|\.)tiktok\.com$/.test(location.hostname)) return '';
+  // What the generic rules cannot find, a site's own page structure can: one entry per site. A site without an entry works from
+  // the generic rules alone (the video's label, the links around it, the page's title). Nothing else in this file names a site.
+  //   description   a selector for the text a card shows about its video (a better name than the page's title)
+  //   playerId      a pattern for an id on the player's wrapper that holds the video's own id
+  //   pageFromId    the address of a video's page, made from that id
+  const SITE_HINTS = [
+    {
+      host: /(^|\.)tiktok\.com$/,
+      description: '[data-e2e="video-desc"]',
+      playerId: /^xgwrapper-\d+-(\d{8,})$/,
+      pageFromId: (id) => `${location.origin}/@/video/${id}`,   // the author is not needed: the site and yt-dlp take /@/video/<id>
+    },
+  ];
+
+  const hint = () => SITE_HINTS.find((h) => h.host.test(location.hostname));
+
+  /** What the site's card says about this video, when the site is known for it. */
+  function describedBySite(video) {
+    const selector = hint()?.description;
+    if (!selector) return '';
     for (let node = video.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
-      const text = clean(node.querySelector('[data-e2e="video-desc"]')?.textContent);
+      const text = clean(node.querySelector(selector)?.textContent);
       if (text) return text.slice(0, 120);
     }
     return '';
   }
 
-  // TikTok's feed has no link to a video's own page near the video, but the player's wrapper is named after it
-  // (<div id="xgwrapper-0-7697839909842767111">), and TikTok and yt-dlp take /@/video/<id> without the author.
-  function tiktokPermalink(video) {
-    if (!/(^|\.)tiktok\.com$/.test(location.hostname)) return '';
-    const id = /^xgwrapper-\d+-(\d{8,})$/.exec(video.closest('[id^="xgwrapper-"]')?.id ?? '')?.[1];
-    return id ? `${location.origin}/@/video/${id}` : '';
+  /** The page of this video when the player's wrapper carries its id and the site is known for it. */
+  function pageFromPlayerId(video) {
+    const { playerId, pageFromId } = hint() ?? {};
+    if (!playerId || !pageFromId) return '';
+    for (let node = video.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      const id = playerId.exec(node.id ?? '')?.[1];
+      if (id) return pageFromId(id);
+    }
+    return '';
   }
 
   function sourceOf(video) {
@@ -124,7 +144,7 @@
       }
     }
 
-    if (!value) value = tiktokPermalink(video);
+    if (!value) value = pageFromPlayerId(video);
 
     permalinks.set(video, { at: Date.now(), value });
     return value;
@@ -134,6 +154,7 @@
     const videos = videoElements();
     return videos.slice(0, 12).map((video) => {
       const buffer = isBuffer(video);
+      const rect = video.getBoundingClientRect();
       return {
         title: titleFor(video, videos.length > 1),
         src: sourceOf(video),
@@ -143,6 +164,8 @@
         blob: buffer,
         drm: !!video.mediaKeys,                         // a player with a licence key: protected, left alone on purpose
         permalink: buffer ? permalinkFor(video) : '',
+        box: [Math.round(rect.width), Math.round(rect.height)],      // with this, the extension can tell a hidden decoy from a video
+        opacity: Number(getComputedStyle(video).opacity),
       };
     });
   }

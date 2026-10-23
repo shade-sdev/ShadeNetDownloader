@@ -39,15 +39,14 @@ export function looksLikeOneVideo(url) {
 }
 
 /**
- * A short placeholder a player loads only so that the browser allows it to play later (TikTok's `.../webapp-desktop/playback1.mp4`).
- * It is not a video anybody wants, and listing it would hide the real video's page.
+ * A <video> the page keeps out of sight: nearly see-through and tiny. Players load one to unlock autoplay or to measure things
+ * (TikTok's 50 px `playback1.mp4`); it is not a video anybody wants, and listing it would hide the real one.
+ * `box` is its size on the screen and `opacity` its see-through-ness, as the page's script reports them.
  */
-export function isPlaceholderVideo(url) {
-  try {
-    return /^\/obj\/tiktok-web[\w-]*\/.*\/playback\d*\.mp4$/i.test(new URL(url).pathname);
-  } catch {
-    return false;
-  }
+export function isDecoyVideo(video) {
+  const [width, height] = Array.isArray(video?.box) ? video.box : [0, 0];
+  const opacity = Number.isFinite(video?.opacity) ? video.opacity : 1;
+  return opacity < 0.05 && Math.max(width, height) < 100;
 }
 
 /** A YouTube player embedded in another site's page (an iframe): its watch page, which is what yt-dlp reads. */

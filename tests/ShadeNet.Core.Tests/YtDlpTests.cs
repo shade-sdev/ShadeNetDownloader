@@ -87,9 +87,25 @@ public class YtDlpTests
     public void Cookies_are_written_as_a_request_header(string? yt, string? header) => Assert.Equal(header, YtDlp.CookieHeaderFrom(yt));
 
     [Fact]
+    public void Any_other_header_yt_dlp_names_travels_too_but_not_the_ones_a_request_has_anyway()
+    {
+        const string json = """
+            { "title": "t", "formats": [
+              { "format_id": "a", "ext": "mp4", "protocol": "https", "url": "https://v.example/a", "vcodec": "avc1", "acodec": "aac", "height": 720,
+                "http_headers": { "User-Agent": "UA/1", "Accept": "*/*", "Accept-Language": "en", "Accept-Encoding": "gzip", "Sec-Fetch-Mode": "navigate",
+                                  "Referer": "https://site.example/p", "Origin": "https://site.example", "X-Token": "abc", "Range": "bytes=0-" } } ] }
+            """;
+
+        var option = Assert.Single(YtDlp.ParseInfo(json).Options);
+
+        Assert.Equal(new[] { ("Origin", "https://site.example"), ("X-Token", "abc") }, option.Headers!.OrderBy(h => h.Key).Select(h => (h.Key, h.Value)));
+        Assert.Equal("https://site.example/p", option.Referer);
+    }
+
+    [Fact]
     public void Formats_without_headers_or_cookies_carry_none()
     {
-        Assert.All(YtDlp.ParseInfo(Sample).Options, o => Assert.Equal((null, null), (o.Referer, o.Cookies)));
+        Assert.All(YtDlp.ParseInfo(Sample).Options, o => Assert.Equal((null, null, null), (o.Referer, o.Cookies, o.Headers)));
     }
 
     [Fact]

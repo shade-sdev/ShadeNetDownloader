@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
-import { acceptPageAddress, embedWatchUrl, isPageSite, isPlaceholderVideo, looksLikeOneVideo } from '../lib/sites.js';
+import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from '../lib/sites.js';
 import { FakeApp, fakeChrome, manualTimers } from './fakes.mjs';
 
 function setup(tab) {
@@ -124,25 +124,25 @@ test('the site list, one-video addresses and embeds', () => {
   assert.equal(acceptPageAddress('https://evil.example/reel/1'), '');
 });
 
-// ---- TikTok: a placeholder <video> next to the real one, whose picture comes through a buffer ----
+// ---- a hidden decoy <video> next to the real one, whose picture comes through a buffer (any site that does this) ----
 
 const TIKTOK = 'https://www.tiktok.com/@scout2015/video/6718335390845095173';
-const PLACEHOLDER = 'https://lf16-tiktok-web.tiktokcdn-us.com/obj/tiktok-web-tx/tiktok/webapp/main/webapp-desktop/playback1.mp4';
 
-test('TikTok\'s autoplay placeholder is not offered; the video page is', async () => {
+test('a tiny see-through <video> is not offered, so the real video\'s page is', async () => {
   const t = setup({ title: 'Scout | TikTok', url: TIKTOK });
-  const placeholder = { title: 'TikTok', src: PLACEHOLDER, blob: false, drm: false, permalink: '', duration: 0, width: 0, height: 0 };
-  const real = blobVideo({ title: 'Scramble up ur name', src: 'blob:https://www.tiktok.com/358b0f8f', permalink: TIKTOK });
+  const decoy = { title: 'TikTok', src: 'https://cdn.example/webapp/playback1.mp4', blob: false, drm: false, permalink: '', duration: 0, width: 0, height: 0, box: [50, 50], opacity: 0.001 };
+  const real = blobVideo({ title: 'Scramble up ur name', src: 'blob:https://www.tiktok.com/358b0f8f', permalink: TIKTOK, box: [432, 768], opacity: 0 });
 
-  const answer = await t.controller.onPageVideos(from(t, TIKTOK), [placeholder, real]);
+  const answer = await t.controller.onPageVideos(from(t, TIKTOK), [decoy, real]);
 
   assert.deepEqual(answer.items.map((i) => [i.kind, i.url]), [['page', TIKTOK]]);
 });
 
-test('only TikTok\'s own placeholder counts as one', () => {
-  assert.equal(isPlaceholderVideo(PLACEHOLDER), true);
-  assert.equal(isPlaceholderVideo(`${PLACEHOLDER}?x=1`), true);
-  assert.equal(isPlaceholderVideo('https://cdn.example/media/playback1.mp4'), false);
-  assert.equal(isPlaceholderVideo('https://lf16-tiktok-web.tiktokcdn-us.com/obj/tiktok-web-tx/video/real-clip.mp4'), false);
-  assert.equal(isPlaceholderVideo('not an address'), false);
+test('what makes a video a decoy is its size and see-through-ness, never its address', () => {
+  assert.equal(isDecoyVideo({ box: [50, 50], opacity: 0.001 }), true);
+  assert.equal(isDecoyVideo({ box: [1, 1], opacity: 0 }), true);
+  assert.equal(isDecoyVideo({ box: [432, 768], opacity: 0 }), false);     // a site that plays its video see-through
+  assert.equal(isDecoyVideo({ box: [50, 50], opacity: 1 }), false);       // a small video that can be seen
+  assert.equal(isDecoyVideo({ src: 'https://x.example/v.mp4' }), false);  // an older page script that reports no size
+  assert.equal(isDecoyVideo(null), false);
 });

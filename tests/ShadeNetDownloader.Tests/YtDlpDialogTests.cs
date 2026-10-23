@@ -103,7 +103,8 @@ public class YtDlpDialogTests
         var capture = new CaptureInfo(tiktok, tiktok, "browser=session", null, new Dictionary<string, string>(), "A video", null, "page", null, null, null);
         var info = new YtDlpInfo("A video", 11, false, new[]
         {
-            new YtDlpOption("1024p · H.264", 1024, "https://v.example/clip", null, ".mp4", 0, "UA/1", false, Referer: tiktok, Cookies: "tt_chain_token=abc"),
+            new YtDlpOption("1024p · H.264", 1024, "https://v.example/clip", null, ".mp4", 0, "UA/1", false, Referer: tiktok, Cookies: "tt_chain_token=abc",
+                Headers: new Dictionary<string, string> { ["X-Token"] = "abc" }),
         });
         using var vm = new AddDownloadViewModel(manager, null, capture, (_, _) => Task.FromResult(info));
         await WaitFor(() => vm.ProbeState == ProbeState.Ready, "yt-dlp's answer");
@@ -113,6 +114,7 @@ public class YtDlpDialogTests
         Assert.Equal("https://v.example/clip", request.Url);
         Assert.Equal(tiktok, request.Referer);
         Assert.Equal("tt_chain_token=abc", request.Cookies);                // not "browser=session"
+        Assert.Equal("abc", request.Headers!["X-Token"]);
     }
 
     [Fact]

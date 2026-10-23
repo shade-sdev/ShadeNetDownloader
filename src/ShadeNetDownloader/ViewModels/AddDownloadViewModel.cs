@@ -553,7 +553,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             Referer = source != null ? source.Referer : referer,
             Cookies = source != null ? source.Cookies : cookies,
             UserAgent = source?.UserAgent ?? (IsCapturedLink(url) ? _capture!.UserAgent : null),
-            Headers = IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
+            Headers = source != null ? source.Headers?.ToDictionary(h => h.Key, h => h.Value)
+                : IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
             FileName = single && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,
             SaveDirectory = single || _folderEdited ? SaveFolder.Trim() : null,
             Category = single ? Category : null,
