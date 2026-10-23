@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPlaylist, looksLikeLiveFlv, looksLikePlaylist, MediaTracker } from '../lib/media.js';
+import { classifyPlaylist, liveStreamKind, looksLikeLiveFlv, looksLikePlaylist, MediaTracker } from '../lib/media.js';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
@@ -177,4 +177,61 @@ test('a live FLV is sent to the app as a recording, and the page route is not of
   assert.equal((await t.controller.sendMedia(items[0].url)).accepted, true);
   assert.equal(t.app.captures[0].source, 'record');
   assert.equal(t.app.captures[0].url, 'https://pull.example/stream.flv?k=1');
+});
+
+// ---- the other endless formats: MPEG-TS and WebM (and not their pieces) ----
+
+const endless = (tabId, url, type, extra = {}) => ({ tabId, url, type: 'xmlhttprequest', statusCode: 200, responseHeaders: [{ name: 'Content-Type', value: type }], ...extra });
+
+test('the format of an endless response comes from its type, and a length or a range rules it out', () => {
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/x-flv')), 'flv');
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/MP2T')), 'ts');
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/webm; codecs="vp9"')), 'webm');
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/x-matroska')), 'webm');
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/mp4')), null);                                    // not endless in any way we can tell
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/mp2t', { statusCode: 206 })), null);               // a range of something
+  assert.equal(liveStreamKind(endless(7, 'https://x.example/a', 'video/webm', { responseHeaders: [{ name: 'Content-Type', value: 'video/webm' }, { name: 'Content-Length', value: '99' }] })), null);
+});
+
+test('an endless MPEG-TS or WebM response is listed once, as a recording', async () => {
+  const tracker = new MediaTracker({ fetchText: async () => '' });
+
+  await tracker.consider(endless(7, 'https://pull.example/channel.ts', 'video/mp2t'));
+  await tracker.consider(endless(8, 'https://pull.example/live.webm', 'video/webm'));
+
+  assert.deepEqual(tracker.list(7).map((i) => [i.kind, i.streamFormat]), [['record', 'ts']]);
+  assert.deepEqual(tracker.list(8).map((i) => [i.kind, i.streamFormat]), [['record', 'webm']]);
+});
+
+test('the pieces of an HLS stream are not endless streams, whichever comes first', async () => {
+  const texts = { 'https://cdn.example/v/index.m3u8': LIVE };
+  const tracker = new MediaTracker({ fetchText: async (u) => texts[u] ?? '' });
+
+  await tracker.consider(seen(7, 'https://cdn.example/v/index.m3u8'));                                  // the playlist, read first
+  await tracker.consider(endless(7, 'https://cdn.example/v/a.ts', 'video/mp2t'));
+  await tracker.consider(endless(7, 'https://cdn.example/v/b.ts', 'video/mp2t'));
+
+  assert.deepEqual(tracker.list(7).map((i) => i.kind), ['media']);
+});
+
+test('several pieces in a row (no playlist seen) are told from one endless stream and not listed', async () => {
+  const tracker = new MediaTracker({ fetchText: async () => '' });
+
+  await tracker.consider(endless(7, 'https://cdn.example/seg1.webm', 'video/webm'));
+  assert.equal(tracker.list(7).length, 1);                                                               // one address could be a live stream
+  await tracker.consider(endless(7, 'https://cdn.example/seg2.webm', 'video/webm'));                      // a second one: they are pieces
+  await tracker.consider(endless(7, 'https://cdn.example/seg3.webm', 'video/webm'));
+
+  assert.equal(tracker.list(7).length, 0);
+});
+
+test('FLV qualities of one live stream are all listed, and a new page starts afresh', async () => {
+  const tracker = new MediaTracker({ fetchText: async () => '' });
+  await tracker.consider(endless(7, 'https://pull.example/sd.flv', 'video/x-flv'));
+  await tracker.consider(endless(7, 'https://pull.example/hd.flv', 'video/x-flv'));
+  assert.equal(tracker.list(7).length, 2);
+
+  tracker.clear(7);
+  await tracker.consider(endless(7, 'https://cdn.example/a.ts', 'video/mp2t'));
+  assert.equal(tracker.list(7).length, 1);
 });

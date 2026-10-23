@@ -34,24 +34,37 @@ export function worthALook(details, contentType) {
   return !type.startsWith('image/');   // no length given: text and plain bytes may be a playlist, an "image" of unknown size is a piece
 }
 
-const FLV_TYPES = ['video/x-flv', 'video/flv', 'application/x-flv'];
+// What an endless response says it is. ffmpeg records all of these; the extension has to notice them.
+const ENDLESS_TYPES = {
+  flv: ['video/x-flv', 'video/flv', 'application/x-flv'],
+  ts: ['video/mp2t', 'video/mpeg', 'video/x-mpegts', 'application/x-mpegts'],
+  webm: ['video/webm', 'video/x-matroska'],
+};
+const SEGMENT_WINDOW_MS = 20000;
 
 /**
- * A live stream delivered as one endless response (an FLV pull): FLV by its type or its address, and no length, because a response
- * that never ends has none. (An FLV file has a length: that is a plain video file, not a recording.)
+ * Is this a live stream delivered as one endless response, and in which format ('flv', 'ts', 'webm')? It has no length, because a
+ * response that never ends has none (a file has one), and it answers with the whole stream (200), not a range. An FLV also by its address.
+ * (HLS and DASH are playlists of pieces and handled elsewhere; the pieces of one look like these, see MediaTracker.)
  */
-export function looksLikeLiveFlv(details, contentType) {
-  if (!['xmlhttprequest', 'media', 'other', 'fetch'].includes(details?.type)) return false;
+export function liveStreamKind(details, contentType) {
+  if (!['xmlhttprequest', 'media', 'other', 'fetch'].includes(details?.type)) return null;
   contentType ??= (details.responseHeaders || []).find((h) => h?.name?.toLowerCase() === 'content-type')?.value;
-  if (details.statusCode && details.statusCode !== 200) return false;
-  if ((details.responseHeaders || []).some((h) => h?.name?.toLowerCase() === 'content-length')) return false;
+  if (details.statusCode && details.statusCode !== 200) return null;
+  if ((details.responseHeaders || []).some((h) => h?.name?.toLowerCase() === 'content-length')) return null;
   const type = String(contentType ?? '').split(';')[0].trim().toLowerCase();
-  if (FLV_TYPES.includes(type)) return true;
+  for (const [kind, types] of Object.entries(ENDLESS_TYPES)) if (types.includes(type)) return kind;
   try {
-    return new URL(details.url).pathname.toLowerCase().endsWith('.flv') && (type === '' || type === 'application/octet-stream' || type === 'binary/octet-stream');
+    const named = new URL(details.url).pathname.toLowerCase().endsWith('.flv');
+    return named && (type === '' || type === 'application/octet-stream' || type === 'binary/octet-stream') ? 'flv' : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** An FLV pull; kept for the tests and callers that only care about FLV. */
+export function looksLikeLiveFlv(details, contentType) {
+  return liveStreamKind(details, contentType) === 'flv';
 }
 
 /** The address or the content type says "HLS playlist" or "DASH manifest". */
@@ -140,6 +153,34 @@ export class MediaTracker {
     this.byTab = new Map();      // tabId -> Map(url -> item)
     this.pending = new Set();    // looks in progress, so a player asking twice costs one look
     this.looked = new Map();     // tabId -> Set(url): neutral answers already read once, so each costs one look at most
+    this.endless = new Map();    // tabId -> { seen: Map(url -> time), pieces }: told apart from the pieces of a playlist or manifest
+  }
+
+  /**
+   * The pieces of an HLS or DASH stream can look like an endless response (MPEG-TS and WebM pieces sent in chunks have no length either).
+   * Not an endless stream: anything on a tab that plays a playlist; and several different addresses of the same format within moments
+   * (one live stream is one address, a stream cut into pieces is many). FLV is left alone: its quality changes are different addresses
+   * of one live stream, and nothing cuts an FLV into pieces.
+   */
+  acceptsEndless(tabId, url, format) {
+    if (format === 'flv') return true;
+    const items = [...(this.byTab.get(tabId)?.values() ?? [])];
+    if (items.some((i) => i.kind === 'master' || i.kind === 'media')) return false;
+
+    const state = this.endless.get(tabId) ?? { seen: new Map(), pieces: false };
+    this.endless.set(tabId, state);
+    if (state.pieces) return false;
+
+    const now = Date.now();
+    for (const [seenUrl, at] of state.seen) if (now - at > SEGMENT_WINDOW_MS) state.seen.delete(seenUrl);
+    state.seen.set(url, now);
+    if (state.seen.size < 2) return true;
+
+    state.pieces = true;   // these were pieces: forget the ones already listed
+    const listed = this.byTab.get(tabId);
+    if (listed) for (const [listedUrl, item] of listed) if (item.kind === 'record' && item.streamFormat !== 'flv') listed.delete(listedUrl);
+    this.onChange(tabId);
+    return false;
   }
 
   /** A response arrived: `details` is what webRequest.onHeadersReceived gives. */
@@ -150,10 +191,11 @@ export class MediaTracker {
 
     const contentType = (details.responseHeaders || []).find((h) => h?.name?.toLowerCase() === 'content-type')?.value;
 
-    // a live FLV pull is never read (it does not end): the address is all there is, and the app records it
-    if (looksLikeLiveFlv(details, contentType)) {
-      if (!this.byTab.get(tabId)?.has(url)) {
-        this.add(tabId, url, { kind: 'record', live: true, children: [], duration: 0, maxHeight: 0, referrer: details.documentUrl || details.initiator || '' });
+    // an endless live response is never read (it does not end): the address is all there is, and the app records it
+    const endless = liveStreamKind(details, contentType);
+    if (endless) {
+      if (this.acceptsEndless(tabId, url, endless) && !this.byTab.get(tabId)?.has(url)) {
+        this.add(tabId, url, { kind: 'record', streamFormat: endless, live: true, children: [], duration: 0, maxHeight: 0, referrer: details.documentUrl || details.initiator || '' });
       }
 
       return;
@@ -224,6 +266,7 @@ export class MediaTracker {
 
   clear(tabId) {
     this.looked.delete(tabId);
+    this.endless.delete(tabId);
     if (this.byTab.delete(tabId)) this.onChange(tabId);
   }
 }

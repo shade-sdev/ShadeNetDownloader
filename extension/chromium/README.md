@@ -64,6 +64,12 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   already).
 * **A try.** A hidden-address video on a site yt-dlp is not known for, with nothing found on the network, gets a button
   "Try to download this video": ShadeNet asks yt-dlp about the frame's own page, and the dialog says why if it cannot.
+* **Live streams.** A live stream that is a playlist (HLS, DASH) is recorded piece by piece. One that is a single endless response
+  (an FLV, MPEG-TS or WebM pull, as TikTok, Bilibili, Douyin and IPTV-style sites send) has no length, so the extension lists it as a
+  "Live stream" and the app records it with ffmpeg until it ends or you press *Stop and save*. The pieces of a playlist stream are told
+  apart from an endless response (a playlist on the page, or several addresses of the same format within moments). A live page whose
+  stream cannot be seen this way falls back to asking yt-dlp (`lib/sites.js` lists the sites it knows), with your sign-in for that site
+  if the setting in *Settings > Browser* is on.
 * ShadeNet can be started by the extension: if it is not running, the host launches it minimized.
 
 Settings that apply are set in the app (Settings → Browser integration): capturing on/off, ask first or start right
