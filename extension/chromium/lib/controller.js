@@ -427,9 +427,14 @@ export class Controller {
   /** The videos of this tab that are downloaded by giving their PAGE to yt-dlp. */
   pageItems(tab, name, haveOthers) {
     const pages = [];
-    const add = (url, title, guess = false) => {
-      if (!url || pages.some((p) => p.url === url)) return;
-      pages.push({ url, kind: 'page', live: false, protected: false, duration: 0, maxHeight: 0, title, guess, quality: guess ? 'ShadeNet will try' : 'qualities chosen in ShadeNet' });
+    const add = (url, title, guess = false, live = false) => {
+      if (!url) return;
+      const known = pages.find((p) => p.url === url);
+      if (known) {
+        known.live ||= live;
+        return;
+      }
+      pages.push({ url, kind: 'page', live, protected: false, duration: 0, maxHeight: 0, title, guess, quality: guess ? 'ShadeNet will try' : 'qualities chosen in ShadeNet' });
     };
 
     if (isVideoPage(tab.url)) add(tab.url, name);
@@ -441,11 +446,12 @@ export class Controller {
 
       for (const v of videos) {
         if (!v.blob || v.drm) continue;   // protected players are left alone on purpose
+        // A live stream has no page of its own to link to: the page it plays on (a user's /live page) is its address.
         const address = acceptPageAddress(v.permalink, this.extraSites)
-          || (isPageSite(tab.url, this.extraSites) && looksLikeOneVideo(tab.url) ? tab.url : '');
+          || (isPageSite(tab.url, this.extraSites) && (looksLikeOneVideo(tab.url) || v.live) ? acceptPageAddress(tab.url, this.extraSites) : '');
         const title = v.title ? cleanTitle(v.title) : name;
         if (address) {
-          add(address, title);
+          add(address, title, false, v.live);
         } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && /^https?:\/\//i.test(frameUrl)) {
           // a site yt-dlp is not known for, and nothing on the network that names the video: the frame's own page is the one thing
           // left to try. It may not work; the button says so, and the dialog explains if yt-dlp cannot read it.
@@ -509,6 +515,7 @@ export class Controller {
       width: Number.isFinite(v?.width) ? v.width : 0,
       height: Number.isFinite(v?.height) ? v.height : 0,
       blob: !!v?.blob,
+      live: !!v?.live,
       drm: !!v?.drm,
       permalink: String(v?.permalink ?? '').slice(0, 2000),
       box: Array.isArray(v?.box) ? v.box.slice(0, 2).map((n) => (Number.isFinite(n) ? n : 0)) : [0, 0],

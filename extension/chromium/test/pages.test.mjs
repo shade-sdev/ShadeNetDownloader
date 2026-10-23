@@ -146,3 +146,36 @@ test('what makes a video a decoy is its size and see-through-ness, never its add
   assert.equal(isDecoyVideo({ src: 'https://x.example/v.mp4' }), false);  // an older page script that reports no size
   assert.equal(isDecoyVideo(null), false);
 });
+
+// ---- live streams: a player that feeds a buffer and never ends (TikTok, Instagram, Facebook, X ... any site yt-dlp reads) ----
+
+const liveVideo = (extra = {}) => blobVideo({ title: 'Going live', src: 'blob:https://www.tiktok.com/live-1', blob: true, live: true, duration: 0, ...extra });
+
+test('a live page of a known site gets a button that records it, whatever its address looks like', async () => {
+  for (const page of ['https://www.tiktok.com/@scout2015/live', 'https://www.instagram.com/someone/live/', 'https://www.facebook.com/someone/live', 'https://x.com/i/broadcasts/1yNGaQZEoQBGj']) {
+    const t = setup({ title: 'Live', url: page });
+    const answer = await t.controller.onPageVideos(from(t, page), [liveVideo()]);
+    assert.deepEqual(answer.items.map((i) => [i.kind, i.url, i.live]), [['page', page, true]], page);
+  }
+});
+
+test('a live page that is not on a site yt-dlp is known for gets no button', async () => {
+  const t = setup({ title: 'Live', url: 'https://unknown.example/someone/live' });
+  const answer = await t.controller.onPageVideos(from(t, 'https://unknown.example/someone/live'), [liveVideo()]);
+  assert.equal(answer.items.filter((i) => i.kind === 'page' && !i.guess).length, 0);
+});
+
+test('a feed video that is not live still needs its own address (the front page is not a video)', async () => {
+  const t = setup({ title: 'TikTok', url: 'https://www.tiktok.com/' });
+  const answer = await t.controller.onPageVideos(from(t, 'https://www.tiktok.com/'), [liveVideo({ live: false })]);
+  assert.equal(answer.items.length, 0);
+});
+
+test('live addresses look like one video; the bare /live front door of a site does not', () => {
+  assert.equal(looksLikeOneVideo('https://www.tiktok.com/@scout2015/live'), true);
+  assert.equal(looksLikeOneVideo('https://www.instagram.com/someone/live/'), true);
+  assert.equal(looksLikeOneVideo('https://www.facebook.com/live/producer/12345'), true);
+  assert.equal(looksLikeOneVideo('https://x.com/i/broadcasts/1yNGaQZEoQBGj'), true);
+  assert.equal(looksLikeOneVideo('https://www.tiktok.com/live'), false);
+  assert.equal(looksLikeOneVideo('https://www.twitch.tv/live/'), false);
+});

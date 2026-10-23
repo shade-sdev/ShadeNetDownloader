@@ -196,6 +196,7 @@ public static partial class YtDlp
 
             var options = live ? new List<YtDlpOption>() : BuildDirect(formats);
             if (options.Count == 0) options = BuildHls(formats);
+            if (options.Count == 0) options = BuildDash(formats);   // live or not: Facebook, Instagram, X ... may offer nothing else
             if (options.Count == 0) throw new DownloadException(JobErrorKind.Unsupported, "yt-dlp found nothing downloadable on this page.");
 
             return new YtDlpInfo(title, seconds, live, options.OrderByDescending(o => o.Height).ToList());
@@ -217,12 +218,13 @@ public static partial class YtDlp
     private static partial System.Text.RegularExpressions.Regex SiteSuffix();
 
     sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent, double Quality = 0,
-        string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null)
+        string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null, string? ManifestUrl = null)
     {
         public bool HasVideo => VCodec != "none" && VCodec.Length > 0;
         public bool HasAudio => ACodec != "none" && ACodec.Length > 0;
         public bool IsFile => Protocol is "https" or "http";
         public bool IsHls => Protocol.StartsWith("m3u8", StringComparison.Ordinal);
+        public bool IsDash => Protocol == "http_dash_segments";
 
         public static Format? From(JsonElement f)
         {
@@ -244,7 +246,7 @@ public static partial class YtDlp
             if (vcodec == null && acodec == null && ext is "mp4" or "webm" or "mkv" or "mov" or "flv" or "m4v") (vcodec, acodec) = ("unknown", "unknown");
             return new Format(Str(f, "format_id") ?? "", url, Str(f, "protocol") ?? "", ext, vcodec ?? "none", acodec ?? "none",
                 (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua, Num(f, "quality"),
-                referer, CookieHeaderFrom(Str(f, "cookies")), extra);
+                referer, CookieHeaderFrom(Str(f, "cookies")), extra, Str(f, "manifest_url"));
         }
     }
 
@@ -302,6 +304,17 @@ public static partial class YtDlp
         {
             var f = g.OrderByDescending(x => x.Tbr).First();
             return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, f.Url, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies, f.Headers);
+        }).ToList();
+
+    /// <summary>
+    /// A DASH presentation (yt-dlp lists every picture and sound of it as a format of its own, all pointing at one manifest): one
+    /// stream per manifest, which the stream engine reads itself (a live one is recorded until it ends, like a live playlist).
+    /// </summary>
+    static List<YtDlpOption> BuildDash(List<Format> formats) =>
+        formats.Where(f => f.IsDash && f.HasVideo).GroupBy(f => f.ManifestUrl ?? f.Url).Select(g =>
+        {
+            var f = g.OrderByDescending(x => x.Height).ThenByDescending(x => x.Tbr).First();
+            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, g.Key, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies, f.Headers);
         }).ToList();
 
     static string FormatSize(long bytes) =>

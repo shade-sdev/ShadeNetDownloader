@@ -102,6 +102,51 @@ public class YtDlpTests
         Assert.Equal("https://site.example/p", option.Referer);
     }
 
+    /// <summary>A TikTok live as yt-dlp lists it: an endless FLV and an HLS stream of each quality (the shape of its extractor's answer).</summary>
+    [Fact]
+    public void A_live_stream_is_offered_as_its_hls_stream_per_quality_with_the_sites_headers()
+    {
+        const string json = """
+            { "title": "someone is live", "is_live": true, "formats": [
+              { "format_id": "flv-sd", "ext": "flv", "protocol": "https", "url": "https://pull.example/sd.flv", "vcodec": "h264", "height": 540 },
+              { "format_id": "hls-sd", "ext": "mp4", "protocol": "m3u8_native", "url": "https://pull.example/sd.m3u8", "vcodec": "h264", "height": 540, "tbr": 800,
+                "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@someone/live" }, "cookies": "k=v; Domain=.example; Path=/" },
+              { "format_id": "hls-hd", "ext": "mp4", "protocol": "m3u8_native", "url": "https://pull.example/hd.m3u8", "vcodec": "h264", "height": 720, "tbr": 1500,
+                "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@someone/live" }, "cookies": "k=v; Domain=.example; Path=/" }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.True(info.IsLive);
+        Assert.Equal(new[] { "https://pull.example/hd.m3u8", "https://pull.example/sd.m3u8" }, info.Options.Select(o => o.VideoUrl));   // best first; the endless FLV is not a file to fetch
+        Assert.All(info.Options, o => Assert.True(o.IsHls));
+        Assert.Equal(("https://www.tiktok.com/@someone/live", "k=v"), (info.Options[0].Referer, info.Options[0].Cookies));
+    }
+
+    /// <summary>Facebook, Instagram, X: a live (or not) video that comes as a DASH manifest and nothing else.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_dash_only_video_is_one_stream_per_manifest(bool live)
+    {
+        var json = $$"""
+            { "title": "Going live", "is_live": {{(live ? "true" : "false")}}, "formats": [
+              { "format_id": "v1", "ext": "mp4", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "avc1.64001f", "acodec": "none", "height": 720, "tbr": 1500 },
+              { "format_id": "v2", "ext": "mp4", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "avc1.4d401e", "acodec": "none", "height": 480, "tbr": 700 },
+              { "format_id": "a1", "ext": "m4a", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 64 }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.Equal(live, info.IsLive);
+        var option = Assert.Single(info.Options);
+        Assert.Equal("https://dash.example/live.mpd", option.VideoUrl);       // the manifest: the engine reads the qualities and the sound from it
+        Assert.True(option.IsHls);
+        Assert.Equal(720, option.Height);
+    }
+
     [Fact]
     public void Formats_without_headers_or_cookies_carry_none()
     {

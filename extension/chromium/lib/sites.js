@@ -25,12 +25,12 @@ export function isPageSite(url, extra = []) {
 
 /**
  * Is this the address of ONE video (what yt-dlp can read), and not a feed or the front page? An address that has an id
- * after /videos/, /reel/, /status/ ... or a `v=` parameter is one.
+ * after /videos/, /reel/, /status/, /live/ ... , a user's own /live page, or a `v=` parameter is one.
  */
 export function looksLikeOneVideo(url) {
   try {
     const u = new URL(url);
-    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch)\/[^/?#]+/i.test(u.pathname) && !/^\/watch\/?$/i.test(u.pathname))
+    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$/i.test(u.pathname) && !/^\/(watch|live)\/?$/i.test(u.pathname))
       || u.searchParams.has('v')
       || /permalink\.php|\/video\.php/i.test(u.pathname);
   } catch {
