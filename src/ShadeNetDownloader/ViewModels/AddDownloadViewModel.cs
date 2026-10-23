@@ -548,8 +548,10 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         return Links.Select(url => (new AddDownloadRequest
         {
             Url = source?.VideoUrl ?? url,
-            Referer = source != null ? null : referer,
-            Cookies = source != null ? null : cookies,
+            // the files behind a page: what yt-dlp itself was told to send for them (some sites answer 403 without it),
+            // never the browser's own session
+            Referer = source != null ? source.Referer : referer,
+            Cookies = source != null ? source.Cookies : cookies,
             UserAgent = source?.UserAgent ?? (IsCapturedLink(url) ? _capture!.UserAgent : null),
             Headers = IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
             FileName = single && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,

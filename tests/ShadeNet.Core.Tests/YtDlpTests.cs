@@ -55,6 +55,43 @@ public class YtDlpTests
         Assert.All(info.Options, o => Assert.False(o.IsHls));
     }
 
+    /// <summary>TikTok: one file with picture and sound; its server wants the page as referrer and the cookies yt-dlp got (403 without).</summary>
+    const string TikTok = """
+        {
+          "title": "send this to someone",
+          "duration": 11,
+          "formats": [
+            { "format_id": "h264_540p", "ext": "mp4", "protocol": "https", "url": "https://v16.tiktokcdn.example/video/tos/abc/", "vcodec": "h264", "acodec": "aac", "height": 1024, "tbr": 900,
+              "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@scout2015/video/6718335390845095173", "Accept": "*/*" },
+              "cookies": "tt_chain_token=\"abc\\075\\075\"; Domain=.tiktokcdn.example; Path=/; Secure; sid_tt=plain; Domain=.tiktokcdn.example; Path=/; Expires=1790000000" }
+          ]
+        }
+        """;
+
+    [Fact]
+    public void The_referrer_and_cookies_yt_dlp_names_for_a_file_travel_with_it()
+    {
+        var option = Assert.Single(YtDlp.ParseInfo(TikTok).Options);
+
+        Assert.Equal("https://www.tiktok.com/@scout2015/video/6718335390845095173", option.Referer);
+        Assert.Equal("tt_chain_token=abc==; sid_tt=plain", option.Cookies);        // no attributes, the quotes and the octal escapes undone
+        Assert.Equal("UA/1", option.UserAgent);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("Secure; Path=/", null)]
+    [InlineData("a=1; Domain=.x.com; Path=/; Secure; b=2", "a=1; b=2")]
+    [InlineData("a=\"x\\\"y\"; b=\"p\\\\q\"", "a=x\"y; b=p\\q")]
+    public void Cookies_are_written_as_a_request_header(string? yt, string? header) => Assert.Equal(header, YtDlp.CookieHeaderFrom(yt));
+
+    [Fact]
+    public void Formats_without_headers_or_cookies_carry_none()
+    {
+        Assert.All(YtDlp.ParseInfo(Sample).Options, o => Assert.Equal((null, null), (o.Referer, o.Cookies)));
+    }
+
     [Fact]
     public void Files_with_picture_and_sound_together_are_used_when_nothing_is_split()
     {
