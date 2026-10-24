@@ -7,7 +7,7 @@ namespace ShadeNetDownloader.Controls;
 /// <summary>
 /// A slim rounded progress bar drawn in one pass. Progress glides between updates (the engine reports 4×/s) and an
 /// indeterminate mode sweeps a highlight for downloads of unknown size. Animation is skipped when Windows asks for
-/// reduced motion.
+/// reduced motion (or the user turned motion off in Settings > Appearance).
 /// </summary>
 public sealed class ProgressTrack : FrameworkElement
 {
@@ -90,7 +90,7 @@ public sealed class ProgressTrack : FrameworkElement
         var target = Math.Clamp((double)e.NewValue, 0, 1);
 
         // Jumps backwards (restart) and first paint are instant; forward progress glides.
-        if (!bar.IsLoaded || target < bar.Shown || !SystemParameters.ClientAreaAnimation)
+        if (!bar.IsLoaded || target < bar.Shown || !ShadeNetDownloader.Services.Motion.Allowed)
         {
             bar.BeginAnimation(ShownProperty, null);
             bar.Shown = target;
@@ -108,7 +108,7 @@ public sealed class ProgressTrack : FrameworkElement
 
     void UpdateSweep()
     {
-        if (IsIndeterminate && IsVisible && IsLoaded && SystemParameters.ClientAreaAnimation)
+        if (IsIndeterminate && IsVisible && IsLoaded && ShadeNetDownloader.Services.Motion.Allowed)
         {
             BeginAnimation(SweepProperty, new DoubleAnimation(-0.4, 1.0, TimeSpan.FromSeconds(1.4))
             {

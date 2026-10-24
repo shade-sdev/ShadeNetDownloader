@@ -59,6 +59,8 @@ public sealed class SettingsService
         loaded.Engine.Normalize();
         loaded.Appearance ??= new AppearanceSettings();
         loaded.Appearance.Normalize();
+        loaded.Layout ??= new LayoutSettings();
+        loaded.Layout.Normalize();
         loaded.Engine.ToolsFolder = Path.Combine(DataDir, "tools");
 
         Current = loaded;

@@ -10,6 +10,9 @@ public interface IThemeApplier
 {
     void Apply(AppTheme theme, AppearanceSettings appearance);
 
+    /// <summary>Font, zoom, list density, corners and motion.</summary>
+    void ApplyLayout(LayoutSettings layout);
+
     /// <summary>Whether the dark palette is the one showing.</summary>
     bool IsDark { get; }
 
@@ -202,6 +205,95 @@ public sealed class AppThemeService : IThemeApplier
         var brush = new SolidColorBrush(colour);
         brush.Freeze();
         return brush;
+    }
+
+    // ---- text and layout ----
+
+    /// <summary>The key WPF-UI's controls take their font from.</summary>
+    const string FontKey = "ContentControlThemeFontFamily";
+
+    public void ApplyLayout(LayoutSettings layout)
+    {
+        var l = layout.Clone();
+        l.Normalize();
+        var resources = Application.Current?.Resources;
+        if (resources == null) return;
+
+        // the font: one that is installed, else the Windows one
+        var font = l.Font != null && IsInstalled(l.Font) ? new FontFamily(l.Font) : null;
+        if (font != null) resources[FontKey] = font;
+        else resources.Remove(FontKey);   // (only the one written here: WPF-UI's own lives in its dictionary)
+        if (_window != null)
+        {
+            if (font != null) _window.FontFamily = font;
+            else _window.ClearValue(Window.FontFamilyProperty);
+
+            // the size of everything: the window's content is scaled (it lays itself out again at the new size)
+            if (_window.Content is FrameworkElement root)
+                root.LayoutTransform = Math.Abs(l.Zoom - 1) < 0.001 ? Transform.Identity : new ScaleTransform(l.Zoom, l.Zoom);
+        }
+
+        // the room each download gets in the list, and the height of the sidebar's items
+        var (padding, gap, navHeight) = l.Density switch
+        {
+            ListDensity.Compact => (new Thickness(12, 8, 10, 8), new Thickness(0, 0, 0, 4), 32.0),
+            ListDensity.Spacious => (new Thickness(20, 18, 16, 18), new Thickness(0, 0, 0, 12), 42.0),
+            _ => (new Thickness(16, 14, 12, 14), new Thickness(0, 0, 0, 8), 38.0),
+        };
+        resources["DownloadCardPadding"] = padding;
+        resources["DownloadCardGap"] = gap;
+        resources["NavItemHeight"] = navHeight;
+
+        // corners: ours and WPF-UI's, scaled together
+        var f = l.CornerFactor;
+        resources["RadiusSm"] = new CornerRadius(4 * f);
+        resources["RadiusMd"] = new CornerRadius(8 * f);
+        resources["RadiusLg"] = new CornerRadius(12 * f);
+        resources["RadiusBadge"] = new CornerRadius(5 * f);
+        resources["CardRadius"] = new CornerRadius(10 * f);
+        resources["SheetRadius"] = new CornerRadius(12 * f);
+        resources["ControlCornerRadius"] = new CornerRadius(4 * f);
+        resources["OverlayCornerRadius"] = new CornerRadius(8 * f);
+
+        ApplyMotion(l.Motion);
+        Applied?.Invoke();
+    }
+
+    /// <summary>
+    /// Whether things move. Animations already on screen keep the timing they were made with, so this is also called before
+    /// the window is created (App start-up); what is made afterwards follows at once.
+    /// </summary>
+    public static void ApplyMotion(MotionLevel level)
+    {
+        Motion.Level = level;
+        var resources = Application.Current?.Resources;
+        if (resources == null) return;
+        if (Motion.Allowed)
+        {
+            resources.Remove("MotionFast");   // the tokens' own durations show again
+            resources.Remove("MotionBase");
+        }
+        else
+        {
+            resources["MotionFast"] = new Duration(TimeSpan.Zero);
+            resources["MotionBase"] = new Duration(TimeSpan.Zero);
+        }
+    }
+
+    static HashSet<string>? _installedFonts;
+
+    /// <summary>The names of the font families installed, sorted (read once).</summary>
+    public static IReadOnlyCollection<string> InstalledFonts()
+    {
+        _installedFonts ??= new HashSet<string>(
+            Fonts.SystemFontFamilies.Select(f => f.Source).Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
+        return _installedFonts.OrderBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    static bool IsInstalled(string name)
+    {
+        InstalledFonts();
+        return _installedFonts!.Contains(name);
     }
 
     /// <summary>The colour a theme brush (or colour) has right now, set by hand or the theme's own; null when it is no plain colour.</summary>

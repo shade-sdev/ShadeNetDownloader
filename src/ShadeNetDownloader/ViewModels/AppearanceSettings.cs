@@ -446,6 +446,92 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         set => SetNumber(Model.ImageDim, Math.Clamp(value, 0, AppearanceSettings.MaxDim * 100) / 100, v => Model.ImageDim = v);
     }
 
+    // ---- text and layout (kept apart from the look: a preset never changes them) ----
+
+    LayoutSettings Layout => _settings.Current.Layout;
+
+    public const string WindowsFont = "Windows font (Segoe UI)";
+    IReadOnlyList<string>? _fonts;
+
+    /// <summary>The Windows font first, then every font installed (read when the list is first opened).</summary>
+    public IReadOnlyList<string> FontChoices => _fonts ??= new[] { WindowsFont }.Concat(AppThemeService.InstalledFonts()).ToList();
+
+    public string SelectedFont
+    {
+        get => Layout.Font ?? WindowsFont;
+        set
+        {
+            var font = string.IsNullOrWhiteSpace(value) || value == WindowsFont ? null : value.Trim();
+            if (string.Equals(font, Layout.Font, StringComparison.OrdinalIgnoreCase)) return;
+            Layout.Font = font;
+            ApplyLayout();
+        }
+    }
+
+    /// <summary>The size of everything in per cent, in steps of 5.</summary>
+    public double ZoomPercent
+    {
+        get => Math.Round(Layout.Zoom * 100);
+        set
+        {
+            var zoom = Math.Round(Math.Clamp(value, LayoutSettings.MinZoom * 100, LayoutSettings.MaxZoom * 100) / 5) * 5 / 100;
+            if (Math.Abs(zoom - Layout.Zoom) < 0.001) return;
+            Layout.Zoom = zoom;
+            ApplyLayout();
+        }
+    }
+
+    [RelayCommand]
+    void ResetZoom() => ZoomPercent = 100;
+
+    public bool IsCompact { get => Layout.Density == ListDensity.Compact; set { if (value) SetDensity(ListDensity.Compact); } }
+    public bool IsComfortable { get => Layout.Density == ListDensity.Comfortable; set { if (value) SetDensity(ListDensity.Comfortable); } }
+    public bool IsSpacious { get => Layout.Density == ListDensity.Spacious; set { if (value) SetDensity(ListDensity.Spacious); } }
+
+    void SetDensity(ListDensity density)
+    {
+        if (Layout.Density == density) return;
+        Layout.Density = density;
+        ApplyLayout();
+    }
+
+    public bool IsSquare { get => Layout.Corners == Roundness.Square; set { if (value) SetCorners(Roundness.Square); } }
+    public bool IsSubtle { get => Layout.Corners == Roundness.Subtle; set { if (value) SetCorners(Roundness.Subtle); } }
+    public bool IsDefaultCorners { get => Layout.Corners == Roundness.Default; set { if (value) SetCorners(Roundness.Default); } }
+    public bool IsRound { get => Layout.Corners == Roundness.Round; set { if (value) SetCorners(Roundness.Round); } }
+
+    void SetCorners(Roundness corners)
+    {
+        if (Layout.Corners == corners) return;
+        Layout.Corners = corners;
+        ApplyLayout();
+    }
+
+    public bool IsMotionSystem { get => Layout.Motion == MotionLevel.System; set { if (value) SetMotion(MotionLevel.System); } }
+    public bool IsMotionOn { get => Layout.Motion == MotionLevel.On; set { if (value) SetMotion(MotionLevel.On); } }
+    public bool IsMotionOff { get => Layout.Motion == MotionLevel.Off; set { if (value) SetMotion(MotionLevel.Off); } }
+
+    void SetMotion(MotionLevel motion)
+    {
+        if (Layout.Motion == motion) return;
+        Layout.Motion = motion;
+        ApplyLayout();
+    }
+
+    [RelayCommand]
+    void ResetLayout()
+    {
+        _settings.Current.Layout = new LayoutSettings();
+        ApplyLayout();
+    }
+
+    void ApplyLayout()
+    {
+        _theme.ApplyLayout(Layout);
+        Refresh();
+        SaveSoon();
+    }
+
     // ---- state colours and the palette ----
 
     void SetColour(Dictionary<string, string> colours, string key, string? value)
@@ -520,6 +606,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                          nameof(HasTint), nameof(TintColor), nameof(UseGradient), nameof(Tint2Color), nameof(TintAngle), nameof(TintStrength),
                          nameof(HasImage), nameof(ImageName), nameof(IsFitFill), nameof(IsFitFit), nameof(IsFitCenter), nameof(IsFitStretch),
                          nameof(ImageBlur), nameof(ImageDim),
+                         nameof(SelectedFont), nameof(ZoomPercent), nameof(IsCompact), nameof(IsComfortable), nameof(IsSpacious),
+                         nameof(IsSquare), nameof(IsSubtle), nameof(IsDefaultCorners), nameof(IsRound),
+                         nameof(IsMotionSystem), nameof(IsMotionOn), nameof(IsMotionOff),
                      })
                 OnPropertyChanged(name);
 

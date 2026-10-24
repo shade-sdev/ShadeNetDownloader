@@ -460,3 +460,83 @@ public static class ThemePresets
 
     public static ThemePreset? Find(string? id) => All.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
 }
+
+/// <summary>How much room the download list gives each download.</summary>
+public enum ListDensity
+{
+    Compact,
+    Comfortable,
+    Spacious,
+}
+
+/// <summary>How round corners are, from square to very round.</summary>
+public enum Roundness
+{
+    Square,
+    Subtle,
+    Default,
+    Round,
+}
+
+/// <summary>Whether things move: like Windows ("Animation effects"), always, or never.</summary>
+public enum MotionLevel
+{
+    System,
+    On,
+    Off,
+}
+
+/// <summary>
+/// Text and layout: the font, the size of everything, the room the list gives each download, how round corners are and
+/// whether things move. Kept apart from the look's colours, so choosing a preset never changes them.
+/// </summary>
+public sealed class LayoutSettings
+{
+    /// <summary>The font family's name; null = the Windows font (Segoe UI).</summary>
+    public string? Font { get; set; }
+
+    /// <summary>The size of everything, from <see cref="MinZoom"/> to <see cref="MaxZoom"/> (1 = 100 %).</summary>
+    public double Zoom { get; set; } = 1;
+
+    public ListDensity Density { get; set; } = ListDensity.Comfortable;
+    public Roundness Corners { get; set; } = Roundness.Default;
+    public MotionLevel Motion { get; set; } = MotionLevel.System;
+
+    public const double MinZoom = 0.8;
+    public const double MaxZoom = 1.5;
+
+    public LayoutSettings Clone() => (LayoutSettings)MemberwiseClone();
+
+    /// <summary>Puts every value in range (a hand-edited or shared file never breaks the app).</summary>
+    public void Normalize()
+    {
+        Font = string.IsNullOrWhiteSpace(Font) ? null : Font.Trim();
+        if (Font is { Length: > 100 }) Font = null;
+        Zoom = double.IsFinite(Zoom) ? Math.Round(Math.Clamp(Zoom, MinZoom, MaxZoom) * 20) / 20 : 1;   // steps of 5 %
+        if (!Enum.IsDefined(Density)) Density = ListDensity.Comfortable;
+        if (!Enum.IsDefined(Corners)) Corners = Roundness.Default;
+        if (!Enum.IsDefined(Motion)) Motion = MotionLevel.System;
+    }
+
+    /// <summary>How much corners are scaled from the theme's own.</summary>
+    public double CornerFactor => Corners switch
+    {
+        Roundness.Square => 0,
+        Roundness.Subtle => 0.5,
+        Roundness.Round => 1.6,
+        _ => 1,
+    };
+}
+
+/// <summary>Whether animations play, as the user chose (in the System choice, as Windows says).</summary>
+public static class Motion
+{
+    public static MotionLevel Level { get; set; } = MotionLevel.System;
+
+    public static bool Allowed => Level switch
+    {
+        MotionLevel.On => true,
+        MotionLevel.Off => false,
+        _ => System.Windows.SystemParameters.ClientAreaAnimation,
+    };
+}

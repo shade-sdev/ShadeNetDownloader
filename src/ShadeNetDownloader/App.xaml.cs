@@ -63,6 +63,7 @@ public partial class App : Application
         // SHADENET_DATA_DIR lets tests and screenshots run against a throw-away data folder.
         var settings = new SettingsService(Environment.GetEnvironmentVariable("SHADENET_DATA_DIR"));
         settings.Load();
+        AppThemeService.ApplyMotion(settings.Current.Layout.Motion);   // (before any window: animations take their timing when made)
 
         DispatcherUnhandledException += (_, args) => OnUnhandled(settings, args);
 

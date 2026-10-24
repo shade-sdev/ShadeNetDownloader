@@ -33,6 +33,14 @@ sealed class FakeTheme : IThemeApplier
         return ThemeColours.TryGetValue(key, out var c) ? c : null;
     }
 
+    public List<LayoutSettings> LayoutCalls { get; } = new();
+
+    public void ApplyLayout(LayoutSettings layout)
+    {
+        LayoutCalls.Add(layout.Clone());
+        Applied?.Invoke();
+    }
+
     public event Action? Applied;
 }
 
@@ -432,5 +440,100 @@ public class AppearanceTests
         Assert.False(layer.HasTint);
         Assert.False(layer.HasImage);
         Assert.NotNull(layer.ImageError);
+    }
+
+    // ---- stage 3: text and layout ----
+
+    [Fact]
+    public void Layout_values_are_kept_in_range()
+    {
+        var layout = new LayoutSettings { Font = "  Cascadia Code ", Zoom = 3, Density = (ListDensity)42, Corners = (Roundness)(-1), Motion = (MotionLevel)9 };
+        layout.Normalize();
+        Assert.Equal("Cascadia Code", layout.Font);
+        Assert.Equal(LayoutSettings.MaxZoom, layout.Zoom);
+        Assert.Equal(ListDensity.Comfortable, layout.Density);
+        Assert.Equal(Roundness.Default, layout.Corners);
+        Assert.Equal(MotionLevel.System, layout.Motion);
+
+        layout.Zoom = 1.123;
+        layout.Normalize();
+        Assert.Equal(1.1, layout.Zoom, 3);   // steps of 5 %
+        layout.Font = " ";
+        layout.Normalize();
+        Assert.Null(layout.Font);
+    }
+
+    [Fact]
+    public void Size_density_corners_and_motion_are_applied_and_remembered()
+    {
+        var (page, theme, settings, _, dir) = Page();
+        using var _d = dir;
+
+        page.ZoomPercent = 127;   // to the nearest 5 %
+        Assert.Equal(125, page.ZoomPercent);
+        Assert.Equal(1.25, theme.LayoutCalls.Last().Zoom, 3);
+
+        page.IsCompact = true;
+        page.IsSquare = true;
+        page.IsMotionOff = true;
+        Assert.Equal(ListDensity.Compact, theme.LayoutCalls.Last().Density);
+        Assert.Equal(0, theme.LayoutCalls.Last().CornerFactor);
+        Assert.Equal(MotionLevel.Off, theme.LayoutCalls.Last().Motion);
+        Assert.True(page.IsCompact && page.IsSquare && page.IsMotionOff);
+
+        var reloaded = new SettingsService(dir.Path);
+        reloaded.Load();
+        Assert.Equal(1.25, reloaded.Current.Layout.Zoom, 3);
+        Assert.Equal(ListDensity.Compact, reloaded.Current.Layout.Density);
+
+        page.ResetLayoutCommand.Execute(null);
+        Assert.Equal(100, page.ZoomPercent);
+        Assert.True(page.IsComfortable && page.IsDefaultCorners && page.IsMotionSystem);
+    }
+
+    [Fact]
+    public void A_preset_never_changes_text_and_layout_and_layout_never_makes_a_look_custom()
+    {
+        var (page, _, settings, _, dir) = Page();
+        using var _d = dir;
+        page.IsSpacious = true;
+        page.ZoomPercent = 110;
+
+        page.ApplyPresetCommand.Execute(page.Presets.Single(p => p.Preset.Id == "nord"));
+        Assert.Equal(ListDensity.Spacious, settings.Current.Layout.Density);
+        Assert.Equal(1.1, settings.Current.Layout.Zoom, 3);
+
+        page.IsRound = true;
+        Assert.Equal("nord", settings.Current.Appearance.Preset);
+    }
+
+    [Fact]
+    public void The_windows_font_comes_first_and_choosing_it_clears_the_font()
+    {
+        var (page, _, settings, _, dir) = Page();
+        using var _d = dir;
+        Assert.Equal(AppearanceSettingsViewModel.WindowsFont, page.FontChoices[0]);
+        Assert.Equal(AppearanceSettingsViewModel.WindowsFont, page.SelectedFont);
+
+        page.SelectedFont = "Consolas";
+        Assert.Equal("Consolas", settings.Current.Layout.Font);
+        page.SelectedFont = AppearanceSettingsViewModel.WindowsFont;
+        Assert.Null(settings.Current.Layout.Font);
+    }
+
+    [Fact]
+    public void Motion_follows_the_choice()
+    {
+        try
+        {
+            AppThemeService.ApplyMotion(MotionLevel.Off);
+            Assert.False(Motion.Allowed);
+            AppThemeService.ApplyMotion(MotionLevel.On);
+            Assert.True(Motion.Allowed);
+        }
+        finally
+        {
+            AppThemeService.ApplyMotion(MotionLevel.System);
+        }
     }
 }

@@ -46,6 +46,7 @@ public partial class MainWindow : FluentWindow
         BackgroundLayerHost.DataContext = theme.Layer;
         theme.Attach(this);
         theme.Apply(settings.Current.Theme, settings.Current.Appearance);
+        theme.ApplyLayout(settings.Current.Layout);
 
         // The limit flyout sits above its button with the right edges aligned (the button is at the window's right edge,
         // so a centred popup would hang outside the window). 14 = the transparent margin around the popup's card.

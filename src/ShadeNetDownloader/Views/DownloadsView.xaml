@@ -56,7 +56,7 @@
 
         <!-- one download card -->
         <DataTemplate x:Key="DownloadCard" DataType="{x:Type vm:DownloadItemViewModel}">
-            <Border x:Name="Card" Margin="0,0,0,8" Padding="16,14,12,14" CornerRadius="10" BorderThickness="1"
+            <Border x:Name="Card" Margin="{DynamicResource DownloadCardGap}" Padding="{DynamicResource DownloadCardPadding}" CornerRadius="{DynamicResource CardRadius}" BorderThickness="1"
                     Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                     SnapsToDevicePixels="True">
@@ -86,7 +86,7 @@
                                        VerticalAlignment="Center" />
 
                             <!-- status chip -->
-                            <Border x:Name="Chip" Grid.Column="1" Margin="12,0,0,0" Padding="9,2" CornerRadius="{StaticResource RadiusBadge}"
+                            <Border x:Name="Chip" Grid.Column="1" Margin="12,0,0,0" Padding="9,2" CornerRadius="{DynamicResource RadiusBadge}"
                                     Background="{DynamicResource SubtleFillColorSecondaryBrush}">
                                 <TextBlock x:Name="ChipText" Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />

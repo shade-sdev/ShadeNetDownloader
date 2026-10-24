@@ -960,6 +960,109 @@
                             </StackPanel>
                         </Border>
 
+                        <Grid Margin="2,16,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Text and layout" Style="{StaticResource SectionTitle}" Margin="0" VerticalAlignment="Bottom" />
+                            <ui:Button Grid.Column="1" Content="Reset" Appearance="Transparent" Padding="10,3"
+                                       Command="{Binding ResetLayoutCommand}" ToolTip="Back to the Windows font, 100 %, comfortable, default corners, motion like Windows" />
+                        </Grid>
+
+                        <ui:CardControl Icon="{ui:SymbolIcon TextFont24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="Font" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}" Text="Any font installed on this computer." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <ComboBox Width="240" ItemsSource="{Binding FontChoices}" SelectedItem="{Binding SelectedFont, Mode=TwoWay}"
+                                      AutomationProperties.Name="Font" IsTextSearchEnabled="True">
+                                <ComboBox.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <VirtualizingStackPanel />
+                                    </ItemsPanelTemplate>
+                                </ComboBox.ItemsPanel>
+                            </ComboBox>
+                        </ui:CardControl>
+
+                        <ui:CardControl Icon="{ui:SymbolIcon ZoomIn24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="Size" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}" Text="Makes everything larger or smaller: text, icons and spacing." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <StackPanel Orientation="Horizontal">
+                                <Slider Width="200" Minimum="80" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                                        Value="{Binding ZoomPercent, Mode=TwoWay}" VerticalAlignment="Center" AutomationProperties.Name="Size" />
+                                <TextBlock Text="{Binding ZoomPercent, StringFormat={}{0:0} %}" Width="50" Margin="10,0,0,0"
+                                           VerticalAlignment="Center" TextAlignment="Right" />
+                                <ui:Button Content="100 %" Margin="8,0,0,0" Padding="10,4" Command="{Binding ResetZoomCommand}" />
+                            </StackPanel>
+                        </ui:CardControl>
+
+                        <ui:CardControl Icon="{ui:SymbolIcon AppsList24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="List density" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}" Text="How much room each download and each sidebar item takes." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton GroupName="density" Style="{StaticResource SegmentRadio}" MinWidth="70" Content="Compact"
+                                                 IsChecked="{Binding IsCompact, Mode=TwoWay}" />
+                                    <RadioButton GroupName="density" Style="{StaticResource SegmentRadio}" MinWidth="70" Content="Comfortable"
+                                                 IsChecked="{Binding IsComfortable, Mode=TwoWay}" />
+                                    <RadioButton GroupName="density" Style="{StaticResource SegmentRadio}" MinWidth="70" Content="Spacious"
+                                                 IsChecked="{Binding IsSpacious, Mode=TwoWay}" />
+                                </StackPanel>
+                            </Border>
+                        </ui:CardControl>
+
+                        <ui:CardControl Icon="{ui:SymbolIcon RectangleLandscape24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="Corners" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}" Text="Of cards, buttons, boxes and the content area." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton GroupName="corners" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Square"
+                                                 IsChecked="{Binding IsSquare, Mode=TwoWay}" />
+                                    <RadioButton GroupName="corners" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Subtle"
+                                                 IsChecked="{Binding IsSubtle, Mode=TwoWay}" />
+                                    <RadioButton GroupName="corners" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Default"
+                                                 IsChecked="{Binding IsDefaultCorners, Mode=TwoWay}" />
+                                    <RadioButton GroupName="corners" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Round"
+                                                 IsChecked="{Binding IsRound, Mode=TwoWay}" />
+                                </StackPanel>
+                            </Border>
+                        </ui:CardControl>
+
+                        <ui:CardControl Icon="{ui:SymbolIcon Sparkle24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="Motion" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}"
+                                               Text="Animations: as Windows says (Settings › Accessibility › Animation effects), always, or never. Some already on screen change after a restart." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton GroupName="motion" Style="{StaticResource SegmentRadio}" MinWidth="70" Content="Like Windows"
+                                                 IsChecked="{Binding IsMotionSystem, Mode=TwoWay}" />
+                                    <RadioButton GroupName="motion" Style="{StaticResource SegmentRadio}" MinWidth="56" Content="On"
+                                                 IsChecked="{Binding IsMotionOn, Mode=TwoWay}" />
+                                    <RadioButton GroupName="motion" Style="{StaticResource SegmentRadio}" MinWidth="56" Content="Off"
+                                                 IsChecked="{Binding IsMotionOff, Mode=TwoWay}" />
+                                </StackPanel>
+                            </Border>
+                        </ui:CardControl>
+
                         <TextBlock Text="Download states" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
                         <Border Padding="16,10" CornerRadius="8" Margin="0,0,0,8" BorderThickness="1"
                                 Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
