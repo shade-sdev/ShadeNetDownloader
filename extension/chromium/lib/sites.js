@@ -39,12 +39,15 @@ export function looksLikeOneVideo(url) {
 }
 
 /**
- * A <video> the page keeps out of sight: nearly see-through and tiny. Players load one to unlock autoplay or to measure things
- * (TikTok's 50 px `playback1.mp4`); it is not a video anybody wants, and listing it would hide the real one.
- * `box` is its size on the screen and `opacity` its see-through-ness, as the page's script reports them.
+ * A <video> the page keeps out of sight: one that takes no room on the screen at all (a player's hidden preview, Reddit's 96 px
+ * scrubbing clip), or one that is nearly see-through and tiny (a clip loaded to unlock autoplay, TikTok's 50 px `playback1.mp4`).
+ * It is not a video anybody wants, and listing it would hide the real one. `box` is its size on the screen and `opacity` its
+ * see-through-ness, as the page's script reports them; a report without them (an older page script) is never a decoy.
  */
 export function isDecoyVideo(video) {
-  const [width, height] = Array.isArray(video?.box) ? video.box : [0, 0];
+  if (!Array.isArray(video?.box)) return false;
+  const [width, height] = video.box;
+  if (width === 0 || height === 0) return true;
   const opacity = Number.isFinite(video?.opacity) ? video.opacity : 1;
   return opacity < 0.05 && Math.max(width, height) < 100;
 }

@@ -143,6 +143,7 @@ test('what makes a video a decoy is its size and see-through-ness, never its add
   assert.equal(isDecoyVideo({ box: [1, 1], opacity: 0 }), true);
   assert.equal(isDecoyVideo({ box: [432, 768], opacity: 0 }), false);     // a site that plays its video see-through
   assert.equal(isDecoyVideo({ box: [50, 50], opacity: 1 }), false);       // a small video that can be seen
+  assert.equal(isDecoyVideo({ box: [0, 0], opacity: 1 }), true);         // one that takes no room at all: a hidden preview
   assert.equal(isDecoyVideo({ src: 'https://x.example/v.mp4' }), false);  // an older page script that reports no size
   assert.equal(isDecoyVideo(null), false);
 });

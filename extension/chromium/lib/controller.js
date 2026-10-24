@@ -654,7 +654,7 @@ export class Controller {
       live: !!v?.live,
       drm: !!v?.drm,
       permalink: String(v?.permalink ?? '').slice(0, 2000),
-      box: Array.isArray(v?.box) ? v.box.slice(0, 2).map((n) => (Number.isFinite(n) ? n : 0)) : [0, 0],
+      box: Array.isArray(v?.box) ? v.box.slice(0, 2).map((n) => (Number.isFinite(n) ? n : 0)) : null,
       opacity: Number.isFinite(v?.opacity) ? v.opacity : 1,
     })).filter((v) => !isDecoyVideo(v));
 

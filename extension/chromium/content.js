@@ -28,16 +28,26 @@
   // ---- finding the videos ---------------------------------------------------------------------------------------
 
   // Players built as web components (Reddit's <shreddit-player>, ...) keep their <video> inside a shadow root, where the page's own
-  // element list does not reach. Open shadow roots are searched too; the hosts are looked up again at most every two seconds.
+  // element list does not reach. Shadow roots are searched too, closed ones as well (an extension may look into those); the hosts are
+  // looked up again at most every two seconds.
   let shadowHosts = [];
   let shadowCheckedAt = 0;
 
+  function shadowOf(el) {
+    try {
+      return el.shadowRoot ?? chrome.dom?.openOrClosedShadowRoot?.(el) ?? null;
+    } catch {
+      return null;   // not an element that can have one
+    }
+  }
+
   function hostsOf(root, depth, out) {
-    if (depth > 4) return;
+    if (depth > 6) return;
     for (const el of root.querySelectorAll('*')) {
-      if (el.shadowRoot) {
-        out.push(el.shadowRoot);
-        hostsOf(el.shadowRoot, depth + 1, out);
+      const shadow = el.tagName.includes('-') || el.shadowRoot ? shadowOf(el) : null;   // only custom elements (and a few built-ins) have one
+      if (shadow) {
+        out.push(shadow);
+        hostsOf(shadow, depth + 1, out);
       }
     }
   }
