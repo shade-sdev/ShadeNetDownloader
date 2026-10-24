@@ -132,8 +132,71 @@ export class Controller {
     this.overlayEnabled = true;  // the "Download" button on top of videos (the popup has the switch)
     this.pageVideos = new Map(); // tab id -> Map(frame id -> { url, videos }): what each frame (the page, or an iframe in it) reports
     this.extraSites = [];        // more sites whose pages yt-dlp may be asked about (the built-in list is in lib/sites.js)
+    this.unattributed = new Map(); // origin -> requests of service/shared workers that no tab could be given yet (see attribute)
     this.events = [];   // the last things that happened, for diagnosis ("why was my download not taken over?")
     this.ready = this.loadLocal();
+  }
+
+  /**
+   * A request made by a service worker or a shared worker belongs to no tab (the browser says tab -1), though a player may well fetch its
+   * playlist and pieces that way. Its `initiator` is the origin of the page that registered the worker, so it is given to the tab that
+   * shows that origin (a page or an iframe): at once when the tab is known, else kept for a minute and handed over when a frame of that
+   * origin reports its videos (see {@link adopt}). Returns the request to use, or `undefined` when it waits.
+   */
+  attribute(details) {
+    if (!details || (Number.isInteger(details.tabId) && details.tabId >= 0)) return details;
+    let origin;
+    try {
+      origin = new URL(details.initiator).origin;
+    } catch {
+      return undefined;   // not from a web page (the extension's own requests, for one)
+    }
+
+    if (!/^https?:/i.test(origin)) return undefined;
+    const tabId = this.tabShowing(origin);
+    if (tabId !== undefined) return { ...details, tabId };
+
+    const waiting = this.unattributed.get(origin) ?? [];
+    this.unattributed.set(origin, waiting);
+    waiting.push({ ...details, seenAt: Date.now() });
+    while (waiting.length > 60) waiting.shift();
+    return undefined;
+  }
+
+  /** The one tab with a frame at this origin (page or iframe) that has reported a video; none when there is none or more than one. */
+  tabShowing(origin) {
+    const found = new Set();
+    for (const [tabId, frames] of this.pageVideos) {
+      for (const { url } of frames.values()) {
+        try {
+          if (new URL(url).origin === origin) found.add(tabId);
+        } catch {
+          // not an address
+        }
+      }
+    }
+
+    return found.size === 1 ? [...found][0] : undefined;
+  }
+
+  /** A frame of this origin has reported its videos: what its workers asked for before that is theirs now. */
+  adopt(tabId, frameUrl) {
+    let origin;
+    try {
+      origin = new URL(frameUrl).origin;
+    } catch {
+      return;
+    }
+
+    const waiting = this.unattributed.get(origin);
+    if (!waiting || this.tabShowing(origin) !== tabId) return;
+    this.unattributed.delete(origin);
+    const fresh = waiting.filter((d) => Date.now() - d.seenAt < 60000);
+    for (const details of fresh) {
+      const mine = { ...details, tabId };
+      this.tracks.consider(mine);
+      this.media.consider(mine);
+    }
   }
 
   /**
@@ -166,10 +229,15 @@ export class Controller {
         + 'so there is nothing to join them with: the page may build the list itself, hide it, or protect the stream. ShadeNet does not work around that.');
     }
 
+    const waiting = [...this.unattributed].map(([origin, list]) => ({ origin, requests: list.length }));
+    if (waiting.length > 0) {
+      notes.push('Requests made by a service worker or shared worker could not be given to any tab (no tab shows the page that started them): see "workerRequestsWaiting".');
+    }
+
     if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
     if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
 
-    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, recentRequests: requests }, null, 2);
+    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
   }
 
   /** Keeps the last 40 steps, newest last. Never throws. */
@@ -213,6 +281,8 @@ export class Controller {
     // video streams the page plays, for the popup's "Videos on this page" list
     c.webRequest?.onHeadersReceived?.addListener(
       (details) => {
+        details = this.attribute(details);
+        if (!details) return undefined;
         this.tracks.consider(details);
         return this.media.consider(details);
       },
@@ -563,6 +633,7 @@ export class Controller {
     const before = JSON.stringify([...frames.entries()]);
     frames.set(sender.frameId ?? 0, { url: String(sender.url ?? tab.url ?? ''), videos: clean });
     this.pageVideos.set(tab.id, frames);
+    this.adopt(tab.id, String(sender.url ?? tab.url ?? ''));
     if (JSON.stringify([...frames.entries()]) !== before) this.updateMediaBadge(tab.id);
 
     return { items: shownItems(await this.itemsFor(tab)), overlay: this.overlayEnabled };

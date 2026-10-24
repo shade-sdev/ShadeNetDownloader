@@ -264,3 +264,43 @@ test('diagnose says plainly when the player asked for pieces but never for a pla
   assert.ok(!JSON.stringify(report).includes('t=x'));                                    // no query string (it can hold a token) unless asked for
   assert.ok(JSON.stringify(JSON.parse(await t.controller.diagnose({ full: true }))).includes('t=x'));
 });
+
+// ---- a player that fetches through a service worker or shared worker (the browser gives such requests no tab) ----
+const settle = () => new Promise((r) => setTimeout(r, 5));
+
+const fromWorker = (url, type, origin = 'https://player.example') => ({
+  tabId: -1, frameId: -1, url, type: 'xmlhttprequest', statusCode: 200, initiator: origin, responseHeaders: [{ name: 'Content-Type', value: type }],
+});
+
+test('a service worker\'s playlist goes to the tab that shows its page', async () => {
+  const t = setup();
+  t.controller.pageVideos.set(7, new Map([[3, { url: 'https://player.example/embed/1', videos: [] }]]));   // an iframe of the tab with a video
+
+  await t.chrome.webRequest.onHeadersReceived.emit(fromWorker('https://cdn.example/v/index.m3u8', 'application/vnd.apple.mpegurl'));
+
+  assert.deepEqual(t.controller.media.list(7).map((i) => i.url), ['https://cdn.example/v/index.m3u8']);
+});
+
+test('what a worker fetched before its page reported a video is handed over when it does', async () => {
+  const t = setup();
+  await t.chrome.webRequest.onHeadersReceived.emit(fromWorker('https://cdn.example/v/index.m3u8', 'application/vnd.apple.mpegurl'));
+  assert.equal(t.controller.media.list(7).length, 0);                           // nobody to give it to yet
+
+  await t.controller.onPageVideos({ tab: { id: 7, url: 'https://site.example/watch' }, frameId: 3, url: 'https://player.example/embed/1' }, [{ title: 'x', src: 'blob:https://player.example/1', blob: true, duration: 60, box: [640, 360], opacity: 1 }]);
+  for (let i = 0; i < 100 && t.controller.media.list(7).length === 0; i++) await settle();   // (the playlist is read, which takes a moment)
+
+  assert.deepEqual(t.controller.media.list(7).map((i) => i.url), ['https://cdn.example/v/index.m3u8']);
+  assert.equal(t.controller.unattributed.size, 0);
+});
+
+test('a worker request is not guessed onto a tab when two tabs show that origin, or when it came from no web page', async () => {
+  const t = setup();
+  t.controller.pageVideos.set(7, new Map([[0, { url: 'https://player.example/a', videos: [] }]]));
+  t.controller.pageVideos.set(8, new Map([[0, { url: 'https://player.example/b', videos: [] }]]));
+
+  await t.chrome.webRequest.onHeadersReceived.emit(fromWorker('https://cdn.example/v/index.m3u8', 'application/vnd.apple.mpegurl'));
+  await t.chrome.webRequest.onHeadersReceived.emit(fromWorker('https://cdn.example/v/other.m3u8', 'application/vnd.apple.mpegurl', 'chrome-extension://abc'));
+
+  assert.equal(t.controller.media.list(7).length + t.controller.media.list(8).length, 0);
+  assert.deepEqual([...t.controller.unattributed.keys()], ['https://player.example']);
+});
