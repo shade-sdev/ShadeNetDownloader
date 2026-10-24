@@ -320,8 +320,10 @@ public static partial class YtDlp
     static List<YtDlpOption> BuildDirect(List<Format> formats)
     {
         var files = formats.Where(f => f.IsFile).ToList();
-        var videos = files.Where(f => f.HasVideo && !f.HasAudio).ToList();
         var audios = files.Where(f => f.HasAudio && !f.HasVideo).ToList();
+        // picture-only files are worth something only with a sound to join them with (Google Drive offers picture-only qualities and no
+        // sound of its own: those would be silent videos; its files with both are used instead)
+        var videos = audios.Count > 0 ? files.Where(f => f.HasVideo && !f.HasAudio).ToList() : new List<Format>();
         var options = new List<YtDlpOption>();
 
         static int Preference(Format f) => f.VCodec.StartsWith("avc", StringComparison.OrdinalIgnoreCase) ? 0 : f.VCodec.StartsWith("vp9", StringComparison.OrdinalIgnoreCase) || f.VCodec.StartsWith("vp09", StringComparison.OrdinalIgnoreCase) ? 1 : 2;

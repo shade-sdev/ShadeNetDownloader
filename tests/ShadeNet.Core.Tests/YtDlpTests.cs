@@ -174,6 +174,25 @@ public class YtDlpTests
     [InlineData("https://www.tiktok.com/x", "novalue")]
     public void Nothing_is_written_when_there_is_nothing_to_use(string page, string cookies) => Assert.Null(YtDlp.WriteCookieFile(page, cookies));
 
+    /// <summary>Google Drive: picture-only qualities and no sound of its own, next to files with both. A silent video is not a quality.</summary>
+    [Fact]
+    public void Picture_only_files_with_no_sound_to_join_are_not_offered()
+    {
+        const string json = """
+            { "title": "holiday", "duration": 60, "formats": [
+              { "format_id": "18", "ext": "mp4", "protocol": "https", "url": "https://d.example/18", "vcodec": "avc1.4D001F", "acodec": "mp4a.40.2", "height": 360 },
+              { "format_id": "22", "ext": "mp4", "protocol": "https", "url": "https://d.example/22", "vcodec": "avc1.640029", "acodec": "mp4a.40.2", "height": 718 },
+              { "format_id": "136", "ext": "mp4", "protocol": "https", "url": "https://d.example/136", "vcodec": "avc1.42C01F", "acodec": "none", "height": 718 },
+              { "format_id": "137", "ext": "mp4", "protocol": "https", "url": "https://d.example/137", "vcodec": "avc1.42C028", "acodec": "none", "height": 1078 }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.Equal(new[] { "https://d.example/22", "https://d.example/18" }, info.Options.Select(o => o.VideoUrl));   // with sound, best first
+        Assert.All(info.Options, o => Assert.Null(o.AudioUrl));
+    }
+
     [Fact]
     public void Formats_without_headers_or_cookies_carry_none()
     {
