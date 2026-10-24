@@ -221,7 +221,17 @@
     }
   }
 
+  let lastError = '';   // for diagnosis: the last thing that went wrong here
+
   async function refresh(force = false) {
+    try {
+      await refreshOnce(force);
+    } catch (error) {
+      lastError = String(error?.stack ?? error).slice(0, 400);
+    }
+  }
+
+  async function refreshOnce(force) {
     if (!alive()) return stop();
     const videos = describe();
     const report = JSON.stringify(videos);
@@ -416,8 +426,18 @@
     addEventListener('resize', () => render(), { passive: true });
     document.addEventListener('fullscreenchange', () => render());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(true); });
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, _sender, reply) => {
       if (message?.type === 'media-changed') refresh(true);
+      // diagnose(): what this page's script sees (it answers for the page itself, not for its frames)
+      if (message?.type === 'page-script-state' && window.top === window) {
+        let found = -1;
+        try {
+          found = videoElements().length;
+        } catch (error) {
+          lastError = String(error?.stack ?? error).slice(0, 400);
+        }
+        reply({ videosFound: found, shadowRoots: shadowHosts.length, videosReported: lastReport ? JSON.parse(lastReport).length : 0, itemsAnswered: items.length, buttonShown: !!host?.isConnected, lastError });
+      }
     });
     refresh();
   }

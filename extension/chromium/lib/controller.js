@@ -216,8 +216,15 @@ export class Controller {
    */
   async diagnose({ urlIncludes = '', full = false } = {}) {
     const tabs = (await this.chrome.tabs?.query?.(urlIncludes ? {} : { active: true, currentWindow: true })) ?? [];
-    const tab = urlIncludes ? tabs.find((t) => String(t.url ?? '').includes(urlIncludes)) : tabs[0];
+    // several tabs may match: the one in front first
+    const tab = urlIncludes ? tabs.filter((t) => String(t.url ?? '').includes(urlIncludes)).sort((a, b) => Number(!!b.active) - Number(!!a.active))[0] : tabs[0];
     if (!tab) return 'No such tab.';
+    let pageScript;
+    try {
+      pageScript = await this.chrome.tabs.sendMessage(tab.id, { type: 'page-script-state' }, { frameId: 0 });
+    } catch (error) {
+      pageScript = { notRunning: String(error?.message ?? error) };   // reload the page after (re)loading the extension
+    }
 
     const strip = (u) => (full ? String(u) : String(u).split('?')[0].split('#')[0]);
     const items = (await this.itemsFor(tab)).map((i) => ({ kind: i.kind, live: !!i.live, url: strip(i.url), title: i.title }));
@@ -246,7 +253,7 @@ export class Controller {
     if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
     if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
 
-    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, pieceRuns: runs, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
+    return JSON.stringify({ tab: strip(tab.url), notes, pageScript, offered: items, pageVideos: videos, pieceRuns: runs, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
   }
 
   /** Keeps the last 40 steps, newest last. Never throws. */
