@@ -12,7 +12,7 @@
     "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" }
   },
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "permissions": ["downloads", "cookies", "webRequest", "contextMenus", "nativeMessaging", "storage", "declarativeNetRequestWithHostAccess"],
+  "permissions": ["downloads", "cookies", "webRequest", "contextMenus", "nativeMessaging", "storage", "declarativeNetRequestWithHostAccess", "scripting"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["content.js"], "all_frames": true, "run_at": "document_idle" }

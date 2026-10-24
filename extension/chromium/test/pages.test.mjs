@@ -206,3 +206,29 @@ test('with the switch off in the app no cookie leaves the browser for a page', a
 
   assert.equal(t.app.captures[0].cookies, undefined);
 });
+
+// ---- a tab whose page script never reported (opened before the extension was loaded, or swapped in without loading) ----
+
+test('a tab that plays something but never reported gets the page script put in, once in a while', async () => {
+  const t = setup({ title: 'Video', url: 'https://www.example.com/watch' });
+  const added = [];
+  t.chrome.scripting = { executeScript: async (what) => { added.push(what); return []; } };
+
+  await t.controller.ensurePageScript(7);
+  await t.controller.ensurePageScript(7);   // again at once: not again
+
+  assert.deepEqual(added, [{ target: { tabId: 7, allFrames: true }, files: ['content.js'] }]);
+});
+
+test('a tab whose page script has reported is left alone, and a refusal is kept for diagnosis', async () => {
+  const t = setup({ title: 'Video', url: 'https://www.example.com/watch' });
+  const added = [];
+  t.chrome.scripting = { executeScript: async (what) => { added.push(what); throw new Error('Cannot access contents of the page'); } };
+  await t.controller.onPageVideos(from(t, 'https://www.example.com/watch'), [blobVideo()]);
+
+  await t.controller.ensurePageScript(7);
+  assert.deepEqual(added, []);
+
+  await t.controller.ensurePageScript(8);
+  assert.equal(t.controller.scriptErrors.get(8), 'Cannot access contents of the page');
+});

@@ -140,8 +140,28 @@ export class Controller {
     this.pageVideos = new Map(); // tab id -> Map(frame id -> { url, videos }): what each frame (the page, or an iframe in it) reports
     this.extraSites = [];        // more sites whose pages yt-dlp may be asked about (the built-in list is in lib/sites.js)
     this.unattributed = new Map(); // origin -> requests of service/shared workers that no tab could be given yet (see attribute)
+    this.scriptAdded = new Map();  // tab id -> when the page script was last put in by hand (see ensurePageScript)
+    this.scriptErrors = new Map(); // tab id -> why it could not be
     this.events = [];   // the last things that happened, for diagnosis ("why was my download not taken over?")
     this.ready = this.loadLocal();
+  }
+
+  /**
+   * A tab plays something but its page script has never reported: the extension was (re)loaded after the page opened, or the page
+   * was swapped in without loading (single-page sites). The script is put in, so the page's videos are seen and get their button.
+   * At most every 15 seconds per tab; the script itself ignores a second copy.
+   */
+  async ensurePageScript(tabId) {
+    if (!Number.isInteger(tabId) || tabId < 0 || this.pageVideos.has(tabId) || !this.chrome.scripting?.executeScript) return;
+    const last = this.scriptAdded.get(tabId) ?? 0;
+    if (Date.now() - last < 15000) return;
+    this.scriptAdded.set(tabId, Date.now());
+    try {
+      await this.chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+      this.scriptErrors.delete(tabId);
+    } catch (error) {
+      this.scriptErrors.set(tabId, String(error?.message ?? error));   // a page the browser keeps extensions out of (its store, settings)
+    }
   }
 
   /**
@@ -223,7 +243,7 @@ export class Controller {
     try {
       pageScript = await this.chrome.tabs.sendMessage(tab.id, { type: 'page-script-state' }, { frameId: 0 });
     } catch (error) {
-      pageScript = { notRunning: String(error?.message ?? error) };   // reload the page after (re)loading the extension
+      pageScript = { notRunning: String(error?.message ?? error), couldNotAdd: this.scriptErrors.get(tab.id) ?? null };
     }
 
     const strip = (u) => (full ? String(u) : String(u).split('?')[0].split('#')[0]);
@@ -497,6 +517,7 @@ export class Controller {
    * own "Download" button (content.js) to look again.
    */
   async updateMediaBadge(tabId) {
+    this.ensurePageScript(tabId);
     const action = this.chrome.action;
     if (!action?.setBadgeText) return;
     const tab = await this.safely(() => this.chrome.tabs.get(tabId));
