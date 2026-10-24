@@ -19,6 +19,22 @@ public sealed class WindowGeometry
     public bool Maximized { get; set; }
 }
 
+public enum DownloadSortKey
+{
+    /// <summary>When the download was added.</summary>
+    Date,
+    Name,
+    /// <summary>The file's extension, then its name.</summary>
+    FileType,
+    Size,
+}
+
+public sealed class ListSortSettings
+{
+    public DownloadSortKey By { get; set; } = DownloadSortKey.Date;
+    public bool Descending { get; set; } = true;
+}
+
 /// <summary>Everything the user can configure; stored as JSON in <c>%LOCALAPPDATA%\ShadeNet\settings.json</c>.</summary>
 public sealed class AppSettings
 {
@@ -30,6 +46,9 @@ public sealed class AppSettings
 
     /// <summary>The sidebar shows icons only (true) or icons with their names.</summary>
     public bool SidebarCollapsed { get; set; }
+
+    /// <summary>How the download lists are sorted (the Queued list always shows the order the queue runs in).</summary>
+    public ListSortSettings Sort { get; set; } = new();
     public EngineSettings Engine { get; set; } = new();
     public BrowserSettings Browser { get; set; } = new();
     public GeneralSettings General { get; set; } = new();

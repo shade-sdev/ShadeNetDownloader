@@ -42,6 +42,14 @@ public partial class DownloadsView : UserControl
     /// <summary>Page width below which the drawer overlays the list instead of pushing it.</summary>
     const double OverlayBelowWidth = 880;
 
+    /// <summary>The sort button opens its menu under it (a right click does too).</summary>
+    void OnSortClick(object sender, RoutedEventArgs e)
+    {
+        if (SortButton.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = SortButton;
+        menu.IsOpen = true;
+    }
+
     void OnLoaded(object sender, RoutedEventArgs e)
     {
         // The slow orbit around the hero icon is decoration only: skip it when Windows asks for reduced motion.

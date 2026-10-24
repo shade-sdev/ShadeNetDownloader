@@ -26,6 +26,9 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     /// <summary>A video stream (HLS): pieces instead of byte ranges, no connection map.</summary>
     public bool IsStream => Job.Kind == DownloadKind.Hls;
     public DateTimeOffset CreatedAt => Job.CreatedAt;
+
+    /// <summary>When the card was added to the list, as a counter (the later, the higher): breaks ties when sorting.</summary>
+    internal long Sequence { get; set; }
     public string Host { get; }
     public string Url => Job.Url;
     public ImageSource? Icon => FileIconCache.Get(FileName);

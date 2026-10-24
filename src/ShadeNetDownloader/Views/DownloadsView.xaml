@@ -5,6 +5,7 @@
              xmlns:vm="clr-namespace:ShadeNetDownloader.ViewModels"
              xmlns:ctl="clr-namespace:ShadeNetDownloader.Controls"
              xmlns:views="clr-namespace:ShadeNetDownloader.Views"
+             xmlns:svc="clr-namespace:ShadeNetDownloader.Services"
              Loaded="OnLoaded" SizeChanged="OnSizeChanged" PreviewKeyDown="OnPreviewKeyDown"
              DataContextChanged="OnDataContextChanged">
 
@@ -247,6 +248,32 @@
                                Command="{Binding DataContext.ToggleQueueCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                Visibility="{Binding DataContext.QueueRunning, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource B2V}}" />
                 </StackPanel>
+                <!-- the order of the list (the Queued list shows the order the queue runs in) -->
+                <ui:Button x:Name="SortButton" Appearance="Secondary" Icon="{ui:SymbolIcon ArrowSort24}" Margin="0,0,8,0" Height="34"
+                           Click="OnSortClick" ToolTip="Sort the list" AutomationProperties.Name="Sort the list"
+                           Visibility="{Binding IsQueueView, Converter={StaticResource InverseB2V}}">
+                    <TextBlock>
+                        <Run Text="Sort:" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <Run Text="{Binding SortLabel, Mode=OneWay}" />
+                    </TextBlock>
+                    <ui:Button.ContextMenu>
+                        <ContextMenu Placement="Bottom">
+                            <MenuItem Header="Name" IsChecked="{Binding IsSortByName, Mode=OneWay}"
+                                      Command="{Binding SortByKeyCommand}" CommandParameter="{x:Static svc:DownloadSortKey.Name}" />
+                            <MenuItem Header="File type" IsChecked="{Binding IsSortByType, Mode=OneWay}"
+                                      Command="{Binding SortByKeyCommand}" CommandParameter="{x:Static svc:DownloadSortKey.FileType}" />
+                            <MenuItem Header="Size" IsChecked="{Binding IsSortBySize, Mode=OneWay}"
+                                      Command="{Binding SortByKeyCommand}" CommandParameter="{x:Static svc:DownloadSortKey.Size}" />
+                            <MenuItem Header="Date added" IsChecked="{Binding IsSortByDate, Mode=OneWay}"
+                                      Command="{Binding SortByKeyCommand}" CommandParameter="{x:Static svc:DownloadSortKey.Date}" />
+                            <Separator />
+                            <MenuItem Header="{Binding AscendingLabel}" Command="{Binding SetAscendingCommand}"
+                                      IsChecked="{Binding SortAscending, Mode=OneWay}" />
+                            <MenuItem Header="{Binding DescendingLabel}" Command="{Binding SetDescendingCommand}"
+                                      IsChecked="{Binding SortDescending, Mode=OneWay}" />
+                        </ContextMenu>
+                    </ui:Button.ContextMenu>
+                </ui:Button>
                 <ui:Button Appearance="Secondary" Icon="{ui:SymbolIcon DeleteDismiss24}" Content="Clear list"
                            Margin="0,0,8,0" Height="34" Command="{Binding ClearCompletedCommand}"
                            Visibility="{Binding ShowClearCompleted, Converter={StaticResource B2V}}" />

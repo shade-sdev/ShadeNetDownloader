@@ -29,6 +29,9 @@ public sealed partial class DownloadsViewModel : ObservableObject
     readonly DownloadManager _manager;
     readonly ToastService _toasts;
     readonly IBrowserBridge? _bridge;
+    readonly SettingsService? _settings;
+    readonly ListSortSettings _sort;
+    long _sequence;
     readonly Dispatcher _ui;
     readonly DispatcherTimer _tick;
     readonly ConcurrentDictionary<Guid, JobSnapshot> _pending = new();
@@ -38,11 +41,13 @@ public sealed partial class DownloadsViewModel : ObservableObject
     NavItem _filter = new(NavKind.All, "All downloads", Wpf.Ui.Controls.SymbolRegular.ArrowDownload24);
     string _search = "";
 
-    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null)
+    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null, SettingsService? settings = null)
     {
         _manager = manager;
         _toasts = toasts;
         _bridge = bridge;
+        _settings = settings;
+        _sort = settings?.Current.Sort ?? new ListSortSettings();
         _ui = Dispatcher.CurrentDispatcher;
 
         Items = new ObservableCollection<DownloadItemViewModel>();
@@ -52,6 +57,9 @@ public sealed partial class DownloadsViewModel : ObservableObject
         View.LiveFilteringProperties.Add(nameof(DownloadItemViewModel.IsPendingRemoval));
         View.IsLiveSorting = true;
         View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.Priority));
+        View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.FileName));
+        View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.TotalBytes));
+        ApplySort();
         ((INotifyCollectionChanged)View).CollectionChanged += (_, _) => UpdateTexts();
 
         foreach (var job in _manager.Jobs.OrderBy(j => j.CreatedAt)) AddItem(job);
@@ -106,20 +114,96 @@ public sealed partial class DownloadsViewModel : ObservableObject
     {
         _filter = item;
 
-        // The queue is shown in the order it will run; every other list keeps "newest first".
-        using (View.DeferRefresh())
-        {
-            View.SortDescriptions.Clear();
-            if (item.Kind == NavKind.Queued)
-            {
-                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.Priority), ListSortDirection.Descending));
-                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.CreatedAt), ListSortDirection.Ascending));
-            }
-        }
-
+        ApplySort();
         OnPropertyChanged(nameof(IsQueueView));
         View.Refresh();
         UpdateTexts();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Sorting
+    // ------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The queue is shown in the order it will run; every other list in the order the user chose.</summary>
+    void ApplySort()
+    {
+        using (View.DeferRefresh())
+        {
+            if (_filter.Kind == NavKind.Queued)
+            {
+                View.CustomSort = null;
+                View.SortDescriptions.Clear();
+                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.Priority), ListSortDirection.Descending));
+                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.CreatedAt), ListSortDirection.Ascending));
+            }
+            else
+            {
+                View.CustomSort = new DownloadSortComparer(_sort.By, _sort.Descending);   // (replaces any sort descriptions)
+            }
+        }
+    }
+
+    public DownloadSortKey SortBy => _sort.By;
+    public bool SortDescending => _sort.Descending;
+    public bool SortAscending => !_sort.Descending;
+    public bool IsSortByDate => SortBy == DownloadSortKey.Date;
+    public bool IsSortByName => SortBy == DownloadSortKey.Name;
+    public bool IsSortByType => SortBy == DownloadSortKey.FileType;
+    public bool IsSortBySize => SortBy == DownloadSortKey.Size;
+
+    public string SortLabel => SortBy switch
+    {
+        DownloadSortKey.Name => "Name",
+        DownloadSortKey.FileType => "File type",
+        DownloadSortKey.Size => "Size",
+        _ => "Date added",
+    };
+
+    /// <summary>What "ascending" means for the order chosen.</summary>
+    public string AscendingLabel => SortBy switch
+    {
+        DownloadSortKey.Size => "Smallest first",
+        DownloadSortKey.Date => "Oldest first",
+        _ => "A to Z",
+    };
+
+    public string DescendingLabel => SortBy switch
+    {
+        DownloadSortKey.Size => "Largest first",
+        DownloadSortKey.Date => "Newest first",
+        _ => "Z to A",
+    };
+
+    /// <summary>Sorts by another key, in the direction most useful for it (names A to Z, the largest and the newest first).</summary>
+    [RelayCommand]
+    void SortByKey(DownloadSortKey key)
+    {
+        if (key == _sort.By) return;
+        _sort.By = key;
+        _sort.Descending = key is DownloadSortKey.Size or DownloadSortKey.Date;
+        SortChanged();
+    }
+
+    [RelayCommand]
+    void SetAscending() => SetDirection(false);
+
+    [RelayCommand]
+    void SetDescending() => SetDirection(true);
+
+    void SetDirection(bool descending)
+    {
+        if (descending == _sort.Descending) return;
+        _sort.Descending = descending;
+        SortChanged();
+    }
+
+    void SortChanged()
+    {
+        ApplySort();
+        foreach (var name in new[] { nameof(SortBy), nameof(SortDescending), nameof(SortAscending), nameof(IsSortByDate), nameof(IsSortByName), nameof(IsSortByType),
+                     nameof(IsSortBySize), nameof(SortLabel), nameof(AscendingLabel), nameof(DescendingLabel) })
+            OnPropertyChanged(name);
+        _settings?.Save();
     }
 
     /// <summary>The Queued list is showing (it gets the start/stop button and the order controls).</summary>
@@ -216,6 +300,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
         if (_byId.ContainsKey(job.Id)) return;
         var item = new DownloadItemViewModel(job, _manager.Snapshot(job), this);
         _byId[job.Id] = item;
+        item.Sequence = ++_sequence;   // (the order cards were added in breaks ties when sorting)
         Items.Insert(0, item); // newest on top
     }
 

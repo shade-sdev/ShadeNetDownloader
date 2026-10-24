@@ -225,6 +225,54 @@ public class ViewModelTests
     }
 
     [Fact]
+    public void The_list_sorts_by_name_file_type_size_and_date_and_remembers_it()
+    {
+        var (manager, settings, dir) = Env();
+        using var d = dir;
+        using var m = manager;
+        AddHeld(manager, "a1.pdf", "b10.zip", "B2.mp4");
+        var vm = new DownloadsViewModel(manager, new ToastService(), settings: settings);
+        string[] Order()
+        {
+            vm.View.Refresh();
+            return vm.View.Cast<DownloadItemViewModel>().Select(i => i.FileName).ToArray();
+        }
+
+        Assert.Equal(new[] { "B2.mp4", "b10.zip", "a1.pdf" }, Order());   // date added, newest first (as before)
+        Assert.Equal("Newest first", vm.DescendingLabel);
+
+        vm.SortByKeyCommand.Execute(DownloadSortKey.Name);
+        Assert.Equal(new[] { "a1.pdf", "B2.mp4", "b10.zip" }, Order());   // A to Z, 2 before 10, case ignored
+        Assert.Equal("Name", vm.SortLabel);
+        Assert.True(vm.SortAscending);
+
+        vm.SortByKeyCommand.Execute(DownloadSortKey.FileType);
+        Assert.Equal(new[] { "B2.mp4", "a1.pdf", "b10.zip" }, Order());
+
+        foreach (var item in vm.Items) item.TotalBytes = item.FileName switch { "a1.pdf" => 300, "b10.zip" => 100, _ => null };
+        vm.SortByKeyCommand.Execute(DownloadSortKey.Size);
+        Assert.Equal(new[] { "a1.pdf", "b10.zip", "B2.mp4" }, Order());   // largest first, an unknown size last
+        vm.SetAscendingCommand.Execute(null);
+        Assert.Equal(new[] { "B2.mp4", "b10.zip", "a1.pdf" }, Order());
+        Assert.Equal("Smallest first", vm.AscendingLabel);
+
+        var reloaded = new SettingsService(settings.DataDir);
+        reloaded.Load();
+        Assert.Equal(DownloadSortKey.Size, reloaded.Current.Sort.By);
+        Assert.False(reloaded.Current.Sort.Descending);
+    }
+
+    [Theory]
+    [InlineData("part 2", "part 10", -1)]
+    [InlineData("Part 2", "part 2", 0)]
+    [InlineData("file007", "file7", 0)]
+    [InlineData("a", "b", -1)]
+    [InlineData("ab", "a", 1)]
+    [InlineData("v1.9", "v1.10", -1)]
+    public void Names_are_compared_with_their_numbers_as_numbers(string a, string b, int expected) =>
+        Assert.Equal(expected, Math.Sign(DownloadSortComparer.NaturalCompare(a, b)));
+
+    [Fact]
     public void The_sidebar_shows_icons_only_when_asked_and_remembers_it()
     {
         var (manager, settings, dir) = Env();
