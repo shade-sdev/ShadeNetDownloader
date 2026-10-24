@@ -74,6 +74,15 @@ New-Item -ItemType Directory $app | Out-Null
 Step "the program (self-contained)"
 Run "publish of the program" { dotnet publish src\ShadeNetDownloader -c Release -r $Runtime --self-contained true -o $app --nologo -v q -p:DebugType=embedded @stamp }
 
+Step "the browser extension carries the program's version"
+# (so the browser's extensions page shows which release runs; the extension itself reloads when the app's version changes)
+$extensionManifest = Join-Path $app "browser\chromium\manifest.json"
+$manifestText = [IO.File]::ReadAllText($extensionManifest)
+$versionField = [regex]'"version"\s*:\s*"[^"]*"'
+if (-not $versionField.IsMatch($manifestText)) { throw "the extension's manifest has no version to stamp" }
+[IO.File]::WriteAllText($extensionManifest, $versionField.Replace($manifestText, "`"version`": `"$version`"", 1), (New-Object Text.UTF8Encoding $false))
+Write-Host "extension $version"
+
 Step "the browser host (self-contained, in its own folder)"
 Run "publish of the browser host" { dotnet publish src\ShadeNet.NativeHost -c Release -r $Runtime --self-contained true -o (Join-Path $app "NativeHost") --nologo -v q -p:DebugType=embedded @stamp }
 
