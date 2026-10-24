@@ -47,7 +47,36 @@ internal static class HlsClient
                    || uri.AbsolutePath.EndsWith(".mpd", StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Reads a playlist. One that is refused (401, 403) while its address carries a query is asked for once more without it: the query
+    /// is often a token (signed, timed) that has expired since the page asked for it, or that is refused outside the browser, while the
+    /// site serves the same playlist without one (Reddit). The address it was finally read from is returned, so the pieces are resolved
+    /// against it. When the second try is refused too, the first refusal is what is reported.
+    /// </summary>
     public static async Task<(string Text, Uri Url)> FetchTextAsync(HttpClient http, RequestSpec spec, string defaultUserAgent, CancellationToken ct)
+    {
+        try
+        {
+            return await FetchOnceAsync(http, spec, defaultUserAgent, ct).ConfigureAwait(false);
+        }
+        catch (HttpStatusException refused) when (refused.StatusCode is 401 or 403 && WithoutQuery(spec.Url) is { } plain)
+        {
+            try
+            {
+                return await FetchOnceAsync(http, spec with { Url = plain }, defaultUserAgent, ct).ConfigureAwait(false);
+            }
+            catch (HttpStatusException)
+            {
+                throw refused;
+            }
+        }
+    }
+
+    /// <summary>The address without its query (and fragment), or null when it has none.</summary>
+    internal static string? WithoutQuery(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Query.Length > 1 ? uri.GetLeftPart(UriPartial.Path) : null;
+
+    static async Task<(string Text, Uri Url)> FetchOnceAsync(HttpClient http, RequestSpec spec, string defaultUserAgent, CancellationToken ct)
     {
         var (response, finalUrl) = await HttpFetcher.GetAsync(http, spec, defaultUserAgent, null, ct).ConfigureAwait(false);
         using (response)

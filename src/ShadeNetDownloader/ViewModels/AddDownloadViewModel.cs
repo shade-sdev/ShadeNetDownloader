@@ -281,7 +281,19 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 captured ? _capture!.Headers : null);
             // The response stays open: if the user presses "Download now" it becomes the first connection, so sites that
             // allow a link to be requested only once still work (IDM: "start downloading immediately").
-            var result = await _manager.ProbeAndHoldAsync(spec, cts.Token);
+            ProbeResult result;
+            try
+            {
+                result = await _manager.ProbeAndHoldAsync(spec, cts.Token);
+            }
+            catch (HttpStatusException refused) when (refused.StatusCode is 401 or 403
+                                                      && (DownloadManager.IsStreamAddress(url) || (captured && _capture!.Source == "media")))
+            {
+                // a playlist refused when asked for as a file: read it as a playlist, which also tries it without its (expired) token
+                await ShowStreamAsync(spec, url, cts).ConfigureAwait(true);
+                return;
+            }
+
             if (cts.IsCancellationRequested)
             {
                 result.Discard();
