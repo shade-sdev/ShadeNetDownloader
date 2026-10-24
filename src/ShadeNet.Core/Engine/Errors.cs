@@ -18,7 +18,7 @@ public sealed class HttpStatusException : DownloadException
     /// <param name="serverReason">What the server said about the refusal, when it said something short and readable (see HttpFetcher.ReasonAsync).</param>
     public HttpStatusException(int statusCode, TimeSpan? retryAfter = null, string? serverReason = null)
         : base(statusCode is 403 or 404 or 410 ? JobErrorKind.AddressExpired : JobErrorKind.HttpStatus,
-            $"The server answered {statusCode} {Reason(statusCode)}." + (string.IsNullOrWhiteSpace(serverReason) ? "" : $" It said: {serverReason}"))
+            $"The server answered {statusCode} {Reason(statusCode)}." + (string.IsNullOrWhiteSpace(serverReason) ? "" : $" It said: {Sentence(serverReason)}"))
     {
         StatusCode = statusCode;
         RetryAfter = retryAfter;
@@ -26,6 +26,13 @@ public sealed class HttpStatusException : DownloadException
     }
 
     public string? ServerReason { get; }
+
+    /// <summary>The server's words as a sentence: ending with a full stop, so that what follows does not run on.</summary>
+    static string Sentence(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.Length > 0 && ".!?…".Contains(trimmed[^1]) ? trimmed : trimmed + ".";
+    }
 
     /// <summary>Worth another attempt (server hiccup or rate limiting) rather than failing the job.</summary>
     public bool IsTransient => StatusCode is 408 or 429 or 500 or 502 or 503 or 504;

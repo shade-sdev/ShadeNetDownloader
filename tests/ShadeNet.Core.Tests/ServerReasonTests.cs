@@ -20,6 +20,15 @@ public class ServerReasonTests
     public void The_reason_is_read_from_the_usual_error_bodies(string body, string? expected) => Assert.Equal(expected, HttpFetcher.ReasonFrom(body));
 
     [Fact]
+    public void The_servers_words_end_as_a_sentence()
+    {
+        Assert.Equal("The server answered 403 Forbidden. It said: UserProjectAccountProblem: The billing account is disabled in state absent.",
+            new Engine.HttpStatusException(403, serverReason: "UserProjectAccountProblem: The billing account is disabled in state absent").Message);
+        Assert.Equal("The server answered 403 Forbidden. It said: Access denied.", new Engine.HttpStatusException(403, serverReason: "Access denied.").Message);
+        Assert.Equal("The server answered 403 Forbidden.", new Engine.HttpStatusException(403).Message);
+    }
+
+    [Fact]
     public async Task A_refused_stream_says_what_the_server_said()
     {
         await using var h = await Harness.CreateAsync();

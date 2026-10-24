@@ -592,7 +592,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
 
     static string Friendly(Exception ex) => ex switch
     {
-        HttpStatusException h => h.Message + (h.Kind == JobErrorKind.AddressExpired ? " The link may have expired or need you to be signed in." : ""),
+        // ShadeNet's guess only when the server said nothing itself (it knows better: a disabled account is no expired link)
+        HttpStatusException h => h.Message + (h.Kind == JobErrorKind.AddressExpired && h.ServerReason == null ? " The link may have expired or need you to be signed in." : ""),
         DownloadException d => d.Message,
         HttpRequestException { InnerException: SocketException } => "Can't reach that address. Check the link and your connection.",
         HttpRequestException h => h.Message.Contains("No such host", StringComparison.OrdinalIgnoreCase)
