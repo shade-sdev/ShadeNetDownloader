@@ -39,6 +39,9 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   lists them too. One click hands the video over; the file is saved under the video's name. The switch "Show a Download
   button on videos" in the popup turns the button off. (`content.js` runs in every page and frame; it only reports the
   `<video>` elements to the extension and draws the answer.) Pages that were open before the extension was reloaded need a refresh.
+* **Dead sources are skipped.** A player that tries one source and moves on to another (the first was refused, deleted or
+  broken) leaves the dead one in the page: a `<video>` whose source the browser could not load, or whose address the server
+  refused the browser itself, is not offered. Only what the browser could load is.
 * **Videos in iframes** (an embedded player from another site) get their own button, and an embedded YouTube player is
   offered as its watch page.
 * **Videos with no address** (Facebook, Instagram, X, TikTok, Vimeo, Reddit ... play through a `blob:` buffer, so no file

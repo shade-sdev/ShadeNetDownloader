@@ -153,3 +153,31 @@ test('a title that ends with a full stop does not make "Title..mp4"', async () =
   await t.controller.sendMedia(clip.src, t.chrome.tabs.active);
   assert.equal(t.app.captures[0].fileName, 'How to share with just friends.mp4');
 });
+
+test('a video source the browser could not load is not offered: the player tried it and moved on', async () => {
+  const t = setup();
+  const dead = { title: 'Dead', src: 'https://storage.example/old/1305.mp4#mp4/chunk/5/1305/2097152/720p', duration: 0, failed: true };
+  const { items } = await t.controller.onPageVideos(sender(t), [dead, clip]);
+  assert.deepEqual(items.map((i) => i.url), [clip.src]);
+});
+
+test('a video file the server refused the browser is not offered, and is again once it answers', async () => {
+  const t = setup();
+  const answer = (statusCode) => t.chrome.webRequest.onHeadersReceived.emit({ tabId: 7, url: clip.src, type: 'media', statusCode, responseHeaders: [{ name: 'Content-Type', value: 'text/xml' }] });
+  await answer(403);
+  // (the element's address carries a fragment the request never has)
+  let { items } = await t.controller.onPageVideos(sender(t), [{ ...clip, src: clip.src + '#t=10' }]);
+  assert.equal(items.length, 0);
+  assert.match(await t.controller.diagnose(), /could not load/);
+
+  await answer(206);
+  ({ items } = await t.controller.onPageVideos(sender(t), [clip]));
+  assert.deepEqual(items.map((i) => i.url), [clip.src]);
+});
+
+test('a refusal on one tab says nothing about the same address on another', async () => {
+  const t = setup();
+  await t.chrome.webRequest.onHeadersReceived.emit({ tabId: 99, url: clip.src, type: 'media', statusCode: 403, responseHeaders: [] });
+  const { items } = await t.controller.onPageVideos(sender(t), [clip]);
+  assert.equal(items.length, 1);
+});

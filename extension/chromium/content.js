@@ -196,6 +196,7 @@
         height: video.videoHeight || 0,
         blob: buffer,
         drm: !!video.mediaKeys,                         // a player with a licence key: protected, left alone on purpose
+        failed: !!video.error,                          // the browser could not load this source: it is not what plays
         permalink: buffer ? permalinkFor(video) : '',
         box: [Math.round(rect.width), Math.round(rect.height)],      // with this, the extension can tell a hidden decoy from a video
         opacity: Number(getComputedStyle(video).opacity),

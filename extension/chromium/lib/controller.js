@@ -142,6 +142,7 @@ export class Controller {
     this.unattributed = new Map(); // origin -> requests of service/shared workers that no tab could be given yet (see attribute)
     this.scriptAdded = new Map();  // tab id -> when the page script was last put in by hand (see ensurePageScript)
     this.scriptErrors = new Map(); // tab id -> why it could not be
+    this.refused = new Map();      // tab id -> Map(address without its fragment -> status): what the server refused the browser itself
     this.events = [];   // the last things that happened, for diagnosis ("why was my download not taken over?")
     this.ready = this.loadLocal();
   }
@@ -250,7 +251,7 @@ export class Controller {
     const items = (await this.itemsFor(tab)).map((i) => ({ kind: i.kind, live: !!i.live, url: strip(i.url), title: i.title }));
     const videos = [];
     for (const [frame, { url, videos: list }] of this.pageVideos.get(tab.id) ?? []) {
-      for (const v of list) videos.push({ frame, frameUrl: strip(url), src: strip(v.src), blob: v.blob, live: v.live, drm: v.drm, box: v.box, opacity: v.opacity, duration: v.duration });
+      for (const v of list) videos.push({ frame, frameUrl: strip(url), src: strip(v.src), blob: v.blob, live: v.live, drm: v.drm, failed: v.failed || this.wasRefused(tab.id, v.src), box: v.box, opacity: v.opacity, duration: v.duration });
     }
 
     const requests = this.media.recent(tab.id, { full });
@@ -270,6 +271,7 @@ export class Controller {
       notes.push('Requests made by a service worker or shared worker could not be given to any tab (no tab shows the page that started them): see "workerRequestsWaiting".');
     }
 
+    if (videos.some((v) => v.failed)) notes.push('A video here has a source the browser could not load (the server refused it, or it is broken): it is not offered, since it is not what plays.');
     if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
     if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
 
@@ -319,6 +321,7 @@ export class Controller {
       (details) => {
         details = this.attribute(details);
         if (!details) return undefined;
+        this.noteRefusal(details);
         this.tracks.consider(details);
         this.pieces.consider(details);
         return this.media.consider(details);
@@ -332,6 +335,7 @@ export class Controller {
         this.tracks.clear(tabId);
         this.pieces.clear(tabId);
         this.pageVideos.delete(tabId);
+        this.refused.delete(tabId);
       }
     });
     c.tabs?.onRemoved?.addListener((tabId) => {
@@ -339,6 +343,7 @@ export class Controller {
       this.tracks.clear(tabId);
       this.pieces.clear(tabId);
       this.pageVideos.delete(tabId);
+      this.refused.delete(tabId);
     });
     c.contextMenus?.onClicked?.addListener((info, tab) => this.onContextMenu(info, tab));
     c.runtime.onInstalled?.addListener(() => this.createMenus());
@@ -542,12 +547,38 @@ export class Controller {
     return cleanTitle(tab.title);
   }
 
-  /** Plain video files (`<video src="https://…/clip.mp4">`) that frames of the tab report. */
+  /**
+   * The server refused the browser itself this address (a dead source a player tried before the one it plays): it is not offered,
+   * since it would be refused to ShadeNet too. An answer that succeeds later takes it back.
+   */
+  noteRefusal(details) {
+    if (!Number.isInteger(details?.tabId) || details.tabId < 0 || typeof details.url !== 'string' || !details.statusCode) return;
+    const key = details.url.split('#')[0];
+    const refused = this.refused.get(details.tabId) ?? new Map();
+    if (details.statusCode >= 400 && details.statusCode !== 416) {
+      refused.set(key, details.statusCode);
+      while (refused.size > 200) refused.delete(refused.keys().next().value);
+      this.refused.set(details.tabId, refused);
+    } else if (details.statusCode < 300 && refused.delete(key) && refused.size === 0) {
+      this.refused.delete(details.tabId);
+    }
+  }
+
+  /** Did the server refuse the browser this address on this tab? */
+  wasRefused(tabId, url) {
+    return typeof url === 'string' && !!this.refused.get(tabId)?.has(url.split('#')[0]);
+  }
+
+  /**
+   * Plain video files (`<video src="https://…/clip.mp4">`) that frames of the tab report. A source the browser could not load (the
+   * element says so, or the server refused it) is not offered: it is not what plays, and a player that moved on plays another.
+   */
   fileVideos(tabId) {
     const found = [];
     for (const { videos } of this.pageVideos.get(tabId)?.values() ?? []) {
       for (const v of videos) {
         if (typeof v.src !== 'string' || !/^https?:\/\//i.test(v.src) || looksLikePlaylist(v.src, '')) continue;
+        if (v.failed || this.wasRefused(tabId, v.src)) continue;
         if (this.media.get(tabId, v.src) || found.some((f) => f.src === v.src)) continue;
         found.push(v);
       }
@@ -681,6 +712,7 @@ export class Controller {
       blob: !!v?.blob,
       live: !!v?.live,
       drm: !!v?.drm,
+      failed: !!v?.failed,
       permalink: String(v?.permalink ?? '').slice(0, 2000),
       box: Array.isArray(v?.box) ? v.box.slice(0, 2).map((n) => (Number.isFinite(n) ? n : 0)) : null,
       opacity: Number.isFinite(v?.opacity) ? v.opacity : 1,
