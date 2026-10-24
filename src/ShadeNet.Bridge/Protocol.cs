@@ -131,6 +131,15 @@ public sealed record CaptureRequest
     public long? AudioSize { get; init; }
     public double? Duration { get; init; }
 
+    /// <summary>
+    /// With <c>pieces</c>: what a player that keeps its list of pieces itself (no playlist or manifest) asked for, in that order, and the
+    /// initialisation part they follow; <see cref="AudioPieces"/> and <see cref="AudioInit"/> when the sound is a run of its own.
+    /// </summary>
+    public string[]? Pieces { get; init; }
+    public string? Init { get; init; }
+    public string[]? AudioPieces { get; init; }
+    public string? AudioInit { get; init; }
+
     /// <summary><c>download</c> (browser started it) or <c>contextmenu</c> (user chose "Download with ShadeNet").</summary>
     public string Source { get; init; } = "download";
 }
@@ -162,6 +171,9 @@ public sealed record BridgeSettings
 
     /// <summary>Downloads known to be smaller than this stay with the browser (0 = take everything).</summary>
     public long MinSizeBytes { get; init; }
+
+    /// <summary>The extension sends the page site's sign-in along with a video page, so that yt-dlp can read what needs one (most live streams).</summary>
+    public bool PageSignIn { get; init; } = true;
 }
 
 public sealed record HostHello

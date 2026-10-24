@@ -27,8 +27,40 @@
 
   // ---- finding the videos ---------------------------------------------------------------------------------------
 
+  // Players built as web components (Reddit's <shreddit-player>, ...) keep their <video> inside a shadow root, where the page's own
+  // element list does not reach. Shadow roots are searched too, closed ones as well (an extension may look into those); the hosts are
+  // looked up again at most every two seconds.
+  let shadowHosts = [];
+  let shadowCheckedAt = 0;
+
+  function shadowOf(el) {
+    try {
+      return el.shadowRoot ?? chrome.dom?.openOrClosedShadowRoot?.(el) ?? null;
+    } catch {
+      return null;   // not an element that can have one
+    }
+  }
+
+  function hostsOf(root, depth, out) {
+    if (depth > 6) return;
+    for (const el of root.querySelectorAll('*')) {
+      const shadow = el.tagName.includes('-') || el.shadowRoot ? shadowOf(el) : null;   // only custom elements (and a few built-ins) have one
+      if (shadow) {
+        out.push(shadow);
+        hostsOf(shadow, depth + 1, out);
+      }
+    }
+  }
+
   function videoElements() {
-    return Array.from(document.getElementsByTagName('video'));
+    const found = Array.from(document.getElementsByTagName('video'));
+    if (Date.now() - shadowCheckedAt > 2000) {
+      shadowCheckedAt = Date.now();
+      shadowHosts = [];
+      hostsOf(document, 0, shadowHosts);
+    }
+    for (const root of shadowHosts) if (root.host?.isConnected) found.push(...root.querySelectorAll('video'));
+    return found;
   }
 
   function isVisible(video) {
@@ -36,13 +68,19 @@
     if (rect.width < MIN_WIDTH || rect.height < MIN_HEIGHT) return false;
     if (rect.bottom < 0 || rect.right < 0 || rect.top > innerHeight || rect.left > innerWidth) return false;
     const style = getComputedStyle(video);
-    return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity) !== 0;
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    // TikTok plays its video with `opacity: 0` and shows the picture another way, so a see-through <video> that has data and
+    // fills the screen is still the video that plays. (A hidden player that has loaded nothing is not.)
+    return Number(style.opacity) !== 0 || video.readyState >= 2;
   }
 
   /** The name of a video: its own label, else the heading of the card it sits in, else what the page calls itself. */
   function titleFor(video, several) {
     const own = clean(video.getAttribute('aria-label') || video.getAttribute('title') || video.dataset?.title);
     if (own.length > 2 && !/^(video|video player|media player|player|youtube video player)$/i.test(own)) return own;
+
+    const described = describedBySite(video);
+    if (described) return described;
 
     if (several) {
       const card = video.closest('article, figure, li, [role="article"]');
@@ -62,6 +100,44 @@
     return social && pageTitle.includes(social) ? social : pageTitle || social;
   }
 
+  // What the generic rules cannot find, a site's own page structure can: one entry per site. A site without an entry works from
+  // the generic rules alone (the video's label, the links around it, the page's title). Nothing else in this file names a site.
+  //   description   a selector for the text a card shows about its video (a better name than the page's title)
+  //   playerId      a pattern for an id on the player's wrapper that holds the video's own id
+  //   pageFromId    the address of a video's page, made from that id
+  const SITE_HINTS = [
+    {
+      host: /(^|\.)tiktok\.com$/,
+      description: '[data-e2e="video-desc"]',
+      playerId: /^xgwrapper-\d+-(\d{8,})$/,
+      pageFromId: (id) => `${location.origin}/@/video/${id}`,   // the author is not needed: the site and yt-dlp take /@/video/<id>
+    },
+  ];
+
+  const hint = () => SITE_HINTS.find((h) => h.host.test(location.hostname));
+
+  /** What the site's card says about this video, when the site is known for it. */
+  function describedBySite(video) {
+    const selector = hint()?.description;
+    if (!selector) return '';
+    for (let node = video.parentElement, depth = 0; node && depth < 12; node = node.parentElement, depth++) {
+      const text = clean(node.querySelector(selector)?.textContent);
+      if (text) return text.slice(0, 120);
+    }
+    return '';
+  }
+
+  /** The page of this video when the player's wrapper carries its id and the site is known for it. */
+  function pageFromPlayerId(video) {
+    const { playerId, pageFromId } = hint() ?? {};
+    if (!playerId || !pageFromId) return '';
+    for (let node = video.parentElement, depth = 0; node && depth < 6; node = node.parentElement, depth++) {
+      const id = playerId.exec(node.id ?? '')?.[1];
+      if (id) return pageFromId(id);
+    }
+    return '';
+  }
+
   function sourceOf(video) {
     return video.currentSrc || video.src || video.querySelector('source')?.src || '';
   }
@@ -70,7 +146,7 @@
   // outside this page. The page the video belongs to is then the only address, and the extension hands that to yt-dlp.
   const isBuffer = (video) => /^blob:/i.test(sourceOf(video)) || (!sourceOf(video) && !!video.srcObject);
   // an ending in `/videos/123`, `/reel/123`, `/status/123` or `?v=123`: a single video, not a feed
-  const ONE_VIDEO = /\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch)\/[^/?#]+|[?&]v=|permalink\.php|\/video\.php/i;
+  const ONE_VIDEO = /\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$|\/file\/d\/[^/?#]+|[?&]v=|permalink\.php|\/video\.php/i;
   const permalinks = new WeakMap();
 
   /** The address of the post or page this video belongs to: its own address when the page is about it, else the nearest link to one. */
@@ -100,6 +176,8 @@
       }
     }
 
+    if (!value) value = pageFromPlayerId(video);
+
     permalinks.set(video, { at: Date.now(), value });
     return value;
   }
@@ -108,15 +186,20 @@
     const videos = videoElements();
     return videos.slice(0, 12).map((video) => {
       const buffer = isBuffer(video);
+      const rect = video.getBoundingClientRect();
       return {
         title: titleFor(video, videos.length > 1),
         src: sourceOf(video),
         duration: Number.isFinite(video.duration) ? Math.round(video.duration) : 0,
+        live: video.duration === Infinity,                 // a live stream has no end: the player says so
         width: video.videoWidth || 0,
         height: video.videoHeight || 0,
         blob: buffer,
         drm: !!video.mediaKeys,                         // a player with a licence key: protected, left alone on purpose
+        failed: !!video.error,                          // the browser could not load this source: it is not what plays
         permalink: buffer ? permalinkFor(video) : '',
+        box: [Math.round(rect.width), Math.round(rect.height)],      // with this, the extension can tell a hidden decoy from a video
+        opacity: Number(getComputedStyle(video).opacity),
       };
     });
   }
@@ -139,7 +222,17 @@
     }
   }
 
+  let lastError = '';   // for diagnosis: the last thing that went wrong here
+
   async function refresh(force = false) {
+    try {
+      await refreshOnce(force);
+    } catch (error) {
+      lastError = String(error?.stack ?? error).slice(0, 400);
+    }
+  }
+
+  async function refreshOnce(force) {
     if (!alive()) return stop();
     const videos = describe();
     const report = JSON.stringify(videos);
@@ -334,8 +427,18 @@
     addEventListener('resize', () => render(), { passive: true });
     document.addEventListener('fullscreenchange', () => render());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(true); });
-    chrome.runtime.onMessage.addListener((message) => {
+    chrome.runtime.onMessage.addListener((message, _sender, reply) => {
       if (message?.type === 'media-changed') refresh(true);
+      // diagnose(): what this page's script sees (it answers for the page itself, not for its frames)
+      if (message?.type === 'page-script-state' && window.top === window) {
+        let found = -1;
+        try {
+          found = videoElements().length;
+        } catch (error) {
+          lastError = String(error?.stack ?? error).slice(0, 400);
+        }
+        reply({ videosFound: found, shadowRoots: shadowHosts.length, videosReported: lastReport ? JSON.parse(lastReport).length : 0, itemsAnswered: items.length, buttonShown: !!host?.isConnected, lastError });
+      }
     });
     refresh();
   }

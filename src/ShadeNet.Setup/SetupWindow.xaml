@@ -38,7 +38,7 @@
             <CheckBox x:Name="StartupBox" Content="Start ShadeNet with Windows (hidden in the notification area)" />
             <CheckBox x:Name="BrowserBox" Content="Set up the browser connection (Chrome, Edge, Brave)" IsChecked="True" />
             <TextBlock Margin="22,2,0,0" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
-                       Text="Then add the extension once in your browser; Settings &gt; Browser shows how." />
+                       Text="Your browser asks you to add the extension yourself; when setup is done it takes you there, step by step." />
 
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,22,0,0">
                 <Button x:Name="InstallButton" Content="Install" Style="{StaticResource Primary}" Click="OnInstall" IsDefault="True" />
@@ -55,6 +55,30 @@
         <!-- 3. done / failed -->
         <StackPanel Grid.Row="1" x:Name="DonePanel" Visibility="Collapsed">
             <TextBlock x:Name="DoneText" TextWrapping="Wrap" Margin="0,8,0,0" />
+
+            <!-- one last step the browser keeps for the user -->
+            <Border x:Name="ExtensionPanel" Visibility="Collapsed" Margin="0,16,0,0" Padding="16,14" CornerRadius="8"
+                    Background="#F0F4FF" BorderBrush="#C7D5F8" BorderThickness="1">
+                <StackPanel>
+                    <TextBlock Text="One last step: add the extension to your browser" FontWeight="SemiBold" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource Muted}"
+                               Text="Without it, ShadeNet cannot take over the downloads your browser starts. Browsers do not let a program add an extension for you, so this part is yours. It takes about 20 seconds:" />
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="20">
+                        <Run FontWeight="SemiBold">1.</Run> Click your browser below. Its extensions page opens.<LineBreak />
+                        <Run FontWeight="SemiBold">2.</Run> Turn on <Run FontWeight="SemiBold">Developer mode</Run> (a switch on that page).<LineBreak />
+                        <Run FontWeight="SemiBold">3.</Run> Click <Run FontWeight="SemiBold">Load unpacked</Run>, paste the folder below (it is already copied) and press <Run FontWeight="SemiBold">Select Folder</Run>.
+                    </TextBlock>
+                    <TextBox x:Name="ExtensionFolderBox" IsReadOnly="True" Margin="0,10,0,0" FontSize="12" />
+                    <WrapPanel x:Name="BrowserButtons" Margin="0,4,0,0" />
+                    <WrapPanel Margin="0,4,0,0">
+                        <Button Content="Copy folder path" Click="OnCopyExtensionFolder" Margin="0,0,8,0" />
+                        <Button Content="Show folder" Click="OnShowExtensionFolder" Margin="0,0,8,0" />
+                    </WrapPanel>
+                    <TextBlock x:Name="ExtensionNote" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="12"
+                               Foreground="{StaticResource Muted}" />
+                </StackPanel>
+            </Border>
+
             <CheckBox x:Name="LaunchBox" Content="Open ShadeNet Downloader" IsChecked="True" Margin="0,16,0,0" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
                 <Button x:Name="RetryButton" Content="Try again" Click="OnRetry" Visibility="Collapsed" />

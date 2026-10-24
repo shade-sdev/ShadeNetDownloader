@@ -106,7 +106,7 @@ public static class HttpProbe
                 var (plain, plainUrl) = await HttpFetcher.GetAsync(http, spec, defaultUserAgent, null, ct).ConfigureAwait(false);
                 current = plain;
                 if (!plain.IsSuccessStatusCode)
-                    throw new HttpStatusException((int)plain.StatusCode, HttpFetcher.RetryAfter(plain) ?? retryAfter);
+                    throw new HttpStatusException((int)plain.StatusCode, HttpFetcher.RetryAfter(plain) ?? retryAfter, await HttpFetcher.ReasonAsync(plain, ct).ConfigureAwait(false));
 
                 response = plain;
                 finalUrl = plainUrl;

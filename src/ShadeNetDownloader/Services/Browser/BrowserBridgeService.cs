@@ -116,6 +116,7 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
             Enabled = browser.Enabled,
             ExcludedHosts = browser.ExcludedHosts.ToArray(),
             MinSizeBytes = browser.MinSizeBytes,
+            PageSignIn = browser.PageSignIn,
         };
     }
 

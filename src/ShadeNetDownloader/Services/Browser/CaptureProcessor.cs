@@ -18,7 +18,11 @@ public sealed record CaptureInfo(
     string Source,
     string? AudioUrl = null,
     long? AudioSize = null,
-    double? Duration = null);
+    double? Duration = null,
+    IReadOnlyList<string>? Pieces = null,
+    string? Init = null,
+    IReadOnlyList<string>? AudioPieces = null,
+    string? AudioInit = null);
 
 /// <summary>What the processor needs from the UI; implemented by the app, faked in tests.</summary>
 public interface ICaptureUi
@@ -50,6 +54,7 @@ public sealed class CaptureProcessor
     const int MaxCookies = 32 * 1024;
     const int MaxHeaderValue = 8192;
     const int MaxUserAgent = 512;
+    const int MaxPieces = 5000;
 
     readonly DownloadManager _manager;
     readonly Func<BrowserSettings> _settings;
@@ -160,10 +165,14 @@ public sealed class CaptureProcessor
         {
             // a video stream the extension found (or an .m3u8 address): the best quality, saved as one video file
             var isTracks = capture.Source == "tracks";
-            var isStream = isTracks || capture.Source == "media" || DownloadManager.IsStreamAddress(capture.Url);
+            var isRecord = capture.Source == "record";   // an endless live response (an FLV pull): ffmpeg records it
+            var isPieces = capture.Source == "pieces";   // pieces a player asked for with no playlist: joined like a playlist's
+            var isStream = isTracks || isRecord || isPieces || capture.Source == "media" || DownloadManager.IsStreamAddress(capture.Url);
             var job = _manager.Add(new AddDownloadRequest
             {
                 Stream = isTracks ? new StreamChoice(Direct: true, AudioUrl: capture.AudioUrl, Seconds: capture.Duration ?? 0)
+                    : isRecord ? new StreamChoice(Subtitles: false, Record: true)
+                    : isPieces ? PiecesChoice(capture)
                     : isStream ? new StreamChoice(AudioUrl: capture.Source == "media" ? capture.AudioUrl : null) : null,
                 // a stream, and a video file the page's own button sent, are named after the video, not after the address
                 FileName = (isStream || capture.Source == "video") && !string.IsNullOrWhiteSpace(capture.FileName) ? capture.FileName : null,
@@ -245,15 +254,35 @@ public sealed class CaptureProcessor
 
         // "media": a stream the extension saw playing; "tracks": picture and sound the player fetched as separate files;
         // "video": a plain video file the page plays, sent with the video's name;
-        // "page": the address of a page whose video has no address of its own (yt-dlp is asked about it)
-        var source = request.Source is "contextmenu" or "media" or "tracks" or "video" or "page" ? request.Source : "download";
+        // "page": the address of a page whose video has no address of its own (yt-dlp is asked about it);
+        // "record": a live stream that is one endless response (an FLV pull), recorded as it arrives;
+        // "pieces": what a player that keeps its list of pieces itself asked for (see CaptureRequest.Pieces)
+        var source = request.Source is "contextmenu" or "media" or "tracks" or "video" or "page" or "record" or "pieces" ? request.Source : "download";
         // (the sound as a second playlist belongs to a "media" stream; as a second file, to "tracks")
         string? audioUrl = source is "tracks" or "media" && IsWebUrl(request.AudioUrl) ? request.AudioUrl : null;
         long? audioSize = audioUrl != null && request.AudioSize is > 0 ? request.AudioSize : null;
-        double? duration = source == "tracks" && request.Duration is > 0 and < 7 * 24 * 3600 ? request.Duration : null;
+        double? duration = source is "tracks" or "pieces" && request.Duration is > 0 and < 7 * 24 * 3600 ? request.Duration : null;
 
-        return new CaptureInfo(request.Url, referrer, cookies, userAgent, headers, fileName, size, source, audioUrl, audioSize, duration);
+        IReadOnlyList<string>? pieces = null, audioPieces = null;
+        string? init = null, audioInit = null;
+        if (source == "pieces")
+        {
+            pieces = WebUrls(request.Pieces);
+            if (pieces == null) return null;   // nothing that could be joined
+            init = IsWebUrl(request.Init) ? request.Init : null;
+            audioPieces = WebUrls(request.AudioPieces);
+            audioInit = audioPieces != null && IsWebUrl(request.AudioInit) ? request.AudioInit : null;
+        }
+
+        return new CaptureInfo(request.Url, referrer, cookies, userAgent, headers, fileName, size, source, audioUrl, audioSize, duration,
+            pieces, init, audioPieces, audioInit);
     }
+
+    static IReadOnlyList<string>? WebUrls(string[]? urls) => urls is { Length: > 0 and <= MaxPieces } && urls.All(IsWebUrl) ? urls : null;
+
+    /// <summary>The stream job for pieces a player asked for: downloaded in this order and joined after their initialisation part.</summary>
+    internal static StreamChoice PiecesChoice(CaptureInfo capture) =>
+        new(Subtitles: false, Seconds: capture.Duration ?? 0, Pieces: capture.Pieces, Init: capture.Init, AudioPieces: capture.AudioPieces, AudioInit: capture.AudioInit);
 
     static bool IsWebUrl(string? url) =>
         url is { Length: > 0 and <= MaxUrl } && Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "http" or "https";

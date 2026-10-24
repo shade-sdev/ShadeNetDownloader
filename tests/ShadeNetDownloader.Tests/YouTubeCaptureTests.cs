@@ -87,4 +87,25 @@ public class YouTubeCaptureTests
         Assert.Equal(AudioUrl, request.Stream.AudioUrl);
         Assert.Equal(212.5, request.Stream.Seconds);
     }
+
+    [Fact]
+    public void Pieces_a_player_asked_for_arrive_in_their_order_and_anything_but_web_addresses_is_refused()
+    {
+        var request = new CaptureRequest
+        {
+            Url = "https://cdn.example/v/init.mp4", Source = "pieces", Duration = 94,
+            Pieces = new[] { "https://cdn.example/v/p_0.m4s", "https://cdn.example/v/p_9.m4s" }, Init = "https://cdn.example/v/init.mp4",
+            AudioPieces = new[] { "https://cdn.example/a/p_0.m4s" }, AudioInit = "file:///etc/passwd",
+        };
+
+        var capture = CaptureProcessor.Sanitize(request)!;
+        Assert.Equal(("pieces", 94.0), (capture.Source, capture.Duration!.Value));
+        Assert.Equal(request.Pieces, capture.Pieces);
+        Assert.Equal("https://cdn.example/v/init.mp4", capture.Init);
+        Assert.Null(capture.AudioInit);                                                    // not a web address
+
+        Assert.Null(CaptureProcessor.Sanitize(request with { Pieces = new[] { "https://cdn.example/v/p_0.m4s", "javascript:alert(1)" } }));
+        Assert.Null(CaptureProcessor.Sanitize(request with { Pieces = Array.Empty<string>() }));
+        Assert.Null(CaptureProcessor.Sanitize(request with { Source = "download" })!.Pieces);   // only a pieces hand-over carries them
+    }
 }

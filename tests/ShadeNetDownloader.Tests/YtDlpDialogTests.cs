@@ -95,6 +95,29 @@ public class YtDlpDialogTests
     }
 
     [Fact]
+    public async Task The_referrer_and_cookies_yt_dlp_names_are_sent_with_the_download_but_the_browsers_are_not()
+    {
+        const string tiktok = "https://www.tiktok.com/@scout2015/video/6718335390845095173";
+        using var dir = new TempDir();
+        using var manager = new DownloadManager(new EngineSettings { DownloadRoot = dir.Path, UseCategoryFolders = false });
+        var capture = new CaptureInfo(tiktok, tiktok, "browser=session", null, new Dictionary<string, string>(), "A video", null, "page", null, null, null);
+        var info = new YtDlpInfo("A video", 11, false, new[]
+        {
+            new YtDlpOption("1024p · H.264", 1024, "https://v.example/clip", null, ".mp4", 0, "UA/1", false, Referer: tiktok, Cookies: "tt_chain_token=abc",
+                Headers: new Dictionary<string, string> { ["X-Token"] = "abc" }),
+        });
+        using var vm = new AddDownloadViewModel(manager, null, capture, (_, _) => Task.FromResult(info));
+        await WaitFor(() => vm.ProbeState == ProbeState.Ready, "yt-dlp's answer");
+
+        var request = vm.Build(AddMode.Hold).Single().Request;
+
+        Assert.Equal("https://v.example/clip", request.Url);
+        Assert.Equal(tiktok, request.Referer);
+        Assert.Equal("tt_chain_token=abc", request.Cookies);                // not "browser=session"
+        Assert.Equal("abc", request.Headers!["X-Token"]);
+    }
+
+    [Fact]
     public async Task A_name_the_user_typed_is_kept_when_the_quality_changes()
     {
         using var dir = new TempDir();

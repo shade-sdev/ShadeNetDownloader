@@ -175,6 +175,18 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    public bool PageSignIn
+    {
+        get => Browser.PageSignIn;
+        set
+        {
+            if (Browser.PageSignIn == value) return;
+            Browser.PageSignIn = value;
+            OnPropertyChanged();
+            BrowserSettingsChanged();
+        }
+    }
+
     public bool CaptureShowsDialog
     {
         get => Browser.Mode == CaptureMode.ShowDialog;
@@ -276,23 +288,44 @@ public sealed partial class SettingsViewModel : ObservableObject
             IntegrationError = "The extension folder is missing from this installation.";
     }
 
+    /// <summary>The installed browsers, each with a button that opens its extensions page.</summary>
+    public IReadOnlyList<ExtensionBrowserTarget> InstalledBrowsers { get; } = ExtensionBrowserFinder.Installed();
+
+    public bool HasNoInstalledBrowser => InstalledBrowsers.Count == 0;
+
+    /// <summary>What the last button did, shown under the steps (the folder is copied so that it can be pasted in the browser's folder box).</summary>
+    [ObservableProperty] string _extensionNote = "";
+
     [RelayCommand]
-    void OpenExtensionsPage()
+    void OpenBrowserExtensionsPage(ExtensionBrowserTarget? browser)
     {
-        // The browser's own page for loading an unpacked extension; chrome:// addresses cannot be opened by the shell.
-        foreach (var (exe, address) in new[] { ("chrome.exe", "chrome://extensions"), ("msedge.exe", "edge://extensions") })
+        if (browser == null) return;
+
+        if (!ExtensionBrowserFinder.TryOpen(browser))
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo(exe, address) { UseShellExecute = true });
-                return;
-            }
-            catch (System.ComponentModel.Win32Exception)
-            {
-                // that browser is not installed; try the next one
-            }
+            IntegrationError = $"Could not start {browser.Name}. Open it yourself and type {browser.ExtensionsAddress} in the address bar.";
+            return;
         }
 
-        IntegrationError = "Could not start a browser. Open chrome://extensions (or edge://extensions) yourself.";
+        IntegrationError = "";
+        ExtensionNote = TryCopyFolder() ? "The folder is copied: press Ctrl+V in the box that opens." : "";
+    }
+
+    [RelayCommand]
+    void CopyExtensionFolder() =>
+        ExtensionNote = TryCopyFolder() ? "Copied. Press Ctrl+V in the box that opens." : "Could not copy. Select the folder above and press Ctrl+C.";
+
+    /// <summary>Another program may hold the clipboard for a moment; the folder is shown in a box too, so a failed copy is no error.</summary>
+    bool TryCopyFolder()
+    {
+        try
+        {
+            Clipboard.SetText(ExtensionFolder);
+            return true;
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            return false;
+        }
     }
 }

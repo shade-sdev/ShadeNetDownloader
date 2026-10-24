@@ -9,11 +9,13 @@ import {
   basename, buildCapture, cookiesToHeader, evaluate, headerValue, isCapturableUrl, pickHeaders,
 } from './capture.js';
 import { MediaTracker, looksLikePlaylist, pairStreams } from './media.js';
+import { PieceTracker } from './pieces.js';
+import { RangedFileTracker } from './files.js';
 import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVideoPage } from './youtube.js';
 import { browserTimers } from './native.js';
-import { acceptPageAddress, embedWatchUrl, isPageSite, looksLikeOneVideo } from './sites.js';
+import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
 
-export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0 };
+export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0, pageSignIn: true };
 
 const CONNECT_TIMEOUT_MS = 10000;   // the app may have to be started
 const ANSWER_TIMEOUT_MS = 8000;
@@ -128,12 +130,164 @@ export class Controller {
       onChange: (tabId) => this.updateMediaBadge(tabId),
     });
     this.tracks = new TracksTracker({ onChange: (tabId) => this.updateMediaBadge(tabId) });
+    // pieces a player asks for with no playlist or manifest on the network (it keeps the list itself)
+    this.pieces = new PieceTracker({
+      fetchHead: (url, via) => fetchHead(url, this.recorder?.lookup(via), this.chrome),
+      onChange: (tabId) => this.updateMediaBadge(tabId),
+      skip: (tabId) => this.media.list(tabId).some((i) => i.kind === 'master' || i.kind === 'media'),   // a playlist's pieces are its own
+    });
+    // one whole video file a player reads itself, a range at a time, under any name and type
+    this.files = new RangedFileTracker({
+      fetchHead: (url, via) => fetchHead(url, this.recorder?.lookup(via), this.chrome),
+      onChange: (tabId) => this.updateMediaBadge(tabId),
+      skip: (tabId) => this.media.list(tabId).some((i) => i.kind === 'master' || i.kind === 'media'),
+    });
     this.handling = new Map();   // download id -> the hand-over in progress (or done), so each download is handled once
     this.overlayEnabled = true;  // the "Download" button on top of videos (the popup has the switch)
     this.pageVideos = new Map(); // tab id -> Map(frame id -> { url, videos }): what each frame (the page, or an iframe in it) reports
     this.extraSites = [];        // more sites whose pages yt-dlp may be asked about (the built-in list is in lib/sites.js)
+    this.unattributed = new Map(); // origin -> requests of service/shared workers that no tab could be given yet (see attribute)
+    this.scriptAdded = new Map();  // tab id -> when the page script was last put in by hand (see ensurePageScript)
+    this.scriptErrors = new Map(); // tab id -> why it could not be
+    this.refused = new Map();      // tab id -> Map(address without its fragment -> status): what the server refused the browser itself
     this.events = [];   // the last things that happened, for diagnosis ("why was my download not taken over?")
     this.ready = this.loadLocal();
+  }
+
+  /**
+   * A tab plays something but its page script has never reported: the extension was (re)loaded after the page opened, or the page
+   * was swapped in without loading (single-page sites). The script is put in, so the page's videos are seen and get their button.
+   * At most every 15 seconds per tab; the script itself ignores a second copy.
+   */
+  async ensurePageScript(tabId) {
+    if (!Number.isInteger(tabId) || tabId < 0 || this.pageVideos.has(tabId) || !this.chrome.scripting?.executeScript) return;
+    const last = this.scriptAdded.get(tabId) ?? 0;
+    if (Date.now() - last < 15000) return;
+    this.scriptAdded.set(tabId, Date.now());
+    try {
+      await this.chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ['content.js'] });
+      this.scriptErrors.delete(tabId);
+    } catch (error) {
+      this.scriptErrors.set(tabId, String(error?.message ?? error));   // a page the browser keeps extensions out of (its store, settings)
+    }
+  }
+
+  /**
+   * A request made by a service worker or a shared worker belongs to no tab (the browser says tab -1), though a player may well fetch its
+   * playlist and pieces that way. Its `initiator` is the origin of the page that registered the worker, so it is given to the tab that
+   * shows that origin (a page or an iframe): at once when the tab is known, else kept for a minute and handed over when a frame of that
+   * origin reports its videos (see {@link adopt}). Returns the request to use, or `undefined` when it waits.
+   */
+  attribute(details) {
+    if (!details || (Number.isInteger(details.tabId) && details.tabId >= 0)) return details;
+    let origin;
+    try {
+      origin = new URL(details.initiator).origin;
+    } catch {
+      return undefined;   // not from a web page (the extension's own requests, for one)
+    }
+
+    if (!/^https?:/i.test(origin)) return undefined;
+    const tabId = this.tabShowing(origin);
+    if (tabId !== undefined) return { ...details, tabId };
+
+    const waiting = this.unattributed.get(origin) ?? [];
+    this.unattributed.set(origin, waiting);
+    waiting.push({ ...details, seenAt: Date.now() });
+    while (waiting.length > 60) waiting.shift();
+    return undefined;
+  }
+
+  /** The one tab with a frame at this origin (page or iframe) that has reported a video; none when there is none or more than one. */
+  tabShowing(origin) {
+    const found = new Set();
+    for (const [tabId, frames] of this.pageVideos) {
+      for (const { url } of frames.values()) {
+        try {
+          if (new URL(url).origin === origin) found.add(tabId);
+        } catch {
+          // not an address
+        }
+      }
+    }
+
+    return found.size === 1 ? [...found][0] : undefined;
+  }
+
+  /** A frame of this origin has reported its videos: what its workers asked for before that is theirs now. */
+  adopt(tabId, frameUrl) {
+    let origin;
+    try {
+      origin = new URL(frameUrl).origin;
+    } catch {
+      return;
+    }
+
+    const waiting = this.unattributed.get(origin);
+    if (!waiting || this.tabShowing(origin) !== tabId) return;
+    this.unattributed.delete(origin);
+    const fresh = waiting.filter((d) => Date.now() - d.seenAt < 60000);
+    for (const details of fresh) {
+      const mine = { ...details, tabId };
+      this.tracks.consider(mine);
+      this.media.consider(mine);
+    }
+  }
+
+  /**
+   * For diagnosis, in the extension's service worker console (chrome://extensions > ShadeNet > "service worker"):
+   *   await shadenet.controller.diagnose()                         the tab you are looking at
+   *   await shadenet.controller.diagnose({ urlIncludes: 'site' })  a tab whose address holds that text
+   *   await shadenet.controller.diagnose({ full: true })           with the query strings of the addresses (they can hold tokens)
+   * It says what ShadeNet found on the tab, what the page's videos report and what the player asked for, and, when the player asked
+   * for pieces but never for a playlist, that this is why nothing can be offered. Nothing here leaves the browser.
+   */
+  async diagnose({ urlIncludes = '', full = false } = {}) {
+    // (the console this runs in is a window of its own, with no tabs: "the tab you are looking at" is the one in front of the
+    // browser window used last, else any tab in front)
+    const query = (q) => this.chrome.tabs?.query?.(q) ?? [];
+    const tabs = urlIncludes
+      ? await query({})
+      : [...(await query({ active: true, lastFocusedWindow: true })), ...(await query({ active: true }))].filter((t) => /^https?:/i.test(String(t.url ?? '')));
+    // several tabs may match: the one in front first
+    const tab = urlIncludes ? tabs.filter((t) => String(t.url ?? '').includes(urlIncludes)).sort((a, b) => Number(!!b.active) - Number(!!a.active))[0] : tabs[0];
+    if (!tab) return 'No such tab.';
+    let pageScript;
+    try {
+      pageScript = await this.chrome.tabs.sendMessage(tab.id, { type: 'page-script-state' }, { frameId: 0 });
+    } catch (error) {
+      pageScript = { notRunning: String(error?.message ?? error), couldNotAdd: this.scriptErrors.get(tab.id) ?? null };
+    }
+
+    const strip = (u) => (full ? String(u) : String(u).split('?')[0].split('#')[0]);
+    const items = (await this.itemsFor(tab)).map((i) => ({ kind: i.kind, live: !!i.live, url: strip(i.url), title: i.title }));
+    const videos = [];
+    for (const [frame, { url, videos: list }] of this.pageVideos.get(tab.id) ?? []) {
+      for (const v of list) videos.push({ frame, frameUrl: strip(url), src: strip(v.src), blob: v.blob, live: v.live, drm: v.drm, failed: v.failed || this.wasRefused(tab.id, v.src), box: v.box, opacity: v.opacity, duration: v.duration });
+    }
+
+    const requests = this.media.recent(tab.id, { full });
+    const pieceLike = requests.filter((r) => /\.(m4s|ts|m4v|m4a|aac)$/i.test(new URL(r.url, 'http://x').pathname)).length;
+    const playlists = this.media.list(tab.id).filter((i) => i.kind === 'master' || i.kind === 'media').length;
+    const runs = this.pieces.describe(tab.id).map((r) => (full ? r : { ...r, pattern: r.pattern.split('?')[0] }));
+    const notes = [];
+    if (items.length === 0) notes.push('ShadeNet offers nothing on this tab.');
+    if (pieceLike > 0 && playlists === 0) {
+      notes.push(runs.some((r) => r.status === 'ok')
+        ? 'The player keeps its list of pieces itself (no playlist or manifest on the network): ShadeNet offers the pieces it has asked for, joined. Let the video load to the end first.'
+        : `The player asked for ${pieceLike} pieces of a stream but no playlist or manifest was requested over the network; see "pieceRuns" for why they cannot be joined.`);
+    }
+
+    const waiting = [...this.unattributed].map(([origin, list]) => ({ origin, requests: list.length }));
+    if (waiting.length > 0) {
+      notes.push('Requests made by a service worker or shared worker could not be given to any tab (no tab shows the page that started them): see "workerRequestsWaiting".');
+    }
+
+    if (videos.some((v) => v.failed)) notes.push('A video here has a source the browser could not load (the server refused it, or it is broken): it is not offered, since it is not what plays.');
+    if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
+    if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
+
+    return JSON.stringify({ tab: strip(tab.url), notes, pageScript, offered: items, pageVideos: videos, pieceRuns: runs, filesRead: this.files.describe(tab.id), recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
   }
 
   /** Keeps the last 40 steps, newest last. Never throws. */
@@ -159,6 +313,7 @@ export class Controller {
       enabled: message.enabled !== false,
       excludedHosts: Array.isArray(message.excludedHosts) ? message.excludedHosts : [],
       minSizeBytes: Number.isFinite(message.minSizeBytes) ? message.minSizeBytes : 0,
+      pageSignIn: message.pageSignIn !== false,
     };
   }
 
@@ -176,7 +331,12 @@ export class Controller {
     // video streams the page plays, for the popup's "Videos on this page" list
     c.webRequest?.onHeadersReceived?.addListener(
       (details) => {
+        details = this.attribute(details);
+        if (!details) return undefined;
+        this.noteRefusal(details);
         this.tracks.consider(details);
+        this.pieces.consider(details);
+        this.files.consider(details);
         return this.media.consider(details);
       },
       { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] },
@@ -186,13 +346,19 @@ export class Controller {
       if (change.status === 'loading') {
         this.media.clear(tabId);
         this.tracks.clear(tabId);
+        this.pieces.clear(tabId);
+        this.files.clear(tabId);
         this.pageVideos.delete(tabId);
+        this.refused.delete(tabId);
       }
     });
     c.tabs?.onRemoved?.addListener((tabId) => {
       this.media.clear(tabId);
       this.tracks.clear(tabId);
+      this.pieces.clear(tabId);
+      this.files.clear(tabId);
       this.pageVideos.delete(tabId);
+      this.refused.delete(tabId);
     });
     c.contextMenus?.onClicked?.addListener((info, tab) => this.onContextMenu(info, tab));
     c.runtime.onInstalled?.addListener(() => this.createMenus());
@@ -371,6 +537,7 @@ export class Controller {
    * own "Download" button (content.js) to look again.
    */
   async updateMediaBadge(tabId) {
+    this.ensurePageScript(tabId);
     const action = this.chrome.action;
     if (!action?.setBadgeText) return;
     const tab = await this.safely(() => this.chrome.tabs.get(tabId));
@@ -395,12 +562,38 @@ export class Controller {
     return cleanTitle(tab.title);
   }
 
-  /** Plain video files (`<video src="https://…/clip.mp4">`) that frames of the tab report. */
+  /**
+   * The server refused the browser itself this address (a dead source a player tried before the one it plays): it is not offered,
+   * since it would be refused to ShadeNet too. An answer that succeeds later takes it back.
+   */
+  noteRefusal(details) {
+    if (!Number.isInteger(details?.tabId) || details.tabId < 0 || typeof details.url !== 'string' || !details.statusCode) return;
+    const key = details.url.split('#')[0];
+    const refused = this.refused.get(details.tabId) ?? new Map();
+    if (details.statusCode >= 400 && details.statusCode !== 416) {
+      refused.set(key, details.statusCode);
+      while (refused.size > 200) refused.delete(refused.keys().next().value);
+      this.refused.set(details.tabId, refused);
+    } else if (details.statusCode < 300 && refused.delete(key) && refused.size === 0) {
+      this.refused.delete(details.tabId);
+    }
+  }
+
+  /** Did the server refuse the browser this address on this tab? */
+  wasRefused(tabId, url) {
+    return typeof url === 'string' && !!this.refused.get(tabId)?.has(url.split('#')[0]);
+  }
+
+  /**
+   * Plain video files (`<video src="https://…/clip.mp4">`) that frames of the tab report. A source the browser could not load (the
+   * element says so, or the server refused it) is not offered: it is not what plays, and a player that moved on plays another.
+   */
   fileVideos(tabId) {
     const found = [];
     for (const { videos } of this.pageVideos.get(tabId)?.values() ?? []) {
       for (const v of videos) {
         if (typeof v.src !== 'string' || !/^https?:\/\//i.test(v.src) || looksLikePlaylist(v.src, '')) continue;
+        if (v.failed || this.wasRefused(tabId, v.src)) continue;
         if (this.media.get(tabId, v.src) || found.some((f) => f.src === v.src)) continue;
         found.push(v);
       }
@@ -424,12 +617,24 @@ export class Controller {
     return /^https?:\/\/[^/]+\/./.test(origin) ? origin : '';   // already a full address (documentUrl)
   }
 
+  /** The length the tab's longest video reports (its pieces have none of their own), 0 when none does. */
+  playingLength(tabId) {
+    let longest = 0;
+    for (const { videos } of this.pageVideos.get(tabId)?.values() ?? []) for (const v of videos) if (v.duration > longest) longest = v.duration;
+    return longest;
+  }
+
   /** The videos of this tab that are downloaded by giving their PAGE to yt-dlp. */
   pageItems(tab, name, haveOthers) {
     const pages = [];
-    const add = (url, title, guess = false) => {
-      if (!url || pages.some((p) => p.url === url)) return;
-      pages.push({ url, kind: 'page', live: false, protected: false, duration: 0, maxHeight: 0, title, guess, quality: guess ? 'ShadeNet will try' : 'qualities chosen in ShadeNet' });
+    const add = (url, title, guess = false, live = false) => {
+      if (!url) return;
+      const known = pages.find((p) => p.url === url);
+      if (known) {
+        known.live ||= live;
+        return;
+      }
+      pages.push({ url, kind: 'page', live, protected: false, duration: 0, maxHeight: 0, title, guess, quality: guess ? 'ShadeNet will try' : 'qualities chosen in ShadeNet' });
     };
 
     if (isVideoPage(tab.url)) add(tab.url, name);
@@ -441,11 +646,12 @@ export class Controller {
 
       for (const v of videos) {
         if (!v.blob || v.drm) continue;   // protected players are left alone on purpose
+        // A live stream has no page of its own to link to: the page it plays on (a user's /live page) is its address.
         const address = acceptPageAddress(v.permalink, this.extraSites)
-          || (isPageSite(tab.url, this.extraSites) && looksLikeOneVideo(tab.url) ? tab.url : '');
+          || (isPageSite(tab.url, this.extraSites) && (looksLikeOneVideo(tab.url) || v.live) ? acceptPageAddress(tab.url, this.extraSites) : '');
         const title = v.title ? cleanTitle(v.title) : name;
         if (address) {
-          add(address, title);
+          add(address, title, false, v.live);
         } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && /^https?:\/\//i.test(frameUrl)) {
           // a site yt-dlp is not known for, and nothing on the network that names the video: the frame's own page is the one thing
           // left to try. It may not work; the button says so, and the dialog explains if yt-dlp cannot read it.
@@ -466,10 +672,30 @@ export class Controller {
       ...(m.audioUrl ? { audioUrl: m.audioUrl } : {}), ...(m.audioOnly ? { audioOnly: true } : {}),
     }));
 
+    // a video file the player reads itself (its bytes were looked at): before the <video> addresses, which may be a front its code answers
+    for (const f of this.files.items(tab.id)) {
+      if (items.some((i) => i.url === f.url)) continue;
+      items.push({
+        url: f.url, kind: 'file', live: false, protected: f.protected, duration: this.playingLength(tab.id), maxHeight: f.maxHeight, title: name,
+        ...(f.kind === 'audio' ? { audioOnly: true } : {}),
+      });
+    }
+
     for (const v of this.fileVideos(tab.id)) {
+      if (items.some((i) => i.url === v.src)) continue;
       items.push({
         url: v.src, kind: 'file', live: false, protected: false, duration: v.duration || 0, maxHeight: v.height || 0,
         title: v.title ? cleanTitle(v.title) : name,
+      });
+    }
+
+    // a player that keeps its list of pieces itself: the pieces it asked for, joined (as far as it has loaded the video)
+    for (const p of this.pieces.items(tab.id)) {
+      const count = p.pieces.length + (p.audioPieces?.length ?? 0);
+      items.push({
+        url: p.url, kind: 'pieces', live: false, protected: p.protected, duration: this.playingLength(tab.id), maxHeight: p.maxHeight, title: name,
+        ...(p.audioPieces ? { audioUrl: p.audioPieces[0] } : {}), ...(p.audioOnly ? { audioOnly: true } : {}),
+        quality: `${count} pieces loaded so far`,
       });
     }
 
@@ -509,14 +735,19 @@ export class Controller {
       width: Number.isFinite(v?.width) ? v.width : 0,
       height: Number.isFinite(v?.height) ? v.height : 0,
       blob: !!v?.blob,
+      live: !!v?.live,
       drm: !!v?.drm,
+      failed: !!v?.failed,
       permalink: String(v?.permalink ?? '').slice(0, 2000),
-    }));
+      box: Array.isArray(v?.box) ? v.box.slice(0, 2).map((n) => (Number.isFinite(n) ? n : 0)) : null,
+      opacity: Number.isFinite(v?.opacity) ? v.opacity : 1,
+    })).filter((v) => !isDecoyVideo(v));
 
     const frames = this.pageVideos.get(tab.id) ?? new Map();
     const before = JSON.stringify([...frames.entries()]);
     frames.set(sender.frameId ?? 0, { url: String(sender.url ?? tab.url ?? ''), videos: clean });
     this.pageVideos.set(tab.id, frames);
+    this.adopt(tab.id, String(sender.url ?? tab.url ?? ''));
     if (JSON.stringify([...frames.entries()]) !== before) this.updateMediaBadge(tab.id);
 
     return { items: shownItems(await this.itemsFor(tab)), overlay: this.overlayEnabled };
@@ -529,8 +760,16 @@ export class Controller {
     if (page) return this.sendPage(tab, page);
     const playing = tab ? this.tracks.current(tab.id) : null;
     if (playing && playing.video.url === url) return this.sendTracks(tab, playing);
+    const read = tab ? this.files.find(tab.id, url) : null;
+    if (read) {
+      if (read.protected) return { accepted: false, reason: 'protected' };
+      // (no referrer of its own: the one the player sent, else the player's page)
+      return this.sendFile(tab, { src: url, extension: read.format, referrerFallback: this.playerPage(tab, read.referrer) || tab.url, size: read.size });
+    }
     const file = tab ? this.fileVideos(tab.id).find((v) => v.src === url) : null;
     if (file) return this.sendFile(tab, file);
+    const pieces = tab ? this.pieces.find(tab.id, url) : null;
+    if (pieces) return this.sendPieces(tab, pieces);
     if (!tab || !this.media.get(tab.id, url)) return { accepted: false, reason: 'unknown-stream' };
 
     try {
@@ -538,7 +777,8 @@ export class Controller {
       // the player's own page (an iframe's address) is the referrer the pieces are expected with, not the outer page
       const referrerFallback = this.playerPage(tab, this.media.get(tab.id, url)?.referrer) || tab.url;
       const audioUrl = (await this.itemsFor(tab)).find((i) => i.url === url)?.audioUrl;   // the sound's own playlist, when it has one
-      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: 'media', audioUrl });
+      const recording = this.media.get(tab.id, url)?.kind === 'record';   // a live FLV pull: the app records it with ffmpeg
+      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`stream ${url} sent: accepted=${result?.accepted} reason=${result?.reason}`);
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
@@ -551,14 +791,18 @@ export class Controller {
   }
 
   /**
-   * The address of a video page goes to the app, which shows its Add dialog and asks yt-dlp. No cookies travel with it:
-   * the page's address is all the app needs, and your sign-in stays in the browser.
+   * The address of a video page goes to the app, which shows its Add dialog and asks yt-dlp. Live streams and private videos can
+   * only be read by a signed-in session, so the page's own site's cookies go along (the switch in the app's Settings > Browser turns
+   * that off); the app gives them to yt-dlp in a temporary file and never to the file servers.
    */
   async sendPage(tab, page) {
     try {
       if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      const cookies = this.appSettings.pageSignIn
+        ? cookiesToHeader(await this.safely(() => this.chrome.cookies.getAll({ url: page.url })))
+        : '';
       const message = buildCapture({
-        id: this.link.newId(), url: page.url, referrer: tab.url, userAgent: this.userAgent, fileName: page.title || cleanTitle(tab.title), source: 'page',
+        id: this.link.newId(), url: page.url, referrer: tab.url, cookies, userAgent: this.userAgent, fileName: page.title || cleanTitle(tab.title), source: 'page',
       });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`page sent: accepted=${result?.accepted} reason=${result?.reason}`);
@@ -571,15 +815,49 @@ export class Controller {
     }
   }
 
+  /**
+   * The pieces a player asked for (it keeps their list itself): the app downloads them in this order and joins them after their
+   * initialisation part, the way it joins the pieces of a playlist. Protected ones are never sent.
+   */
+  async sendPieces(tab, item) {
+    if (item.protected) return { accepted: false, reason: 'protected' };
+    try {
+      if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      const message = await this.describe({
+        url: item.init ?? item.pieces[0], lookupUrl: item.pieces[0], referrerFallback: tab.url, fileName: this.pageTitle(tab), source: 'pieces',
+        duration: this.playingLength(tab.id),
+      });
+      message.pieces = item.pieces;
+      if (item.init) message.init = item.init;
+      if (item.audioPieces) {
+        message.audioPieces = item.audioPieces;
+        if (item.audioInit) message.audioInit = item.audioInit;
+      }
+
+      if (JSON.stringify(message).length > 3_500_000) throw new Error('too many pieces to hand over at once');
+      const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
+      this.trace(`pieces sent (${item.pieces.length}): accepted=${result?.accepted} reason=${result?.reason}`);
+      this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
+      return { accepted: !!result?.accepted, reason: result?.reason };
+    } catch (error) {
+      this.trace(`pieces hand-over failed: ${error?.message ?? error}`);
+      this.flash('!', '#c4452d');
+      return { accepted: false, reason: String(error?.message ?? error) };
+    }
+  }
+
   /** A plain video file the page plays: the app asks or starts as set up, and names the file after the video. */
   async sendFile(tab, file) {
     try {
       if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
-      const extension = /\.(mp4|webm|mkv|mov|m4v|ogv|ogg)(?=$|[?#])/i.exec(new URL(file.src).pathname + '#')?.[1]?.toLowerCase() ?? 'mp4';
+      const extension = file.extension ?? /\.(mp4|webm|mkv|mov|m4v|ogv|ogg)(?=$|[?#])/i.exec(new URL(file.src).pathname + '#')?.[1]?.toLowerCase() ?? 'mp4';
       const message = await this.describe({
         url: file.src,
-        referrer: tab.url,
-        fileName: `${(file.title ? cleanTitle(file.title) : this.pageTitle(tab)).replace(/[.\s]+$/, '') || 'video'}.${extension}`,   // "Title." + ".mp4" would be "Title..mp4"
+        referrer: file.referrerFallback ? undefined : tab.url,
+        referrerFallback: file.referrerFallback,
+        // ("Title." + ".mp4" would be "Title..mp4", and a page that names its video "Film 1080p.mkv" does not make it "….mkv.mp4")
+        fileName: `${(file.title ? cleanTitle(file.title) : this.pageTitle(tab)).replace(/\.(mp4|mkv|webm|mov|m4v|avi|flv|ts)$/i, '').replace(/[.\s]+$/, '') || 'video'}.${extension}`,
+        size: file.size,
         source: 'video',
       });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);

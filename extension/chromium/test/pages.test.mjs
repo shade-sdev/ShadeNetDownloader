@@ -5,12 +5,12 @@ import assert from 'node:assert/strict';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
-import { acceptPageAddress, embedWatchUrl, isPageSite, looksLikeOneVideo } from '../lib/sites.js';
+import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from '../lib/sites.js';
 import { FakeApp, fakeChrome, manualTimers } from './fakes.mjs';
 
-function setup(tab) {
+function setup(tab, cookies = {}) {
   const app = new FakeApp();
-  const fake = fakeChrome(app);
+  const fake = fakeChrome(app, { cookies });
   Object.assign(fake.chrome.tabs.active, tab);
   const timers = manualTimers();
   let controller;
@@ -38,7 +38,7 @@ test('a Facebook video page whose player uses a buffer gets a button that sends 
   assert.equal(capture.url, FB);
   assert.equal(capture.source, 'page');
   assert.equal(capture.fileName, 'How to Share');
-  assert.equal(capture.cookies, undefined);   // the browser's sign-in stays in the browser
+  assert.equal(capture.cookies, undefined);   // (this browser has none for the site)
 });
 
 test('in a feed the address of the video\'s own post is used, not the feed\'s', async () => {
@@ -122,4 +122,127 @@ test('the site list, one-video addresses and embeds', () => {
   assert.equal(embedWatchUrl('https://evil.example/embed/abcdefghijk'), null);
   assert.equal(acceptPageAddress('https://www.facebook.com/reel/1#x'), 'https://www.facebook.com/reel/1');
   assert.equal(acceptPageAddress('https://evil.example/reel/1'), '');
+});
+
+// ---- a hidden decoy <video> next to the real one, whose picture comes through a buffer (any site that does this) ----
+
+const TIKTOK = 'https://www.tiktok.com/@scout2015/video/6718335390845095173';
+
+test('a tiny see-through <video> is not offered, so the real video\'s page is', async () => {
+  const t = setup({ title: 'Scout | TikTok', url: TIKTOK });
+  const decoy = { title: 'TikTok', src: 'https://cdn.example/webapp/playback1.mp4', blob: false, drm: false, permalink: '', duration: 0, width: 0, height: 0, box: [50, 50], opacity: 0.001 };
+  const real = blobVideo({ title: 'Scramble up ur name', src: 'blob:https://www.tiktok.com/358b0f8f', permalink: TIKTOK, box: [432, 768], opacity: 0 });
+
+  const answer = await t.controller.onPageVideos(from(t, TIKTOK), [decoy, real]);
+
+  assert.deepEqual(answer.items.map((i) => [i.kind, i.url]), [['page', TIKTOK]]);
+});
+
+test('what makes a video a decoy is its size and see-through-ness, never its address', () => {
+  assert.equal(isDecoyVideo({ box: [50, 50], opacity: 0.001 }), true);
+  assert.equal(isDecoyVideo({ box: [1, 1], opacity: 0 }), true);
+  assert.equal(isDecoyVideo({ box: [432, 768], opacity: 0 }), false);     // a site that plays its video see-through
+  assert.equal(isDecoyVideo({ box: [50, 50], opacity: 1 }), false);       // a small video that can be seen
+  assert.equal(isDecoyVideo({ box: [0, 0], opacity: 1 }), true);         // one that takes no room at all: a hidden preview
+  assert.equal(isDecoyVideo({ src: 'https://x.example/v.mp4' }), false);  // an older page script that reports no size
+  assert.equal(isDecoyVideo(null), false);
+});
+
+// ---- live streams: a player that feeds a buffer and never ends (TikTok, Instagram, Facebook, X ... any site yt-dlp reads) ----
+
+const liveVideo = (extra = {}) => blobVideo({ title: 'Going live', src: 'blob:https://www.tiktok.com/live-1', blob: true, live: true, duration: 0, ...extra });
+
+test('a live page of a known site gets a button that records it, whatever its address looks like', async () => {
+  for (const page of ['https://www.tiktok.com/@scout2015/live', 'https://www.instagram.com/someone/live/', 'https://www.facebook.com/someone/live', 'https://x.com/i/broadcasts/1yNGaQZEoQBGj']) {
+    const t = setup({ title: 'Live', url: page });
+    const answer = await t.controller.onPageVideos(from(t, page), [liveVideo()]);
+    assert.deepEqual(answer.items.map((i) => [i.kind, i.url, i.live]), [['page', page, true]], page);
+  }
+});
+
+test('a live page that is not on a site yt-dlp is known for gets no button', async () => {
+  const t = setup({ title: 'Live', url: 'https://unknown.example/someone/live' });
+  const answer = await t.controller.onPageVideos(from(t, 'https://unknown.example/someone/live'), [liveVideo()]);
+  assert.equal(answer.items.filter((i) => i.kind === 'page' && !i.guess).length, 0);
+});
+
+test('a feed video that is not live still needs its own address (the front page is not a video)', async () => {
+  const t = setup({ title: 'TikTok', url: 'https://www.tiktok.com/' });
+  const answer = await t.controller.onPageVideos(from(t, 'https://www.tiktok.com/'), [liveVideo({ live: false })]);
+  assert.equal(answer.items.length, 0);
+});
+
+test('live addresses look like one video; the bare /live front door of a site does not', () => {
+  assert.equal(looksLikeOneVideo('https://www.tiktok.com/@scout2015/live'), true);
+  assert.equal(looksLikeOneVideo('https://www.instagram.com/someone/live/'), true);
+  assert.equal(looksLikeOneVideo('https://www.facebook.com/live/producer/12345'), true);
+  assert.equal(looksLikeOneVideo('https://x.com/i/broadcasts/1yNGaQZEoQBGj'), true);
+  assert.equal(looksLikeOneVideo('https://www.tiktok.com/live'), false);
+  assert.equal(looksLikeOneVideo('https://www.twitch.tv/live/'), false);
+});
+
+// ---- the sign-in of the page's own site goes to the app for yt-dlp (lives and private videos need one) ----
+
+const LIVE_PAGE = 'https://www.tiktok.com/@scout2015/live';
+const SIGNED_IN = { [LIVE_PAGE]: [{ name: 'sessionid', value: 'abc' }, { name: 'ttwid', value: 'xyz' }] };
+
+test('a video page is sent with the browser\'s cookies for that site', async () => {
+  const t = setup({ title: 'Live', url: LIVE_PAGE }, SIGNED_IN);
+  await t.controller.onPageVideos(from(t, LIVE_PAGE), [liveVideo()]);
+
+  const sent = await t.controller.sendMedia(LIVE_PAGE, t.chrome.tabs.active);
+
+  assert.equal(sent.accepted, true);
+  assert.equal(t.app.captures[0].source, 'page');
+  assert.equal(t.app.captures[0].cookies, 'sessionid=abc; ttwid=xyz');
+});
+
+test('with the switch off in the app no cookie leaves the browser for a page', async () => {
+  const t = setup({ title: 'Live', url: LIVE_PAGE }, SIGNED_IN);
+  t.app.settings.pageSignIn = false;   // what the app tells the extension when it connects
+  await t.controller.onPageVideos(from(t, LIVE_PAGE), [liveVideo()]);
+
+  await t.controller.sendMedia(LIVE_PAGE, t.chrome.tabs.active);
+
+  assert.equal(t.app.captures[0].cookies, undefined);
+});
+
+// ---- a tab whose page script never reported (opened before the extension was loaded, or swapped in without loading) ----
+
+test('a tab that plays something but never reported gets the page script put in, once in a while', async () => {
+  const t = setup({ title: 'Video', url: 'https://www.example.com/watch' });
+  const added = [];
+  t.chrome.scripting = { executeScript: async (what) => { added.push(what); return []; } };
+
+  await t.controller.ensurePageScript(7);
+  await t.controller.ensurePageScript(7);   // again at once: not again
+
+  assert.deepEqual(added, [{ target: { tabId: 7, allFrames: true }, files: ['content.js'] }]);
+});
+
+test('a tab whose page script has reported is left alone, and a refusal is kept for diagnosis', async () => {
+  const t = setup({ title: 'Video', url: 'https://www.example.com/watch' });
+  const added = [];
+  t.chrome.scripting = { executeScript: async (what) => { added.push(what); throw new Error('Cannot access contents of the page'); } };
+  await t.controller.onPageVideos(from(t, 'https://www.example.com/watch'), [blobVideo()]);
+
+  await t.controller.ensurePageScript(7);
+  assert.deepEqual(added, []);
+
+  await t.controller.ensurePageScript(8);
+  assert.equal(t.controller.scriptErrors.get(8), 'Cannot access contents of the page');
+});
+
+// ---- Google Drive: the player is an embed (youtube.googleapis.com) in the Drive page, which is what yt-dlp reads ----
+
+test('a Drive video is sent as its Drive page, not as the embedded player\'s address', async () => {
+  const DRIVE = 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view';
+  const EMBED = 'https://youtube.googleapis.com/embed/?ps=docs&partnerid=30&hbut=Ci0B';
+  const t = setup({ title: 'holiday.mp4 - Google Drive', url: DRIVE });
+
+  const answer = await t.controller.onPageVideos(from(t, EMBED, 5), [blobVideo({ src: 'blob:https://youtube.googleapis.com/x' })]);
+
+  assert.deepEqual(answer.items.map((i) => [i.kind, i.url, !!i.guess]), [['page', DRIVE, false]]);
+  assert.equal(looksLikeOneVideo('https://docs.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit'), true);
+  assert.equal(looksLikeOneVideo('https://drive.google.com/drive/folders/1AbCd'), false);
 });

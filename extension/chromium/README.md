@@ -6,6 +6,10 @@ the session cookie is sent, for example).
 
 ## Install (once)
 
+When ShadeNet is installed with its setup program, the last page of setup walks through steps 2 and 3 below: it opens
+the installed browser on its extensions page and puts the folder path on the clipboard. (Browsers do not let a program add
+an extension for the user, so the click on *Load unpacked* stays with them.)
+
 1. In ShadeNet: **Settings → Browser integration → Set up**. This registers the native messaging host for Chrome, Edge,
    Brave and Chromium under *HKEY_CURRENT_USER* (no administrator rights).
 2. In your browser open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**.
@@ -35,6 +39,15 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   lists them too. One click hands the video over; the file is saved under the video's name. The switch "Show a Download
   button on videos" in the popup turns the button off. (`content.js` runs in every page and frame; it only reports the
   `<video>` elements to the extension and draws the answer.) Pages that were open before the extension was reloaded need a refresh.
+* **Video files a player reads itself** (its own code asks for the file a range at a time, under any name and type, such as
+  `/c/f/89a7f.4` sent as `application/octet-stream`, while the `<video>` shows a `blob:` or another address): a partial
+  answer of a big file has its first bytes looked at, and only a real video file (MP4, WebM, Matroska, FLV, MPEG-TS) is
+  offered, with its size and the player's own Referer; one whose tracks name an encryption is listed as protected. It is listed
+  before the `<video>` element's own address, which may be one the player's code answers itself. `diagnose()` lists every
+  such file it saw under `filesRead`, with what the look said (`ok`, `not-a-video-file`, `unreadable`).
+* **Dead sources are skipped.** A player that tries one source and moves on to another (the first was refused, deleted or
+  broken) leaves the dead one in the page: a `<video>` whose source the browser could not load, or whose address the server
+  refused the browser itself, is not offered. Only what the browser could load is.
 * **Videos in iframes** (an embedded player from another site) get their own button, and an embedded YouTube player is
   offered as its watch page.
 * **Videos with no address** (Facebook, Instagram, X, TikTok, Vimeo, Reddit ... play through a `blob:` buffer, so no file
@@ -60,6 +73,18 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   already).
 * **A try.** A hidden-address video on a site yt-dlp is not known for, with nothing found on the network, gets a button
   "Try to download this video": ShadeNet asks yt-dlp about the frame's own page, and the dialog says why if it cannot.
+* **Live streams.** A live stream that is a playlist (HLS, DASH) is recorded piece by piece. One that is a single endless response
+  (an FLV, MPEG-TS or WebM pull, as TikTok, Bilibili, Douyin and IPTV-style sites send) has no length, so the extension lists it as a
+  "Live stream" and the app records it with ffmpeg until it ends or you press *Stop and save*. The pieces of a playlist stream are told
+  apart from an endless response (a playlist on the page, or several addresses of the same format within moments). A live page whose
+  stream cannot be seen this way falls back to asking yt-dlp (`lib/sites.js` lists the sites it knows), with your sign-in for that site
+  if the setting in *Settings > Browser* is on.
+* **Players that keep their list of pieces themselves.** Some players (Media Source Extensions with no playlist or manifest on the
+  network, like <https://r-w-c.github.io/mse-demo/>) fetch an initialisation part and then numbered pieces that only their own code
+  lists. The extension notices such a run (one folder, names alike with a counter), checks the first bytes (MP4 fragments or MPEG-TS
+  pieces, not whole files; an initialisation part that names no encryption) and offers "Video (from its pieces)": the app downloads
+  the pieces the player has asked for, in that order, and joins them after their initialisation part, as it does a playlist's. It gets
+  what the player has loaded, so let the video load to the end first. Protected (encrypted) streams are not offered (`lib/pieces.js`).
 * ShadeNet can be started by the extension: if it is not running, the host launches it minimized.
 
 Settings that apply are set in the app (Settings → Browser integration): capturing on/off, ask first or start right

@@ -180,7 +180,7 @@ public sealed class DownloadManager : IDisposable
         var name = FileNameHelper.Sanitize(request.FileName
                                            ?? (request.Stream != null ? HlsClient.SuggestName(uri) + ".mp4" : null)
                                            ?? probe?.FileName ?? GuessName(uri));
-        if (request.Stream != null) name = StreamFileName(name);
+        if (request.Stream != null) name = request.Stream.Record ? RecordingFileName(name) : StreamFileName(name);
         var category = request.Category ?? Settings.CategoryOf(name);
         var dir = request.SaveDirectory ?? Settings.ResolveCategoryFolder(category);
         Directory.CreateDirectory(dir);
@@ -213,7 +213,8 @@ public sealed class DownloadManager : IDisposable
                 job.Kind = DownloadKind.Hls;
                 job.Probed = true;
                 job.Hls = new HlsJobData { Height = stream.Height, Bandwidth = stream.Bandwidth, AudioName = stream.AudioName, Subtitles = stream.Subtitles, EmbedSubtitles = stream.EmbedSubtitles,
-                    Direct = stream.Direct, AudioUrl = stream.AudioUrl, Seconds = stream.Seconds,
+                    Direct = stream.Direct, AudioUrl = stream.AudioUrl, Seconds = stream.Seconds, Record = stream.Record, Live = stream.Record,
+                    Pieces = stream.Pieces?.ToList(), InitUrl = stream.Init, AudioPieces = stream.AudioPieces?.ToList(), AudioInitUrl = stream.AudioInit,
                 };
             }
 
@@ -257,6 +258,14 @@ public sealed class DownloadManager : IDisposable
         var ext = Path.GetExtension(name).ToLowerInvariant();
         if (ext is ".mp4" or ".mkv" or ".ts" or ".mov" or ".m4v") return name;
         return (ext is ".m3u8" or ".m3u" ? Path.ChangeExtension(name, null) : name) + ".mp4";
+    }
+
+    /// <summary>A recorded live stream is a Matroska file (it takes whatever the stream carries, and survives being cut off).</summary>
+    static string RecordingFileName(string name)
+    {
+        var ext = Path.GetExtension(name).ToLowerInvariant();
+        if (ext == ".mkv") return name;
+        return (ext is ".mp4" or ".flv" or ".ts" or ".mov" or ".m4v" or ".m3u8" ? Path.ChangeExtension(name, null) : name) + ".mkv";
     }
 
     static string GuessName(Uri uri)
@@ -310,7 +319,9 @@ public sealed class DownloadManager : IDisposable
             Publish = s => JobUpdated?.Invoke(s),
         };
 
-        IJobRunner runner = job.Kind == DownloadKind.Hls ? new HlsRunner(job, ctx) : new JobRunner(job, ctx);
+        IJobRunner runner = job.Kind == DownloadKind.Hls
+            ? job.Hls?.Record == true ? new RecordRunner(job, ctx) : new HlsRunner(job, ctx)
+            : new JobRunner(job, ctx);
         var cts = new CancellationTokenSource();
         var rj = new RunningJob { Runner = runner, Cts = cts, FromQueue = fromQueue };
         _running[job.Id] = rj;

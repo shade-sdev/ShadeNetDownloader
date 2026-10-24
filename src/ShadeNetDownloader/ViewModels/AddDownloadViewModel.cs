@@ -49,7 +49,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         Func<string, CancellationToken, Task<YtDlpInfo>>? resolver = null)
     {
         _manager = manager;
-        _resolver = resolver ?? ((url, ct) => DefaultResolveAsync(manager.Settings, url, ct));
+        _resolver = resolver ?? ((url, ct) => DefaultResolveAsync(manager.Settings, url, PageSignIn(url), ct));
         _connections = Math.Clamp(manager.Settings.DefaultConnections, 1, 32);
         _saveFolder = manager.Settings.ResolveCategoryFolder(CategoryResolver.General);
         _category = CategoryResolver.General;
@@ -256,6 +256,20 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            // pieces a player asked for with no playlist: the extension already knows what they are
+            if (IsCapturedLink(url) && _capture!.Source == "pieces")
+            {
+                ShowPieces(_capture);
+                return;
+            }
+
+            // an endless live response: nothing to ask the server (a request would sit on the stream for ever)
+            if (IsCapturedLink(url) && _capture!.Source == "record")
+            {
+                ShowRecording(_capture);
+                return;
+            }
+
             if (YtDlp.IsSupportedPage(url) || (IsCapturedLink(url) && _capture!.Source == "page"))
             {
                 await ShowYtDlpAsync(url, cts).ConfigureAwait(true);
@@ -267,7 +281,19 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 captured ? _capture!.Headers : null);
             // The response stays open: if the user presses "Download now" it becomes the first connection, so sites that
             // allow a link to be requested only once still work (IDM: "start downloading immediately").
-            var result = await _manager.ProbeAndHoldAsync(spec, cts.Token);
+            ProbeResult result;
+            try
+            {
+                result = await _manager.ProbeAndHoldAsync(spec, cts.Token);
+            }
+            catch (HttpStatusException refused) when (refused.StatusCode is 401 or 403
+                                                      && (DownloadManager.IsStreamAddress(url) || (captured && _capture!.Source == "media")))
+            {
+                // a playlist refused when asked for as a file: read it as a playlist, which also tries it without its (expired) token
+                await ShowStreamAsync(spec, url, cts).ConfigureAwait(true);
+                return;
+            }
+
             if (cts.IsCancellationRequested)
             {
                 result.Discard();
@@ -312,12 +338,27 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         }
     }
 
-    static Task<YtDlpInfo> DefaultResolveAsync(ShadeNet.Core.Engine.EngineSettings settings, string url, CancellationToken ct)
+    /// <summary>The browser's sign-in for the page the browser handed over (and for no other address), when the app was allowed to receive it.</summary>
+    string? PageSignIn(string url) =>
+        _capture is { Source: "page", Cookies: { Length: > 0 } cookies } && string.Equals(_capture.Url, url, StringComparison.OrdinalIgnoreCase) ? cookies : null;
+
+    /// <summary>
+    /// yt-dlp is asked without the sign-in first: most pages need none, and an account's cookies are not something to hand out without a
+    /// reason. Only when it cannot read the page is it asked again with them (a live stream, a private video).
+    /// </summary>
+    static async Task<YtDlpInfo> DefaultResolveAsync(ShadeNet.Core.Engine.EngineSettings settings, string url, string? signIn, CancellationToken ct)
     {
         var exe = settings.FindYtDlp()
                   ?? throw new DownloadException(JobErrorKind.Tool,
                       "yt-dlp was not found. Run tools\\get-tools.ps1, or choose its location in Settings > Downloads.");
-        return YtDlp.ResolveAsync(exe, url, ct);
+        try
+        {
+            return await YtDlp.ResolveAsync(exe, url, ct).ConfigureAwait(false);
+        }
+        catch (DownloadException ex) when (signIn != null && ex.Kind == JobErrorKind.Tool && !ex.Message.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
+        {
+            return await YtDlp.ResolveAsync(exe, url, ct, cookies: signIn).ConfigureAwait(false);
+        }
     }
 
     /// <summary>A YouTube page: yt-dlp says which files are behind it; the qualities become the quality list.</summary>
@@ -372,6 +413,45 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         });
         Refine(FileName);
         UpdateStreamSize();
+        ProbeState = ProbeState.Ready;
+    }
+
+    /// <summary>A player that keeps its list of pieces itself: the pieces it asked for are downloaded in that order and joined.</summary>
+    void ShowPieces(CaptureInfo capture)
+    {
+        _direct = CaptureProcessor.PiecesChoice(capture);
+        IsStream = true;
+        var count = (capture.Pieces?.Count ?? 0) + (capture.AudioPieces?.Count ?? 0);
+        var name = FileNameHelper.Sanitize(string.IsNullOrWhiteSpace(capture.FileName) ? "video" : capture.FileName!);
+        if (!new[] { ".mp4", ".mkv", ".ts" }.Contains(System.IO.Path.GetExtension(name).ToLowerInvariant())) name += ".mp4";
+        var length = capture.Duration is { } s ? TimeSpan.FromSeconds(s) : (TimeSpan?)null;
+        Run(() =>
+        {
+            if (!_nameEdited) FileName = name;
+            SizeText = (length is { } l ? (l.TotalHours >= 1 ? l.ToString(@"h\:mm\:ss") : l.ToString(@"m\:ss")) + "  ·  " : "") + $"{count} pieces";
+            TypeText = "Video from the pieces your browser's player loaded";
+            Resumable = true;
+        });
+        Refine(FileName);
+        ProbeState = ProbeState.Ready;
+    }
+
+    /// <summary>A live stream the browser's player pulls as one endless response: ShadeNet records it with ffmpeg until it ends or is stopped.</summary>
+    void ShowRecording(CaptureInfo capture)
+    {
+        _direct = new StreamChoice(Subtitles: false, Record: true);
+        IsStream = true;
+        IsLiveStream = true;
+        var name = FileNameHelper.Sanitize(string.IsNullOrWhiteSpace(capture.FileName) ? "live" : capture.FileName!);
+        if (!name.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)) name += ".mkv";
+        Run(() =>
+        {
+            if (!_nameEdited) FileName = name;
+            SizeText = "Live: recorded until you stop it";
+            TypeText = "Live stream (recorded as it plays)";
+            Resumable = false;
+        });
+        Refine(FileName);
         ProbeState = ProbeState.Ready;
     }
 
@@ -512,7 +592,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
 
     static string Friendly(Exception ex) => ex switch
     {
-        HttpStatusException h => h.Message + (h.Kind == JobErrorKind.AddressExpired ? " The link may have expired or need you to be signed in." : ""),
+        // ShadeNet's guess only when the server said nothing itself (it knows better: a disabled account is no expired link)
+        HttpStatusException h => h.Message + (h.Kind == JobErrorKind.AddressExpired && h.ServerReason == null ? " The link may have expired or need you to be signed in." : ""),
         DownloadException d => d.Message,
         HttpRequestException { InnerException: SocketException } => "Can't reach that address. Check the link and your connection.",
         HttpRequestException h => h.Message.Contains("No such host", StringComparison.OrdinalIgnoreCase)
@@ -548,10 +629,13 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         return Links.Select(url => (new AddDownloadRequest
         {
             Url = source?.VideoUrl ?? url,
-            Referer = source != null ? null : referer,
-            Cookies = source != null ? null : cookies,
+            // the files behind a page: what yt-dlp itself was told to send for them (some sites answer 403 without it),
+            // never the browser's own session
+            Referer = source != null ? source.Referer : referer,
+            Cookies = source != null ? source.Cookies : cookies,
             UserAgent = source?.UserAgent ?? (IsCapturedLink(url) ? _capture!.UserAgent : null),
-            Headers = IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
+            Headers = source != null ? source.Headers?.ToDictionary(h => h.Key, h => h.Value)
+                : IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
             FileName = single && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,
             SaveDirectory = single || _folderEdited ? SaveFolder.Trim() : null,
             Category = single ? Category : null,

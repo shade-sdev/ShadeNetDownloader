@@ -55,6 +55,150 @@ public class YtDlpTests
         Assert.All(info.Options, o => Assert.False(o.IsHls));
     }
 
+    /// <summary>TikTok: one file with picture and sound; its server wants the page as referrer and the cookies yt-dlp got (403 without).</summary>
+    const string TikTok = """
+        {
+          "title": "send this to someone",
+          "duration": 11,
+          "formats": [
+            { "format_id": "h264_540p", "ext": "mp4", "protocol": "https", "url": "https://v16.tiktokcdn.example/video/tos/abc/", "vcodec": "h264", "acodec": "aac", "height": 1024, "tbr": 900,
+              "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@scout2015/video/6718335390845095173", "Accept": "*/*" },
+              "cookies": "tt_chain_token=\"abc\\075\\075\"; Domain=.tiktokcdn.example; Path=/; Secure; sid_tt=plain; Domain=.tiktokcdn.example; Path=/; Expires=1790000000" }
+          ]
+        }
+        """;
+
+    [Fact]
+    public void The_referrer_and_cookies_yt_dlp_names_for_a_file_travel_with_it()
+    {
+        var option = Assert.Single(YtDlp.ParseInfo(TikTok).Options);
+
+        Assert.Equal("https://www.tiktok.com/@scout2015/video/6718335390845095173", option.Referer);
+        Assert.Equal("tt_chain_token=abc==; sid_tt=plain", option.Cookies);        // no attributes, the quotes and the octal escapes undone
+        Assert.Equal("UA/1", option.UserAgent);
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("Secure; Path=/", null)]
+    [InlineData("a=1; Domain=.x.com; Path=/; Secure; b=2", "a=1; b=2")]
+    [InlineData("a=\"x\\\"y\"; b=\"p\\\\q\"", "a=x\"y; b=p\\q")]
+    public void Cookies_are_written_as_a_request_header(string? yt, string? header) => Assert.Equal(header, YtDlp.CookieHeaderFrom(yt));
+
+    [Fact]
+    public void Any_other_header_yt_dlp_names_travels_too_but_not_the_ones_a_request_has_anyway()
+    {
+        const string json = """
+            { "title": "t", "formats": [
+              { "format_id": "a", "ext": "mp4", "protocol": "https", "url": "https://v.example/a", "vcodec": "avc1", "acodec": "aac", "height": 720,
+                "http_headers": { "User-Agent": "UA/1", "Accept": "*/*", "Accept-Language": "en", "Accept-Encoding": "gzip", "Sec-Fetch-Mode": "navigate",
+                                  "Referer": "https://site.example/p", "Origin": "https://site.example", "X-Token": "abc", "Range": "bytes=0-" } } ] }
+            """;
+
+        var option = Assert.Single(YtDlp.ParseInfo(json).Options);
+
+        Assert.Equal(new[] { ("Origin", "https://site.example"), ("X-Token", "abc") }, option.Headers!.OrderBy(h => h.Key).Select(h => (h.Key, h.Value)));
+        Assert.Equal("https://site.example/p", option.Referer);
+    }
+
+    /// <summary>A TikTok live as yt-dlp lists it: an endless FLV and an HLS stream of each quality (the shape of its extractor's answer).</summary>
+    [Fact]
+    public void A_live_stream_is_offered_as_its_hls_stream_per_quality_with_the_sites_headers()
+    {
+        const string json = """
+            { "title": "someone is live", "is_live": true, "formats": [
+              { "format_id": "flv-sd", "ext": "flv", "protocol": "https", "url": "https://pull.example/sd.flv", "vcodec": "h264", "height": 540 },
+              { "format_id": "hls-sd", "ext": "mp4", "protocol": "m3u8_native", "url": "https://pull.example/sd.m3u8", "vcodec": "h264", "height": 540, "tbr": 800,
+                "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@someone/live" }, "cookies": "k=v; Domain=.example; Path=/" },
+              { "format_id": "hls-hd", "ext": "mp4", "protocol": "m3u8_native", "url": "https://pull.example/hd.m3u8", "vcodec": "h264", "height": 720, "tbr": 1500,
+                "http_headers": { "User-Agent": "UA/1", "Referer": "https://www.tiktok.com/@someone/live" }, "cookies": "k=v; Domain=.example; Path=/" }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.True(info.IsLive);
+        Assert.Equal(new[] { "https://pull.example/hd.m3u8", "https://pull.example/sd.m3u8" }, info.Options.Select(o => o.VideoUrl));   // best first; the endless FLV is not a file to fetch
+        Assert.All(info.Options, o => Assert.True(o.IsHls));
+        Assert.Equal(("https://www.tiktok.com/@someone/live", "k=v"), (info.Options[0].Referer, info.Options[0].Cookies));
+    }
+
+    /// <summary>Facebook, Instagram, X: a live (or not) video that comes as a DASH manifest and nothing else.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_dash_only_video_is_one_stream_per_manifest(bool live)
+    {
+        var json = $$"""
+            { "title": "Going live", "is_live": {{(live ? "true" : "false")}}, "formats": [
+              { "format_id": "v1", "ext": "mp4", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "avc1.64001f", "acodec": "none", "height": 720, "tbr": 1500 },
+              { "format_id": "v2", "ext": "mp4", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "avc1.4d401e", "acodec": "none", "height": 480, "tbr": 700 },
+              { "format_id": "a1", "ext": "m4a", "protocol": "http_dash_segments", "url": "https://dash.example/live.mpd", "manifest_url": "https://dash.example/live.mpd", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 64 }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.Equal(live, info.IsLive);
+        var option = Assert.Single(info.Options);
+        Assert.Equal("https://dash.example/live.mpd", option.VideoUrl);       // the manifest: the engine reads the qualities and the sound from it
+        Assert.True(option.IsHls);
+        Assert.Equal(720, option.Height);
+    }
+
+    [Fact]
+    public void The_browsers_sign_in_is_written_as_a_cookie_file_for_the_whole_site()
+    {
+        var path = YtDlp.WriteCookieFile("https://www.tiktok.com/@someone/live", "sessionid=abc; ttwid=x%7Cy; bad=a\tb; =novalue");
+        try
+        {
+            var lines = File.ReadAllLines(path!);
+            Assert.Equal("# Netscape HTTP Cookie File", lines[0]);
+            Assert.Equal(3, lines.Length);                                              // the cookie with a tab in it, and the one without a name, are left out
+            var fields = lines[1].Split('\t');
+            Assert.Equal(new[] { ".tiktok.com", "TRUE", "/", "TRUE" }, fields[..4]);      // the site and its sub-domains (the live API is on another host), https only
+            Assert.True(long.Parse(fields[4]) > DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            Assert.Equal(("sessionid", "abc"), (fields[5], fields[6]));
+            Assert.EndsWith("ttwid\tx%7Cy", lines[2]);
+        }
+        finally
+        {
+            if (path != null) File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("not an address", "a=b")]
+    [InlineData("https://www.tiktok.com/x", "")]
+    [InlineData("https://www.tiktok.com/x", "novalue")]
+    public void Nothing_is_written_when_there_is_nothing_to_use(string page, string cookies) => Assert.Null(YtDlp.WriteCookieFile(page, cookies));
+
+    /// <summary>Google Drive: picture-only qualities and no sound of its own, next to files with both. A silent video is not a quality.</summary>
+    [Fact]
+    public void Picture_only_files_with_no_sound_to_join_are_not_offered()
+    {
+        const string json = """
+            { "title": "holiday", "duration": 60, "formats": [
+              { "format_id": "18", "ext": "mp4", "protocol": "https", "url": "https://d.example/18", "vcodec": "avc1.4D001F", "acodec": "mp4a.40.2", "height": 360 },
+              { "format_id": "22", "ext": "mp4", "protocol": "https", "url": "https://d.example/22", "vcodec": "avc1.640029", "acodec": "mp4a.40.2", "height": 718 },
+              { "format_id": "136", "ext": "mp4", "protocol": "https", "url": "https://d.example/136", "vcodec": "avc1.42C01F", "acodec": "none", "height": 718 },
+              { "format_id": "137", "ext": "mp4", "protocol": "https", "url": "https://d.example/137", "vcodec": "avc1.42C028", "acodec": "none", "height": 1078 }
+            ] }
+            """;
+
+        var info = YtDlp.ParseInfo(json);
+
+        Assert.Equal(new[] { "https://d.example/22", "https://d.example/18" }, info.Options.Select(o => o.VideoUrl));   // with sound, best first
+        Assert.All(info.Options, o => Assert.Null(o.AudioUrl));
+    }
+
+    [Fact]
+    public void Formats_without_headers_or_cookies_carry_none()
+    {
+        Assert.All(YtDlp.ParseInfo(Sample).Options, o => Assert.Equal((null, null, null), (o.Referer, o.Cookies, o.Headers)));
+    }
+
     [Fact]
     public void Files_with_picture_and_sound_together_are_used_when_nothing_is_split()
     {

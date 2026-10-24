@@ -132,7 +132,7 @@ test('a YouTube video page is recognised, other pages are not', async () => {
   }
 });
 
-test('a YouTube tab lists its page; "Download" sends the page address without any cookies', async () => {
+test('a YouTube tab lists its page; "Download" sends the page address (with the cookies, which the app uses only if yt-dlp fails without them)', async () => {
   const t = setup();
   t.chrome.cookies.getAll = async () => [{ name: 'SID', value: 'secret' }];
   const { items } = await t.controller.listMedia();
@@ -146,6 +146,6 @@ test('a YouTube tab lists its page; "Download" sends the page address without an
   assert.equal(capture.url, 'https://www.youtube.com/watch?v=abc');
   assert.equal(capture.source, 'page');
   assert.equal(capture.fileName, 'My Holiday Video');
-  assert.equal(capture.cookies, undefined);                        // the sign-in stays in the browser
+  assert.equal(capture.cookies, 'SID=secret');                     // the app tries without them first; see AddDownloadViewModel
   assert.equal((await t.controller.sendMedia('https://evil.example/x')).accepted, false);
 });

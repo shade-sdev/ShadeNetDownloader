@@ -11,7 +11,12 @@ namespace ShadeNet.Core.Sites;
 /// <param name="VideoUrl">The picture (or a file with both picture and sound; or an HLS playlist when <paramref name="IsHls"/>).</param>
 /// <param name="AudioUrl">The sound, when it is a file of its own.</param>
 /// <param name="Size">The expected download in bytes (0 = unknown).</param>
-public sealed record YtDlpOption(string Label, int Height, string VideoUrl, string? AudioUrl, string Extension, long Size, string? UserAgent, bool IsHls);
+/// <param name="Referer">The page yt-dlp says the file must be asked for from (TikTok's servers answer 403 without it).</param>
+/// <param name="Cookies">The cookies yt-dlp collected for this file's address, as a <c>Cookie</c> header value (TikTok's servers want them too).
+/// These are what yt-dlp itself got from the site, not the user's browser session.</param>
+/// <param name="Headers">Any other header yt-dlp says the site's servers want for this file (the ones ShadeNet sets itself are left out).</param>
+public sealed record YtDlpOption(string Label, int Height, string VideoUrl, string? AudioUrl, string Extension, long Size, string? UserAgent, bool IsHls,
+    string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null);
 
 public sealed record YtDlpInfo(string Title, double Seconds, bool IsLive, IReadOnlyList<YtDlpOption> Options);
 
@@ -74,9 +79,70 @@ public static partial class YtDlp
 
     // ---- asking yt-dlp ----
 
-    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null)
+    /// <param name="cookies">The browser's sign-in for the page's site, as a <c>Cookie</c> header value. It goes to yt-dlp in a temporary file that is
+    /// deleted when yt-dlp is done, and only this once: a live stream or a private video cannot be read without a signed-in session.</param>
+    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null, string? cookies = null)
     {
-        var (code, output, error) = await RunAsync(exe, new[] { "-J", "--no-playlist", "--no-warnings", "--no-update", pageUrl }, ct, timeout ?? TimeSpan.FromSeconds(120))
+        var arguments = new List<string> { "-J", "--no-playlist", "--no-warnings", "--no-update" };
+        string? cookieFile = null;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(cookies) && WriteCookieFile(pageUrl, cookies) is { } file)
+            {
+                cookieFile = file;
+                arguments.AddRange(new[] { "--cookies", file });
+            }
+
+            arguments.Add(pageUrl);
+            return await ResolveCoreAsync(exe, arguments, ct, timeout).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (cookieFile != null)
+            {
+                try
+                {
+                    File.Delete(cookieFile);
+                }
+                catch (IOException)
+                {
+                    // the user's temp folder: it is cleaned up with it
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A cookie file in the Netscape format yt-dlp reads, for the whole site of <paramref name="pageUrl"/> (its sub-domains too: TikTok's
+    /// live API is on another host). <c>null</c> when the address or the cookies cannot be used.
+    /// </summary>
+    internal static string? WriteCookieFile(string pageUrl, string cookies)
+    {
+        if (!Uri.TryCreate(pageUrl, UriKind.Absolute, out var page) || page.Scheme != Uri.UriSchemeHttps && page.Scheme != Uri.UriSchemeHttp) return null;
+
+        var domain = Util.HostNames.IsIp(page.Host) ? page.Host : "." + Util.HostNames.RegistrableDomain(page.Host);
+        var expires = DateTimeOffset.UtcNow.AddDays(1).ToUnixTimeSeconds();   // the file lives for one run; the jar needs a date in the future
+        var lines = new List<string> { "# Netscape HTTP Cookie File" };
+        foreach (var pair in cookies.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq <= 0) continue;
+            var name = pair[..eq].Trim();
+            var value = pair[(eq + 1)..].Trim();
+            if (name.Any(c => c <= ' ' || c == 127) || value.Any(c => c < ' ' || c == 127)) continue;   // a tab or a line break would break the file
+            lines.Add($"{domain}\t{(domain.StartsWith('.') ? "TRUE" : "FALSE")}\t/\t{(page.Scheme == Uri.UriSchemeHttps ? "TRUE" : "FALSE")}\t{expires}\t{name}\t{value}");
+        }
+
+        if (lines.Count == 1) return null;
+
+        var path = Path.Combine(Path.GetTempPath(), "shadenet-" + Guid.NewGuid().ToString("N")[..12] + ".cookies.txt");
+        File.WriteAllLines(path, lines, new UTF8Encoding(false));
+        return path;
+    }
+
+    static async Task<YtDlpInfo> ResolveCoreAsync(string exe, IEnumerable<string> arguments, CancellationToken ct, TimeSpan? timeout)
+    {
+        var (code, output, error) = await RunAsync(exe, arguments, ct, timeout ?? TimeSpan.FromSeconds(120))
             .ConfigureAwait(false);
 
         if (code != 0)
@@ -92,6 +158,8 @@ public static partial class YtDlp
     static string HintFor(string reason) =>
         reason.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase)
             ? " (yt-dlp does not know this site, so ShadeNet cannot read this page.)"
+            : reason.Contains("not currently live", StringComparison.OrdinalIgnoreCase) || reason.Contains("is not live", StringComparison.OrdinalIgnoreCase)
+            ? " (If it is live, the site may only show it to a signed-in browser: sign in there, and keep \"Use my browser's sign-in for video pages\" on in Settings > Browser.)"
             : reason.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || reason.Contains("bot", StringComparison.OrdinalIgnoreCase)
             ? " (The site wants a signed-in browser for this video.)"
             : reason.Contains("not available", StringComparison.OrdinalIgnoreCase) || reason.Contains("Unable to extract", StringComparison.OrdinalIgnoreCase)
@@ -191,6 +259,7 @@ public static partial class YtDlp
 
             var options = live ? new List<YtDlpOption>() : BuildDirect(formats);
             if (options.Count == 0) options = BuildHls(formats);
+            if (options.Count == 0) options = BuildDash(formats);   // live or not: Facebook, Instagram, X ... may offer nothing else
             if (options.Count == 0) throw new DownloadException(JobErrorKind.Unsupported, "yt-dlp found nothing downloadable on this page.");
 
             return new YtDlpInfo(title, seconds, live, options.OrderByDescending(o => o.Height).ToList());
@@ -211,19 +280,27 @@ public static partial class YtDlp
     [System.Text.RegularExpressions.GeneratedRegex(@"\s*\|\s*(Facebook|Instagram|TikTok)\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
     private static partial System.Text.RegularExpressions.Regex SiteSuffix();
 
-    sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent, double Quality = 0)
+    sealed record Format(string Id, string Url, string Protocol, string Ext, string VCodec, string ACodec, int Height, double Fps, double Tbr, long Size, string? UserAgent, double Quality = 0,
+        string? Referer = null, string? Cookies = null, IReadOnlyDictionary<string, string>? Headers = null, string? ManifestUrl = null)
     {
         public bool HasVideo => VCodec != "none" && VCodec.Length > 0;
         public bool HasAudio => ACodec != "none" && ACodec.Length > 0;
         public bool IsFile => Protocol is "https" or "http";
         public bool IsHls => Protocol.StartsWith("m3u8", StringComparison.Ordinal);
+        public bool IsDash => Protocol == "http_dash_segments";
 
         public static Format? From(JsonElement f)
         {
             var url = Str(f, "url");
             if (string.IsNullOrEmpty(url)) return null;
-            string? ua = null;
-            if (f.TryGetProperty("http_headers", out var h) && h.ValueKind == JsonValueKind.Object && Str(h, "User-Agent") is { Length: > 0 } agent) ua = agent;
+            string? ua = null, referer = null;
+            Dictionary<string, string>? extra = null;
+            if (f.TryGetProperty("http_headers", out var h) && h.ValueKind == JsonValueKind.Object)
+            {
+                if (Str(h, "User-Agent") is { Length: > 0 } agent) ua = agent;
+                if (Str(h, "Referer") is { Length: > 0 } page) referer = page;
+                extra = ExtraHeaders(h);
+            }
             var ext = Str(f, "ext") ?? "";
             var vcodec = Str(f, "vcodec");
             var acodec = Str(f, "acodec");
@@ -231,7 +308,8 @@ public static partial class YtDlp
             // what yt-dlp itself would pick as "best": picture and sound together.
             if (vcodec == null && acodec == null && ext is "mp4" or "webm" or "mkv" or "mov" or "flv" or "m4v") (vcodec, acodec) = ("unknown", "unknown");
             return new Format(Str(f, "format_id") ?? "", url, Str(f, "protocol") ?? "", ext, vcodec ?? "none", acodec ?? "none",
-                (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua, Num(f, "quality"));
+                (int)Num(f, "height"), Num(f, "fps"), Num(f, "tbr"), (long)(Num(f, "filesize") > 0 ? Num(f, "filesize") : Num(f, "filesize_approx")), ua, Num(f, "quality"),
+                referer, CookieHeaderFrom(Str(f, "cookies")), extra, Str(f, "manifest_url"));
         }
     }
 
@@ -242,8 +320,10 @@ public static partial class YtDlp
     static List<YtDlpOption> BuildDirect(List<Format> formats)
     {
         var files = formats.Where(f => f.IsFile).ToList();
-        var videos = files.Where(f => f.HasVideo && !f.HasAudio).ToList();
         var audios = files.Where(f => f.HasAudio && !f.HasVideo).ToList();
+        // picture-only files are worth something only with a sound to join them with (Google Drive offers picture-only qualities and no
+        // sound of its own: those would be silent videos; its files with both are used instead)
+        var videos = audios.Count > 0 ? files.Where(f => f.HasVideo && !f.HasAudio).ToList() : new List<Format>();
         var options = new List<YtDlpOption>();
 
         static int Preference(Format f) => f.VCodec.StartsWith("avc", StringComparison.OrdinalIgnoreCase) ? 0 : f.VCodec.StartsWith("vp9", StringComparison.OrdinalIgnoreCase) || f.VCodec.StartsWith("vp09", StringComparison.OrdinalIgnoreCase) ? 1 : 2;
@@ -264,7 +344,7 @@ public static partial class YtDlp
             var codec = Preference(video) switch { 0 => "H.264", 1 => "VP9", _ => "AV1" };
             var size = video.Size + (audio?.Size ?? 0);
             var label = $"{video.Height}p{fps} · {codec}" + (size > 0 ? $" · about {FormatSize(size)}" : "");
-            options.Add(new YtDlpOption(label, video.Height, video.Url, audio?.Url, mp4 ? ".mp4" : ".mkv", size, video.UserAgent, false));
+            options.Add(new YtDlpOption(label, video.Height, video.Url, audio?.Url, mp4 ? ".mp4" : ".mkv", size, video.UserAgent, false, video.Referer, video.Cookies, video.Headers));
         }
 
         if (options.Count == 0)
@@ -276,7 +356,7 @@ public static partial class YtDlp
                 var f = group.OrderByDescending(x => x.Tbr).First();
                 var name = f.Height > 0 ? $"{f.Height}p" : f.Id.Length > 0 ? f.Id.ToUpperInvariant() : "video";
                 options.Add(new YtDlpOption($"{name} · {f.Ext}" + (f.Size > 0 ? $" · about {FormatSize(f.Size)}" : ""), f.Height, f.Url, null,
-                    f.Ext is "mp4" or "mkv" or "webm" ? (f.Ext == "webm" ? ".mkv" : "." + f.Ext) : ".mp4", f.Size, f.UserAgent, false));
+                    f.Ext is "mp4" or "mkv" or "webm" ? (f.Ext == "webm" ? ".mkv" : "." + f.Ext) : ".mp4", f.Size, f.UserAgent, false, f.Referer, f.Cookies, f.Headers));
             }
         }
 
@@ -288,12 +368,80 @@ public static partial class YtDlp
         formats.Where(f => f.IsHls && f.HasVideo).GroupBy(f => f.Height).Select(g =>
         {
             var f = g.OrderByDescending(x => x.Tbr).First();
-            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, f.Url, null, ".mp4", 0, f.UserAgent, true);
+            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, f.Url, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies, f.Headers);
+        }).ToList();
+
+    /// <summary>
+    /// A DASH presentation (yt-dlp lists every picture and sound of it as a format of its own, all pointing at one manifest): one
+    /// stream per manifest, which the stream engine reads itself (a live one is recorded until it ends, like a live playlist).
+    /// </summary>
+    static List<YtDlpOption> BuildDash(List<Format> formats) =>
+        formats.Where(f => f.IsDash && f.HasVideo).GroupBy(f => f.ManifestUrl ?? f.Url).Select(g =>
+        {
+            var f = g.OrderByDescending(x => x.Height).ThenByDescending(x => x.Tbr).First();
+            return new YtDlpOption($"{f.Height}p · stream" + (f.Height == 0 ? " (best)" : ""), f.Height, g.Key, null, ".mp4", 0, f.UserAgent, true, f.Referer, f.Cookies, f.Headers);
         }).ToList();
 
     static string FormatSize(long bytes) =>
         bytes >= 1L << 30 ? (bytes / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GB"
         : (bytes / (double)(1L << 20)).ToString("0", CultureInfo.InvariantCulture) + " MB";
+
+    /// <summary>
+    /// The headers yt-dlp sends that ShadeNet does not set (or handle) itself: a site may want a custom one (an <c>Origin</c>, a token),
+    /// and a download that leaves it out is refused. The ones a request carries anyway, or that only make sense for yt-dlp's own request, stay out.
+    /// </summary>
+    static Dictionary<string, string>? ExtraHeaders(JsonElement headers)
+    {
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "User-Agent", "Referer", "Cookie", "Host", "Accept", "Accept-Language", "Accept-Encoding", "Connection", "Keep-Alive", "Upgrade-Insecure-Requests",
+            "Content-Length", "Content-Type", "Transfer-Encoding", "TE", "Range", "If-Range", "Expect",
+        };
+
+        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var header in headers.EnumerateObject())
+        {
+            if (found.Count >= 20 || header.Value.ValueKind != JsonValueKind.String) continue;
+            var name = header.Name;
+            var value = header.Value.GetString() ?? "";
+            if (skip.Contains(name) || name.StartsWith("Sec-Fetch-", StringComparison.OrdinalIgnoreCase)) continue;
+            if (name.Length == 0 || value.Length == 0 || value.Length > 2000 || name.Any(c => c <= ' ' || c == ':' || c > '~') || value.Any(c => c < ' ' || c == 127)) continue;
+            found[name] = value;
+        }
+
+        return found.Count == 0 ? null : found;
+    }
+
+    static readonly string[] CookieAttributes = { "domain", "path", "expires", "max-age", "version", "samesite", "comment" };
+
+    /// <summary>
+    /// yt-dlp writes a format's cookies the way a server sets them: <c>name=value; Domain=.site.com; Path=/; Secure; name2=value2; ...</c>,
+    /// with a value that has special characters in quotes. A request needs only <c>name=value; name2=value2</c>, unquoted.
+    /// </summary>
+    public static string? CookieHeaderFrom(string? cookies)
+    {
+        if (string.IsNullOrWhiteSpace(cookies)) return null;
+
+        var pairs = new List<string>();
+        foreach (var part in cookies.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = part.IndexOf('=');
+            if (eq <= 0) continue;                                            // a flag such as Secure or HttpOnly
+            var name = part[..eq].Trim();
+            if (CookieAttributes.Contains(name, StringComparer.OrdinalIgnoreCase)) continue;
+            pairs.Add($"{name}={UnquoteCookie(part[(eq + 1)..].Trim())}");
+        }
+
+        return pairs.Count == 0 ? null : string.Join("; ", pairs);
+    }
+
+    /// <summary>The reverse of Python's cookie quoting: the quotes go, <c>\"</c> and <c>\\</c> become the character, <c>\ooo</c> (octal) too.</summary>
+    static string UnquoteCookie(string value)
+    {
+        if (value.Length < 2 || value[0] != '"' || value[^1] != '"') return value;
+        return System.Text.RegularExpressions.Regex.Replace(value[1..^1], @"\\(?:([0-3][0-7]{2})|(.))",
+            m => m.Groups[1].Success ? ((char)Convert.ToInt32(m.Groups[1].Value, 8)).ToString() : m.Groups[2].Value);
+    }
 
     static string? Str(JsonElement e, string name) => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 

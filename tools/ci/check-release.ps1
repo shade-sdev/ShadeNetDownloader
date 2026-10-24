@@ -43,6 +43,7 @@ foreach ($f in $installer, $package) {
 }
 
 # the package: the program, the uninstaller (it applies the next update), no tools\
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::OpenRead($package)
 try {

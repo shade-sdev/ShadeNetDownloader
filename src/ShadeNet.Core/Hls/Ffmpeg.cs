@@ -98,6 +98,36 @@ public static class Ffmpeg
         return args;
     }
 
+    /// <summary>
+    /// Arguments that record an endless live response (an FLV pull) into a Matroska file, copying picture and sound as they come.
+    /// The request carries what the browser's player sent (referrer, cookies, any other header); progress is written to the standard
+    /// output as <c>key=value</c> lines, and a <c>q</c> on the standard input ends the recording cleanly (the file is finished properly).
+    /// </summary>
+    public static IReadOnlyList<string> RecordArguments(string url, string output, string? userAgent, string? referer, string? cookies,
+        IReadOnlyDictionary<string, string>? headers)
+    {
+        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-y", "-nostats", "-progress", "pipe:1" };
+        if (!string.IsNullOrWhiteSpace(userAgent) && IsHeaderValue(userAgent)) args.AddRange(new[] { "-user_agent", userAgent });
+
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(referer) && IsHeaderValue(referer)) lines.Add("Referer: " + referer);
+        if (!string.IsNullOrWhiteSpace(cookies) && IsHeaderValue(cookies)) lines.Add("Cookie: " + cookies);
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+        {
+            if (name.Equals("User-Agent", StringComparison.OrdinalIgnoreCase) || name.Equals("Referer", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)) continue;
+            if (name.Length > 0 && name.All(c => c > ' ' && c < 127 && c != ':') && IsHeaderValue(value)) lines.Add($"{name}: {value}");
+        }
+
+        if (lines.Count > 0) args.AddRange(new[] { "-headers", string.Join("\r\n", lines) + "\r\n" });
+
+        // give up on a stream that goes silent (20 s), instead of waiting for ever
+        args.AddRange(new[] { "-rw_timeout", "20000000", "-i", url, "-map", "0:v?", "-map", "0:a?", "-c", "copy", "-f", "matroska", output });
+        return args;
+    }
+
+    static bool IsHeaderValue(string value) => value.Length > 0 && value.All(c => c >= ' ' && c != 127);
+
     /// <returns>The exit code and what ffmpeg wrote to its error output (the reason, when it failed).</returns>
     public static async Task<(int ExitCode, string Log)> RunAsync(string exe, IEnumerable<string> arguments, CancellationToken ct,
         string? workingDirectory = null)

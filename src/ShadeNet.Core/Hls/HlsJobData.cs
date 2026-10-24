@@ -33,6 +33,22 @@ public sealed class HlsJobData
     /// <summary>The stream is live: it is recorded until it ends or the user stops it.</summary>
     public bool Live { get; set; }
 
+    /// <summary>
+    /// The job's address is one endless response (a live FLV pull) that ffmpeg records as it arrives, not a playlist of pieces:
+    /// there are no segments, so nothing to resume; stopping the recording saves it.
+    /// </summary>
+    public bool Record { get; set; }
+
+    /// <summary>
+    /// No playlist: the pieces a player asked for (it keeps their list itself), in that order, after their initialisation part
+    /// (none for MPEG-TS pieces). The sound's own run when it is kept apart. They are downloaded and joined like a playlist's pieces.
+    /// </summary>
+    public List<string>? Pieces { get; set; }
+
+    public string? InitUrl { get; set; }
+    public List<string>? AudioPieces { get; set; }
+    public string? AudioInitUrl { get; set; }
+
     // progress
     public long BytesDone { get; set; }
     public int Parts { get; set; }

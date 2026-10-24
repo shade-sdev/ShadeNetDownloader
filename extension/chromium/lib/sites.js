@@ -8,6 +8,7 @@ const PAGE_SITES = [
   'facebook.com', 'fb.watch', 'instagram.com', 'threads.net', 'twitter.com', 'x.com', 'tiktok.com', 'vimeo.com',
   'reddit.com', 'dailymotion.com', 'twitch.tv', 'streamable.com', 'ok.ru', 'vk.com', 'bilibili.com', 'rumble.com',
   'odysee.com', 'bitchute.com', 'kick.com', 'linkedin.com', 'pinterest.com', 'tumblr.com', 'imgur.com', 'ted.com',
+  'drive.google.com', 'docs.google.com',   // the player is an embed of another site (youtube.googleapis.com); the Drive page is what yt-dlp reads
 ];
 
 /** Is this address on a site whose pages ShadeNet can have yt-dlp read? `extra` adds hosts (tests, and your own list). */
@@ -25,17 +26,31 @@ export function isPageSite(url, extra = []) {
 
 /**
  * Is this the address of ONE video (what yt-dlp can read), and not a feed or the front page? An address that has an id
- * after /videos/, /reel/, /status/ ... or a `v=` parameter is one.
+ * after /videos/, /reel/, /status/, /live/ ... , a user's own /live page, or a `v=` parameter is one.
  */
 export function looksLikeOneVideo(url) {
   try {
     const u = new URL(url);
-    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch)\/[^/?#]+/i.test(u.pathname) && !/^\/watch\/?$/i.test(u.pathname))
+    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$|\/file\/d\/[^/?#]+/i.test(u.pathname) && !/^\/(watch|live)\/?$/i.test(u.pathname))
       || u.searchParams.has('v')
       || /permalink\.php|\/video\.php/i.test(u.pathname);
   } catch {
     return false;
   }
+}
+
+/**
+ * A <video> the page keeps out of sight: one that takes no room on the screen at all (a player's hidden preview, Reddit's 96 px
+ * scrubbing clip), or one that is nearly see-through and tiny (a clip loaded to unlock autoplay, TikTok's 50 px `playback1.mp4`).
+ * It is not a video anybody wants, and listing it would hide the real one. `box` is its size on the screen and `opacity` its
+ * see-through-ness, as the page's script reports them; a report without them (an older page script) is never a decoy.
+ */
+export function isDecoyVideo(video) {
+  if (!Array.isArray(video?.box)) return false;
+  const [width, height] = video.box;
+  if (width === 0 || height === 0) return true;
+  const opacity = Number.isFinite(video?.opacity) ? video.opacity : 1;
+  return opacity < 0.05 && Math.max(width, height) < 100;
 }
 
 /** A YouTube player embedded in another site's page (an iframe): its watch page, which is what yt-dlp reads. */
