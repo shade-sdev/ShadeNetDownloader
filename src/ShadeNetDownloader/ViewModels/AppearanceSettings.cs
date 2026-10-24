@@ -131,14 +131,20 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     DispatcherTimer? _saveTimer;
     bool _refreshing;
     readonly Func<string?> _pickImage;
+    readonly Func<string, string?> _pickExportFile;
+    readonly Func<string?> _pickThemeFile;
 
     /// <param name="baseTheme">System / Light / Dark as chosen now (the page's theme switch owns it).</param>
     /// <param name="setBaseTheme">Chooses System / Light / Dark (a preset comes with one).</param>
     /// <param name="pickImage">Asks for a picture file (the open-file dialog); tests pass their own.</param>
+    /// <param name="pickExportFile">Asks where to save a theme (given a name for it); tests pass their own.</param>
+    /// <param name="pickThemeFile">Asks for a theme file to import; tests pass their own.</param>
     public AppearanceSettingsViewModel(SettingsService settings, IThemeApplier theme, Func<AppTheme> baseTheme, Action<AppTheme> setBaseTheme,
-        Func<string?>? pickImage = null)
+        Func<string?>? pickImage = null, Func<string, string?>? pickExportFile = null, Func<string?>? pickThemeFile = null)
     {
         _pickImage = pickImage ?? PickImageFile;
+        _pickExportFile = pickExportFile ?? PickExportFile;
+        _pickThemeFile = pickThemeFile ?? PickThemeFile;
         _settings = settings;
         _theme = theme;
         _baseTheme = baseTheme;
@@ -376,14 +382,34 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 return null;
             }
 
-            if (BackgroundLayer.TryLoad(source, out _) == null)
-            {
-                ImageError = "That file is not a picture ShadeNet can show (PNG, JPEG, BMP, GIF, TIFF or WebP with its codec).";
-                return null;
-            }
+            return KeepImage(File.ReadAllBytes(source), info.Extension);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            ImageError = "The picture could not be copied: " + ex.Message;
+            return null;
+        }
+    }
 
-            var bytes = File.ReadAllBytes(source);
-            var name = Convert.ToHexString(SHA256.HashData(bytes))[..16].ToLowerInvariant() + Path.GetExtension(source).ToLowerInvariant();
+    /// <summary>The same, for a picture's bytes (a theme file carries its picture).</summary>
+    internal string? KeepImage(byte[] bytes, string extension)
+    {
+        ImageError = null;
+        if (bytes.LongLength > MaxImageBytes)
+        {
+            ImageError = "That picture is too large.";
+            return null;
+        }
+
+        if (!BackgroundLayer.IsPicture(bytes))
+        {
+            ImageError = "That file is not a picture ShadeNet can show (PNG, JPEG, BMP, GIF, TIFF or WebP with its codec).";
+            return null;
+        }
+
+        try
+        {
+            var name = Convert.ToHexString(SHA256.HashData(bytes))[..16].ToLowerInvariant() + extension.ToLowerInvariant();
             Directory.CreateDirectory(ImageFolder);
             var target = Path.Combine(ImageFolder, name);
             if (!File.Exists(target)) File.WriteAllBytes(target, bytes);
@@ -444,6 +470,135 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     {
         get => Math.Round(Model.ImageDim * 100);
         set => SetNumber(Model.ImageDim, Math.Clamp(value, 0, AppearanceSettings.MaxDim * 100) / 100, v => Model.ImageDim = v);
+    }
+
+    // ---- sharing: a look as a theme file ----
+
+    /// <summary>What happened to the last export or import (saved where, why a file was refused), or null.</summary>
+    [ObservableProperty] string? _themeFileMessage;
+
+    /// <summary>An imported theme is showing and can still be undone.</summary>
+    [ObservableProperty] bool _isPreviewing;
+
+    [ObservableProperty] string _previewName = "";
+
+    (AppearanceSettings Look, AppTheme Theme)? _beforeImport;   // what Undo goes back to
+    bool _importing;
+
+    [RelayCommand]
+    void ExportTheme()
+    {
+        var name = ThemePresets.Find(Model.Preset)?.Name ?? "My ShadeNet theme";
+        var path = _pickExportFile(name);
+        if (path == null) return;
+        try
+        {
+            File.WriteAllText(path, ThemeFile.Write(Path.GetFileNameWithoutExtension(path), _baseTheme(), Model, MaxImageBytes));
+            ThemeFileMessage = $"Saved \"{Path.GetFileName(path)}\". Anyone with ShadeNet can import it.";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            ThemeFileMessage = "The theme could not be saved: " + ex.Message;
+        }
+    }
+
+    /// <summary>A theme file is checked, then shown at once; the page offers to keep it or to go back.</summary>
+    [RelayCommand]
+    void ImportTheme()
+    {
+        var path = _pickThemeFile();
+        if (path == null) return;
+
+        ThemeFileContent content;
+        try
+        {
+            content = ThemeFile.Read(path);
+        }
+        catch (ThemeFileException ex)
+        {
+            ThemeFileMessage = ex.Message;
+            return;
+        }
+
+        var look = content.Appearance;
+        if (content.Image != null) look.Image = KeepImage(content.Image, content.ImageExtension ?? ".png");   // (a bad one says why)
+
+        _beforeImport ??= (Model.Clone(), _baseTheme());   // previewing one after another: Undo goes back to before the first
+        _importing = true;
+        try
+        {
+            _settings.Current.Appearance = look;
+            if (_baseTheme() != content.Theme) _setBaseTheme(content.Theme);
+            Apply();   // (named after a preset it matches, else Custom)
+        }
+        finally
+        {
+            _importing = false;
+        }
+
+        PreviewName = content.Name;
+        IsPreviewing = true;
+        ThemeFileMessage = content.Dropped > 0
+            ? $"{content.Dropped} of its settings could not be used and were left out."
+            : null;
+    }
+
+    [RelayCommand]
+    void KeepImported()
+    {
+        EndPreview();
+        ThemeFileMessage = null;
+        SaveSoon();
+    }
+
+    [RelayCommand]
+    void UndoImport()
+    {
+        if (_beforeImport is not { } before) return;
+        _importing = true;
+        try
+        {
+            _settings.Current.Appearance = before.Look;
+            if (_baseTheme() != before.Theme) _setBaseTheme(before.Theme);
+            Apply(keepPreset: true);
+        }
+        finally
+        {
+            _importing = false;
+        }
+
+        EndPreview();
+        ThemeFileMessage = null;
+        ImageError = null;
+    }
+
+    void EndPreview()
+    {
+        _beforeImport = null;
+        IsPreviewing = false;
+    }
+
+    static string? PickExportFile(string name)
+    {
+        var safe = string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '-' : c));
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Save the look as a theme",
+            FileName = safe + ThemeFile.Extension,
+            DefaultExt = ThemeFile.Extension,
+            Filter = $"ShadeNet themes|*{ThemeFile.Extension}|All files|*.*",
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    static string? PickThemeFile()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Import a theme",
+            Filter = $"ShadeNet themes|*{ThemeFile.Extension}|All files|*.*",
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
     }
 
     // ---- text and layout (kept apart from the look: a preset never changes them) ----
@@ -578,6 +733,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// <summary>The look changed here: show it at once, remember it (the file is written once the user pauses).</summary>
     void Apply(bool keepPreset = false)
     {
+        if (IsPreviewing && !_importing) EndPreview();   // changing anything else keeps the imported theme
+
         // the look is named after the preset it matches (the one it came from first), else it is "Custom"
         if (!keepPreset)
             Model.Preset = (ThemePresets.Find(Model.Preset) is { } p && Same(p.Appearance, Model) ? p : ThemePresets.All.FirstOrDefault(q => Same(q.Appearance, Model)))?.Id
@@ -629,7 +786,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     void Save()
     {
         _settings.Save();
-        PruneImages(Model.Image);
+        PruneImages(Model.Image, _beforeImport?.Look.Image);   // (the picture of the look Undo would bring back stays)
     }
 
     void SaveSoon()

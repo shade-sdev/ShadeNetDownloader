@@ -79,6 +79,22 @@ public sealed partial class BackgroundLayer : ObservableObject
         Dim = look.ImageDim;
     }
 
+    /// <summary>Whether these bytes decode as a picture (a theme file's picture is checked before it is written to disk).</summary>
+    public static bool IsPicture(byte[] bytes)
+    {
+        try
+        {
+            using var stream = new MemoryStream(bytes, writable: false);
+            var frame = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+            return frame.PixelWidth > 0 && frame.PixelHeight > 0;
+        }
+        catch (Exception ex) when (ex is IOException or NotSupportedException or ArgumentException or FileFormatException
+                                       or InvalidOperationException or OverflowException or System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>A picture file as a frozen image, or null with the reason.</summary>
     public static ImageSource? TryLoad(string path, out string? error)
     {

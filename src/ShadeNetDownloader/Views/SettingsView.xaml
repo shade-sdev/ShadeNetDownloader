@@ -702,6 +702,33 @@
 
                 <!-- ================= Appearance ================= -->
                 <StackPanel Visibility="{Binding IsAppearance, Converter={StaticResource B2V}}">
+                    <!-- an imported theme is showing: keep it, or go back to the look before -->
+                    <Border DataContext="{Binding Appearance}" Padding="16,12" Margin="0,0,0,16" CornerRadius="8" BorderThickness="1"
+                            Background="{DynamicResource SystemFillColorAttentionBackgroundBrush}"
+                            BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                            Visibility="{Binding IsPreviewing, Converter={StaticResource B2V}}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ui:SymbolIcon Symbol="Eye24" FontSize="20" Margin="0,0,12,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock FontSize="14" TextWrapping="Wrap">
+                                    <Run Text="Trying out" />
+                                    <Run Text="{Binding PreviewName, Mode=OneWay}" FontWeight="SemiBold" />
+                                </TextBlock>
+                                <TextBlock Style="{StaticResource CardHint}" Text="Keep it, or go back to the look you had." />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ui:Button Content="Undo" Margin="0,0,8,0" Command="{Binding UndoImportCommand}" />
+                                <ui:Button Content="Keep it" Appearance="Primary" Command="{Binding KeepImportedCommand}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
                     <TextBlock Text="Themes" Style="{StaticResource SectionTitle}" />
                     <TextBlock Style="{StaticResource CardHint}" Margin="2,-4,0,10"
                                Text="Every look is free. Pick one, then change anything below; your changes are kept as &#8220;Custom&#8221;." />
@@ -756,6 +783,25 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                    <!-- sharing: a look as a file anyone with ShadeNet can import -->
+                    <Grid DataContext="{Binding Appearance}" Margin="0,-8,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Style="{StaticResource CardHint}" VerticalAlignment="Center" Margin="2,0,12,0"
+                                   Text="{Binding ThemeFileMessage}"
+                                   Visibility="{Binding ThemeFileMessage, Converter={StaticResource NullToCollapsed}}" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <ui:Button Content="Import a theme…" Icon="{ui:SymbolIcon ArrowImport24}" Margin="0,0,8,0"
+                                       Command="{Binding ImportThemeCommand}"
+                                       ToolTip="Try a theme someone shared (a .shadenet-theme file)" />
+                            <ui:Button Content="Share this look…" Icon="{ui:SymbolIcon Share24}"
+                                       Command="{Binding ExportThemeCommand}"
+                                       ToolTip="Save the colours, background and picture as a file to share (not the font or size)" />
+                        </StackPanel>
+                    </Grid>
 
                     <TextBlock Text="Appearance" Style="{StaticResource SectionTitle}" />
 

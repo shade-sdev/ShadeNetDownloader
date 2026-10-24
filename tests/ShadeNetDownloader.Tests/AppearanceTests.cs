@@ -160,7 +160,8 @@ public class AppearanceTests
 
     // ---- the Appearance page ----
 
-    static (AppearanceSettingsViewModel Page, FakeTheme Theme, SettingsService Settings, Func<AppTheme> Base, TempDir Dir) Page(Func<string?>? pickImage = null)
+    static (AppearanceSettingsViewModel Page, FakeTheme Theme, SettingsService Settings, Func<AppTheme> Base, TempDir Dir) Page(Func<string?>? pickImage = null,
+        Func<string, string?>? pickExport = null, Func<string?>? pickTheme = null)
     {
         var dir = new TempDir();
         var settings = new SettingsService(dir.Path);
@@ -171,7 +172,7 @@ public class AppearanceTests
         {
             current = t;
             settings.Current.Theme = t;
-        }, pickImage);
+        }, pickImage, pickExport, pickTheme);
         return (page, theme, settings, () => current, dir);
     }
 
@@ -535,5 +536,136 @@ public class AppearanceTests
         {
             AppThemeService.ApplyMotion(MotionLevel.System);
         }
+    }
+
+    // ---- stage 4: themes as files ----
+
+    [Fact]
+    public void A_theme_file_carries_the_look_and_its_picture_but_no_path()
+    {
+        using var source = new TempDir();
+        var look = ThemePresets.Find("dracula")!.Appearance.Clone();
+        look.Tint = "#FF79C6";
+        look.Image = Picture(source.Path, "bg.jpg");
+
+        var text = ThemeFile.Write("Night", AppTheme.Dark, look, maxImageBytes: 1_000_000);
+        Assert.DoesNotContain(source.Path.Replace("\\", "\\\\"), text);   // no path from this computer
+
+        var read = ThemeFile.Parse(text);
+        Assert.Equal("Night", read.Name);
+        Assert.Equal(AppTheme.Dark, read.Theme);
+        Assert.Equal("#BD93F9", read.Appearance.Accent);
+        Assert.Equal("#FF79C6", read.Appearance.Tint);
+        Assert.Equal("#282A36", read.Appearance.Dark["ApplicationBackgroundBrush"]);
+        Assert.Null(read.Appearance.Image);
+        Assert.Equal(File.ReadAllBytes(look.Image), read.Image);
+        Assert.Equal(".jpg", read.ImageExtension);
+        Assert.Equal(0, read.Dropped);
+    }
+
+    [Theory]
+    [InlineData("not json at all")]
+    [InlineData("{ \"format\": \"something-else\", \"version\": 1, \"appearance\": {} }")]
+    [InlineData("{ \"format\": \"shadenet-theme\", \"version\": 1 }")]
+    [InlineData("[1, 2, 3]")]
+    public void What_is_not_a_theme_is_refused(string text) => Assert.Throws<ThemeFileException>(() => ThemeFile.Parse(text));
+
+    [Fact]
+    public void A_theme_from_a_newer_shadenet_says_so()
+    {
+        var ex = Assert.Throws<ThemeFileException>(() => ThemeFile.Parse("{ \"format\": \"shadenet-theme\", \"version\": 99, \"appearance\": {} }"));
+        Assert.Contains("newer", ex.Message);
+    }
+
+    [Fact]
+    public void What_a_theme_cannot_use_is_left_out_and_counted()
+    {
+        var read = ThemeFile.Parse("""
+            {
+              "format": "shadenet-theme", "version": 1, "name": "Odd", "theme": "Light",
+              "appearance": { "accent": "#12345", "image": "C:\\Windows\\secret.png",
+                              "light": { "TextFillColorPrimaryBrush": "#111111", "NotAKey": "#000000" } },
+              "image": { "extension": ".exe", "data": "%%% not base64 %%%" }
+            }
+            """);
+        Assert.Equal(3, read.Dropped);              // the accent, the unknown key, the picture
+        Assert.Null(read.Appearance.Accent);
+        Assert.Null(read.Appearance.Image);        // a path in the file is never used
+        Assert.Null(read.Image);
+        Assert.Equal("#111111", read.Appearance.Light["TextFillColorPrimaryBrush"]);
+        Assert.Equal(ThemePresets.CustomId, read.Appearance.Preset);
+    }
+
+    [Fact]
+    public void A_shared_theme_is_tried_out_and_can_be_undone()
+    {
+        using var files = new TempDir();
+        var themePath = Path.Combine(files.Path, "night" + ThemeFile.Extension);
+        var shared = ThemePresets.Find("nord")!.Appearance.Clone();
+        shared.Image = Picture(files.Path, "wall.png", 0x40);
+        File.WriteAllText(themePath, ThemeFile.Write("Night", AppTheme.Dark, shared, 1_000_000));
+
+        string? export = null;
+        var (page, theme, settings, current, dir) = Page(pickExport: name => export = Path.Combine(files.Path, name + ".out"), pickTheme: () => themePath);
+        using var _d = dir;
+        page.ApplyPresetCommand.Execute(page.Presets.Single(p => p.Preset.Id == "rose"));   // the look before: light, rose
+        Assert.Equal(AppTheme.Light, current());
+
+        page.ImportThemeCommand.Execute(null);
+        Assert.True(page.IsPreviewing);
+        Assert.Equal("Night", page.PreviewName);
+        Assert.Equal(AppTheme.Dark, current());
+        Assert.Equal("#88C0D0", settings.Current.Appearance.Accent);
+        Assert.Equal("#88C0D0", theme.Calls.Last().Look.Accent);
+        var picture = settings.Current.Appearance.Image!;
+        Assert.True(File.Exists(picture));
+        Assert.StartsWith(Path.Combine(dir.Path, "backgrounds"), picture);
+
+        page.UndoImportCommand.Execute(null);
+        Assert.False(page.IsPreviewing);
+        Assert.Equal(AppTheme.Light, current());
+        Assert.Equal("rose", settings.Current.Appearance.Preset);
+        Assert.Null(settings.Current.Appearance.Image);
+
+        page.ImportThemeCommand.Execute(null);
+        page.KeepImportedCommand.Execute(null);
+        Assert.False(page.IsPreviewing);
+        Assert.Equal("#88C0D0", settings.Current.Appearance.Accent);
+
+        page.ExportThemeCommand.Execute(null);   // and it can be shared on
+        Assert.NotNull(export);
+        Assert.Equal("#88C0D0", ThemeFile.Read(export!).Appearance.Accent);
+        Assert.NotNull(ThemeFile.Read(export!).Image);
+    }
+
+    [Fact]
+    public void Changing_anything_while_trying_a_theme_keeps_it()
+    {
+        using var files = new TempDir();
+        var themePath = Path.Combine(files.Path, "x" + ThemeFile.Extension);
+        File.WriteAllText(themePath, ThemeFile.Write("X", AppTheme.Dark, ThemePresets.Find("midnight")!.Appearance, 0));
+        var (page, _, settings, _, dir) = Page(pickTheme: () => themePath);
+        using var _d = dir;
+
+        page.ImportThemeCommand.Execute(null);
+        Assert.True(page.IsPreviewing);
+        page.IsSolid = true;
+        Assert.False(page.IsPreviewing);
+        Assert.Equal(BackdropKind.Solid, settings.Current.Appearance.Backdrop);
+    }
+
+    [Fact]
+    public void A_file_that_is_not_a_theme_changes_nothing_and_says_why()
+    {
+        using var files = new TempDir();
+        var path = Path.Combine(files.Path, "notes" + ThemeFile.Extension);
+        File.WriteAllText(path, "hello");
+        var (page, _, settings, _, dir) = Page(pickTheme: () => path);
+        using var _d = dir;
+
+        page.ImportThemeCommand.Execute(null);
+        Assert.False(page.IsPreviewing);
+        Assert.NotNull(page.ThemeFileMessage);
+        Assert.Equal(ThemePresets.DefaultId, settings.Current.Appearance.Preset);
     }
 }
