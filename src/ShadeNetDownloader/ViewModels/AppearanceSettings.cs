@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -20,7 +22,7 @@ public sealed partial class ThemePresetItem : ObservableObject
     {
         Preset = preset;
         var (background, card, accent, text) = preset.Swatch;
-        Background = Frozen(background);
+        Background = BackgroundOf(preset.Appearance, background);
         Card = Frozen(card);
         Accent = Frozen(accent);
         Text = Frozen(text);
@@ -41,6 +43,18 @@ public sealed partial class ThemePresetItem : ObservableObject
         var b = new SolidColorBrush(c);
         b.Freeze();
         return b;
+    }
+
+    /// <summary>The window of the look: its background, with its tint or gradient laid over it.</summary>
+    static Brush BackgroundOf(AppearanceSettings look, Color background)
+    {
+        if (look.Tint == null || !ThemeColor.TryParse(look.Tint, out var from)) return Frozen(background);
+        var to = look.Tint2 != null && ThemeColor.TryParse(look.Tint2, out var second) ? second : from;
+        var alpha = (byte)Math.Round(look.TintStrength * 255);
+        var brush = new LinearGradientBrush(ThemeColor.Over(ThemeColor.WithAlpha(from, alpha), background),
+            ThemeColor.Over(ThemeColor.WithAlpha(to, alpha), background), look.TintAngle);
+        brush.Freeze();
+        return brush;
     }
 }
 
@@ -116,11 +130,15 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     readonly Action<AppTheme> _setBaseTheme;
     DispatcherTimer? _saveTimer;
     bool _refreshing;
+    readonly Func<string?> _pickImage;
 
     /// <param name="baseTheme">System / Light / Dark as chosen now (the page's theme switch owns it).</param>
     /// <param name="setBaseTheme">Chooses System / Light / Dark (a preset comes with one).</param>
-    public AppearanceSettingsViewModel(SettingsService settings, IThemeApplier theme, Func<AppTheme> baseTheme, Action<AppTheme> setBaseTheme)
+    /// <param name="pickImage">Asks for a picture file (the open-file dialog); tests pass their own.</param>
+    public AppearanceSettingsViewModel(SettingsService settings, IThemeApplier theme, Func<AppTheme> baseTheme, Action<AppTheme> setBaseTheme,
+        Func<string?>? pickImage = null)
     {
+        _pickImage = pickImage ?? PickImageFile;
         _settings = settings;
         _theme = theme;
         _baseTheme = baseTheme;
@@ -216,6 +234,218 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         Apply();
     }
 
+    // ---- over the window: a tint or a gradient ----
+
+    Color ShowingAccent => ThemeColor.TryParse(Model.Accent, out var own) ? own : _theme.ColorOf("SystemAccentColor") ?? ThemeColor.Parse("#0078D4");
+
+    public bool HasTint
+    {
+        get => Model.Tint != null;
+        set
+        {
+            if (value == HasTint) return;
+            Model.Tint = value ? ThemeColor.Format(ShowingAccent) : null;   // a tint starts from the accent
+            if (!value) Model.Tint2 = null;
+            Apply();
+        }
+    }
+
+    public string TintColor
+    {
+        get => Model.Tint ?? ThemeColor.Format(ShowingAccent);
+        set
+        {
+            if (!ThemeColor.TryParse(value, out var colour)) return;
+            var text = ThemeColor.Format(ThemeColor.WithAlpha(colour, 255));
+            if (string.Equals(text, Model.Tint, StringComparison.OrdinalIgnoreCase)) return;
+            Model.Tint = text;
+            Apply();
+        }
+    }
+
+    public bool UseGradient
+    {
+        get => Model.Tint2 != null;
+        set
+        {
+            if (value == UseGradient) return;
+            if (value)
+            {
+                Model.Tint ??= ThemeColor.Format(ShowingAccent);
+                // the second colour starts a sixth of the colour wheel away from the first
+                var (h, sat, v) = ThemeColor.ToHsv(ThemeColor.Parse(Model.Tint));
+                Model.Tint2 = ThemeColor.Format(ThemeColor.FromHsv(h + 60, Math.Max(sat, 0.5), Math.Max(v, 0.6)));
+            }
+            else
+            {
+                Model.Tint2 = null;
+            }
+
+            Apply();
+        }
+    }
+
+    public string Tint2Color
+    {
+        get => Model.Tint2 ?? TintColor;
+        set
+        {
+            if (!ThemeColor.TryParse(value, out var colour)) return;
+            var text = ThemeColor.Format(ThemeColor.WithAlpha(colour, 255));
+            if (string.Equals(text, Model.Tint2, StringComparison.OrdinalIgnoreCase)) return;
+            Model.Tint ??= ThemeColor.Format(ShowingAccent);
+            Model.Tint2 = text;
+            Apply();
+        }
+    }
+
+    /// <summary>The gradient's direction, 0 to 359 degrees.</summary>
+    public double TintAngle
+    {
+        get => Model.TintAngle;
+        set => SetNumber(Model.TintAngle, Math.Clamp(value, 0, 359), v => Model.TintAngle = v);
+    }
+
+    /// <summary>The tint's strength in per cent.</summary>
+    public double TintStrength
+    {
+        get => Math.Round(Model.TintStrength * 100);
+        set => SetNumber(Model.TintStrength, Math.Clamp(value, 0, 100) / 100, v => Model.TintStrength = v);
+    }
+
+    void SetNumber(double current, double value, Action<double> set)
+    {
+        if (Math.Abs(current - value) < 0.0005) return;
+        set(value);
+        Apply();
+    }
+
+    // ---- a picture behind the app ----
+
+    /// <summary>The largest picture accepted (a background does not need more).</summary>
+    public const long MaxImageBytes = 30L * 1024 * 1024;
+
+    public bool HasImage => Model.Image != null;
+    public string ImageName => Model.Image == null ? "" : Path.GetFileName(Model.Image);
+
+    /// <summary>Why the picture cannot be used, or null.</summary>
+    [ObservableProperty] string? _imageError;
+
+    [RelayCommand]
+    void ChooseImage()
+    {
+        var picked = _pickImage();
+        if (picked == null) return;
+        var stored = KeepImage(picked);
+        if (stored == null) return;
+        Model.Image = stored;
+        Apply();
+    }
+
+    [RelayCommand]
+    void RemoveImage()
+    {
+        ImageError = null;
+        if (Model.Image == null) return;
+        Model.Image = null;
+        Apply();
+    }
+
+    /// <summary>The folder ShadeNet keeps its copies of background pictures in.</summary>
+    string ImageFolder => Path.Combine(_settings.DataDir, "backgrounds");
+
+    /// <summary>
+    /// A copy of the picture in ShadeNet's own folder (the look must not break when the original is moved or deleted), named
+    /// after its content so the same picture is kept once. Null, with <see cref="ImageError"/> set, when it cannot be used.
+    /// </summary>
+    internal string? KeepImage(string source)
+    {
+        ImageError = null;
+        try
+        {
+            var info = new FileInfo(source);
+            if (!info.Exists)
+            {
+                ImageError = "That file is gone.";
+                return null;
+            }
+
+            if (info.Length > MaxImageBytes)
+            {
+                ImageError = $"That picture is too large ({info.Length / (1024 * 1024)} MB); pick one under {MaxImageBytes / (1024 * 1024)} MB.";
+                return null;
+            }
+
+            if (BackgroundLayer.TryLoad(source, out _) == null)
+            {
+                ImageError = "That file is not a picture ShadeNet can show (PNG, JPEG, BMP, GIF, TIFF or WebP with its codec).";
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(source);
+            var name = Convert.ToHexString(SHA256.HashData(bytes))[..16].ToLowerInvariant() + Path.GetExtension(source).ToLowerInvariant();
+            Directory.CreateDirectory(ImageFolder);
+            var target = Path.Combine(ImageFolder, name);
+            if (!File.Exists(target)) File.WriteAllBytes(target, bytes);
+            return target;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            ImageError = "The picture could not be copied: " + ex.Message;
+            return null;
+        }
+    }
+
+    /// <summary>Copies of pictures no longer in use are deleted (keep: pictures still wanted, e.g. by a look that can be undone).</summary>
+    internal void PruneImages(params string?[] keep)
+    {
+        try
+        {
+            if (!Directory.Exists(ImageFolder)) return;
+            foreach (var file in Directory.EnumerateFiles(ImageFolder))
+                if (!keep.Any(k => string.Equals(k, file, StringComparison.OrdinalIgnoreCase))) File.Delete(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // one that is in use stays until the next time
+        }
+    }
+
+    static string? PickImageFile()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Choose a background picture",
+            Filter = "Pictures|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.jxr|All files|*.*",
+        };
+        return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    public bool IsFitFill { get => Model.ImageFit == ImageFit.Fill; set { if (value) SetFit(ImageFit.Fill); } }
+    public bool IsFitFit { get => Model.ImageFit == ImageFit.Fit; set { if (value) SetFit(ImageFit.Fit); } }
+    public bool IsFitCenter { get => Model.ImageFit == ImageFit.Center; set { if (value) SetFit(ImageFit.Center); } }
+    public bool IsFitStretch { get => Model.ImageFit == ImageFit.Stretch; set { if (value) SetFit(ImageFit.Stretch); } }
+
+    void SetFit(ImageFit fit)
+    {
+        if (Model.ImageFit == fit) return;
+        Model.ImageFit = fit;
+        Apply();
+    }
+
+    public double ImageBlur
+    {
+        get => Model.ImageBlur;
+        set => SetNumber(Model.ImageBlur, Math.Clamp(value, 0, AppearanceSettings.MaxBlur), v => Model.ImageBlur = v);
+    }
+
+    /// <summary>How much the picture fades into the background, in per cent.</summary>
+    public double ImageDim
+    {
+        get => Math.Round(Model.ImageDim * 100);
+        set => SetNumber(Model.ImageDim, Math.Clamp(value, 0, AppearanceSettings.MaxDim * 100) / 100, v => Model.ImageDim = v);
+    }
+
     // ---- state colours and the palette ----
 
     void SetColour(Dictionary<string, string> colours, string key, string? value)
@@ -271,12 +501,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         SaveSoon();
     }
 
-    static bool Same(AppearanceSettings a, AppearanceSettings b) =>
-        string.Equals(a.Accent, b.Accent, StringComparison.OrdinalIgnoreCase) && a.Backdrop == b.Backdrop
-        && SameColours(a.Status, b.Status) && SameColours(a.Dark, b.Dark) && SameColours(a.Light, b.Light);
-
-    static bool SameColours(Dictionary<string, string> a, Dictionary<string, string> b) =>
-        a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var v) && string.Equals(v, kv.Value, StringComparison.OrdinalIgnoreCase));
+    static bool Same(AppearanceSettings a, AppearanceSettings b) => a.SameLook(b);
 
     /// <summary>Everything the page shows, read again (after a change here, a preset, or light and dark switching).</summary>
     public void Refresh()
@@ -288,9 +513,17 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             foreach (var item in Presets) item.IsSelected = string.Equals(item.Preset.Id, Model.Preset, StringComparison.OrdinalIgnoreCase);
             foreach (var item in StatusItems) item.Refresh();
             foreach (var item in PaletteGroups.SelectMany(g => g.Items)) item.Refresh();
-            foreach (var name in new[] { nameof(PresetName), nameof(PaletteTitle), nameof(UseWindowsAccent), nameof(AccentColor),
-                         nameof(IsMica), nameof(IsMicaAlt), nameof(IsAcrylic), nameof(IsSolid) })
+            foreach (var name in new[]
+                     {
+                         nameof(PresetName), nameof(PaletteTitle), nameof(UseWindowsAccent), nameof(AccentColor),
+                         nameof(IsMica), nameof(IsMicaAlt), nameof(IsAcrylic), nameof(IsSolid),
+                         nameof(HasTint), nameof(TintColor), nameof(UseGradient), nameof(Tint2Color), nameof(TintAngle), nameof(TintStrength),
+                         nameof(HasImage), nameof(ImageName), nameof(IsFitFill), nameof(IsFitFit), nameof(IsFitCenter), nameof(IsFitStretch),
+                         nameof(ImageBlur), nameof(ImageDim),
+                     })
                 OnPropertyChanged(name);
+
+            if (Model.Image != null && !File.Exists(Model.Image)) ImageError ??= "The background picture is gone. Choose another one.";
 
             var contrast = TextContrast();
             ContrastWarning = contrast is { } c && c < 4.5
@@ -304,19 +537,25 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         }
     }
 
+    void Save()
+    {
+        _settings.Save();
+        PruneImages(Model.Image);
+    }
+
     void SaveSoon()
     {
         // a slider being dragged changes the look many times a second; the settings file is written once it stops
         if (Application.Current?.Dispatcher is not { } dispatcher)
         {
-            _settings.Save();
+            Save();
             return;
         }
 
         _saveTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(600), DispatcherPriority.Background, (_, _) =>
         {
             _saveTimer!.Stop();
-            _settings.Save();
+            Save();
         }, dispatcher);
         _saveTimer.Stop();
         _saveTimer.Start();

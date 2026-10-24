@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ShadeNetDownloader.Services;
 using ShadeNetDownloader.ViewModels;
 
@@ -151,7 +152,7 @@ public class AppearanceTests
 
     // ---- the Appearance page ----
 
-    static (AppearanceSettingsViewModel Page, FakeTheme Theme, SettingsService Settings, Func<AppTheme> Base, TempDir Dir) Page()
+    static (AppearanceSettingsViewModel Page, FakeTheme Theme, SettingsService Settings, Func<AppTheme> Base, TempDir Dir) Page(Func<string?>? pickImage = null)
     {
         var dir = new TempDir();
         var settings = new SettingsService(dir.Path);
@@ -162,7 +163,7 @@ public class AppearanceTests
         {
             current = t;
             settings.Current.Theme = t;
-        });
+        }, pickImage);
         return (page, theme, settings, () => current, dir);
     }
 
@@ -297,5 +298,139 @@ public class AppearanceTests
         Assert.Equal(BackdropKind.Mica, settings.Current.Appearance.Backdrop);
         Assert.Empty(settings.Current.Appearance.Dark);
         Assert.Equal(ThemePresets.DefaultId, settings.Current.Appearance.Preset);
+    }
+
+    // ---- stage 2: a tint or gradient, and a picture ----
+
+    [Fact]
+    public void Tint_and_picture_values_are_kept_in_range()
+    {
+        var look = new AppearanceSettings
+        {
+            Tint2 = "#FF0000",          // a gradient without its first colour
+            TintAngle = -90,
+            TintStrength = 7,
+            ImageBlur = 500,
+            ImageDim = double.NaN,
+            Image = "  ",
+        };
+        look.Normalize();
+        Assert.Null(look.Tint2);
+        Assert.Equal(270, look.TintAngle);
+        Assert.Equal(1, look.TintStrength);
+        Assert.Equal(AppearanceSettings.MaxBlur, look.ImageBlur);
+        Assert.Equal(0.4, look.ImageDim);
+        Assert.Null(look.Image);
+    }
+
+    [Fact]
+    public void A_tint_starts_from_the_accent_and_a_gradient_adds_a_second_colour()
+    {
+        var (page, theme, settings, _, dir) = Page();
+        using var _d = dir;
+        Assert.False(page.HasTint);
+
+        page.HasTint = true;
+        Assert.Equal("#0078D4", settings.Current.Appearance.Tint);   // the accent showing
+        page.UseGradient = true;
+        Assert.NotNull(settings.Current.Appearance.Tint2);
+        Assert.NotEqual(settings.Current.Appearance.Tint, settings.Current.Appearance.Tint2);
+
+        page.TintStrength = 40;
+        page.TintAngle = 90;
+        Assert.Equal(0.4, theme.Calls.Last().Look.TintStrength, 3);
+        Assert.Equal(90, theme.Calls.Last().Look.TintAngle);
+
+        page.HasTint = false;   // no tint, no gradient
+        Assert.Null(settings.Current.Appearance.Tint);
+        Assert.Null(settings.Current.Appearance.Tint2);
+    }
+
+    [Fact]
+    public void A_gradient_preset_is_recognised_again_when_its_look_comes_back()
+    {
+        var (page, _, settings, _, dir) = Page();
+        using var _d = dir;
+        page.ApplyPresetCommand.Execute(page.Presets.Single(p => p.Preset.Id == "aurora"));
+        Assert.IsType<LinearGradientBrush>(page.Presets.Single(p => p.Preset.Id == "aurora").Background);
+
+        page.TintStrength = 50;
+        Assert.Equal(ThemePresets.CustomId, settings.Current.Appearance.Preset);
+        page.TintStrength = 28;
+        Assert.Equal("aurora", settings.Current.Appearance.Preset);
+    }
+
+    static string Picture(string folder, string name, byte shade = 0x80)
+    {
+        var pixels = Enumerable.Repeat(shade, 2 * 2 * 4).ToArray();
+        var bitmap = BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32, null, pixels, 2 * 4);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        var path = Path.Combine(folder, name);
+        using var file = File.Create(path);
+        encoder.Save(file);
+        return path;
+    }
+
+    [Fact]
+    public void A_picture_is_kept_as_a_copy_of_its_own_and_old_copies_are_cleaned_up()
+    {
+        using var source = new TempDir();
+        var next = Picture(source.Path, "holiday.png");
+        var (page, theme, settings, _, dir) = Page(() => next);
+        using var _d = dir;
+
+        page.ChooseImageCommand.Execute(null);
+        var kept = settings.Current.Appearance.Image!;
+        Assert.StartsWith(Path.Combine(dir.Path, "backgrounds"), kept);
+        Assert.True(File.Exists(kept));
+        Assert.True(page.HasImage);
+        Assert.Equal(kept, theme.Calls.Last().Look.Image);
+
+        File.Delete(next);   // the original can go: the look keeps working
+        Assert.True(File.Exists(kept));
+
+        next = Picture(source.Path, "mountains.png", 0x20);
+        page.ChooseImageCommand.Execute(null);
+        Assert.NotEqual(kept, settings.Current.Appearance.Image);
+        Assert.False(File.Exists(kept));   // the copy no longer used is deleted when the look is saved
+
+        page.RemoveImageCommand.Execute(null);
+        Assert.False(page.HasImage);
+        Assert.Empty(Directory.GetFiles(Path.Combine(dir.Path, "backgrounds")));
+    }
+
+    [Fact]
+    public void A_file_that_is_no_picture_is_refused_with_the_reason()
+    {
+        using var source = new TempDir();
+        var text = Path.Combine(source.Path, "notes.png");
+        File.WriteAllText(text, "not a picture");
+        var (page, _, settings, _, dir) = Page(() => text);
+        using var _d = dir;
+
+        page.ChooseImageCommand.Execute(null);
+        Assert.Null(settings.Current.Appearance.Image);
+        Assert.NotNull(page.ImageError);
+    }
+
+    [Fact]
+    public void The_layer_behind_the_window_shows_the_tint_and_the_picture()
+    {
+        using var source = new TempDir();
+        var layer = new BackgroundLayer();
+        layer.Update(new AppearanceSettings { Tint = "#FF0000", Tint2 = "#0000FF", TintStrength = 0.3, Image = Picture(source.Path, "a.png"), ImageBlur = 10, ImageDim = 0.5 });
+
+        Assert.True(layer.HasTint);
+        Assert.IsType<LinearGradientBrush>(layer.Tint);
+        Assert.Equal(0.3, layer.TintOpacity);
+        Assert.True(layer.HasImage);
+        Assert.Equal(-20, layer.BlurMargin.Left);
+        Assert.Equal(0.5, layer.Dim);
+
+        layer.Update(new AppearanceSettings { Image = Path.Combine(source.Path, "gone.png") });
+        Assert.False(layer.HasTint);
+        Assert.False(layer.HasImage);
+        Assert.NotNull(layer.ImageError);
     }
 }

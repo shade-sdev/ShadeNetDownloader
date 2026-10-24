@@ -37,11 +37,28 @@
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding AddDownloadCommand}" />
     </ui:FluentWindow.InputBindings>
 
-    <Grid>
+    <Grid x:Name="Root">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+
+        <!-- ===================== Behind everything: a picture and a tint (Settings > Appearance > Background) ===================== -->
+        <Grid x:Name="BackgroundLayerHost" Grid.RowSpan="2" IsHitTestVisible="False" ClipToBounds="True">
+            <Image Source="{Binding Image}" Stretch="{Binding ImageStretch}" Margin="{Binding BlurMargin}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   RenderOptions.BitmapScalingMode="HighQuality"
+                   Visibility="{Binding HasImage, Converter={StaticResource B2V}}">
+                <Image.Effect>
+                    <BlurEffect Radius="{Binding Blur}" RenderingBias="Performance" KernelType="Gaussian" />
+                </Image.Effect>
+            </Image>
+            <!-- the picture fades into the theme's background, so text on it stays readable -->
+            <Rectangle Fill="{DynamicResource ApplicationBackgroundBrush}" Opacity="{Binding Dim}"
+                       Visibility="{Binding HasImage, Converter={StaticResource B2V}}" />
+            <Rectangle Fill="{Binding Tint}" Opacity="{Binding TintOpacity}"
+                       Visibility="{Binding HasTint, Converter={StaticResource B2V}}" />
+        </Grid>
 
         <!-- ===================== Title bar: brand · search · live speed · theme ===================== -->
         <ui:TitleBar x:Name="TitleBar" Grid.Row="0" Height="52" Title="" ShowMaximize="True">

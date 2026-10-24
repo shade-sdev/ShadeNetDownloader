@@ -14,6 +14,19 @@ public enum BackdropKind
     Solid,
 }
 
+/// <summary>How a background picture covers the window.</summary>
+public enum ImageFit
+{
+    /// <summary>Covers the window, cut to fit (keeps its shape).</summary>
+    Fill,
+    /// <summary>Shows whole, with bands where the shapes differ.</summary>
+    Fit,
+    /// <summary>At its own size, in the middle.</summary>
+    Center,
+    /// <summary>Stretched to the window's shape.</summary>
+    Stretch,
+}
+
 /// <summary>
 /// How the app looks, beyond light and dark (<see cref="AppSettings.Theme"/>): the accent, the window's material, the colours
 /// of a download's state, and any colour of the palette the user chose to set. Plain data (colours as "#RRGGBB" or
@@ -38,6 +51,34 @@ public sealed class AppearanceSettings
     /// <summary>The same, for the light theme (a colour that reads well on dark rarely does on light).</summary>
     public Dictionary<string, string> Light { get; set; } = new();
 
+    // ---- over the window: a tint or a gradient, and a picture ----
+
+    /// <summary>A colour laid over the window's material; null = none.</summary>
+    public string? Tint { get; set; }
+
+    /// <summary>A second colour: the tint becomes a gradient from <see cref="Tint"/> to this one.</summary>
+    public string? Tint2 { get; set; }
+
+    /// <summary>The gradient's direction in degrees (0 = left to right, 90 = top to bottom).</summary>
+    public double TintAngle { get; set; } = 135;
+
+    /// <summary>How strong the tint is, 0 to 1.</summary>
+    public double TintStrength { get; set; } = 0.25;
+
+    /// <summary>A picture behind the app: a copy kept in ShadeNet's data folder; null = none.</summary>
+    public string? Image { get; set; }
+
+    public ImageFit ImageFit { get; set; } = ImageFit.Fill;
+
+    /// <summary>How much the picture is blurred, 0 to <see cref="MaxBlur"/> pixels.</summary>
+    public double ImageBlur { get; set; }
+
+    /// <summary>How much the picture is faded into the theme's background, so text stays readable: 0 to <see cref="MaxDim"/>.</summary>
+    public double ImageDim { get; set; } = 0.4;
+
+    public const double MaxBlur = 40;
+    public const double MaxDim = 0.9;
+
     public AppearanceSettings Clone() => new()
     {
         Preset = Preset,
@@ -46,7 +87,30 @@ public sealed class AppearanceSettings
         Status = new Dictionary<string, string>(Status, StringComparer.OrdinalIgnoreCase),
         Dark = new Dictionary<string, string>(Dark, StringComparer.OrdinalIgnoreCase),
         Light = new Dictionary<string, string>(Light, StringComparer.OrdinalIgnoreCase),
+        Tint = Tint,
+        Tint2 = Tint2,
+        TintAngle = TintAngle,
+        TintStrength = TintStrength,
+        Image = Image,
+        ImageFit = ImageFit,
+        ImageBlur = ImageBlur,
+        ImageDim = ImageDim,
     };
+
+    /// <summary>Whether two looks are the same (the preset a look matches is named after it).</summary>
+    public bool SameLook(AppearanceSettings other) =>
+        Same(Accent, other.Accent) && Backdrop == other.Backdrop
+        && SameColours(Status, other.Status) && SameColours(Dark, other.Dark) && SameColours(Light, other.Light)
+        && Same(Tint, other.Tint) && Same(Tint2, other.Tint2)
+        && (Tint == null || (Close(TintAngle, other.TintAngle) && Close(TintStrength, other.TintStrength)))
+        && Same(Image, other.Image)
+        && (Image == null || (ImageFit == other.ImageFit && Close(ImageBlur, other.ImageBlur) && Close(ImageDim, other.ImageDim)));
+
+    static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+    static bool Close(double a, double b) => Math.Abs(a - b) < 0.001;
+
+    static bool SameColours(Dictionary<string, string> a, Dictionary<string, string> b) =>
+        a.Count == b.Count && a.All(kv => b.TryGetValue(kv.Key, out var v) && Same(v, kv.Value));
 
     /// <summary>
     /// Drops what cannot be used (an unknown key, a colour that is not one, an unknown material), so a hand-edited settings
@@ -67,12 +131,39 @@ public sealed class AppearanceSettings
             dropped++;
         }
 
+        if (Tint != null && !ThemeColor.TryParse(Tint, out _))
+        {
+            Tint = null;
+            dropped++;
+        }
+
+        if (Tint2 != null && (Tint == null || !ThemeColor.TryParse(Tint2, out _)))
+        {
+            Tint2 = null;   // (a gradient needs its first colour)
+            dropped++;
+        }
+
+        TintAngle = Finite(TintAngle, 135) % 360;
+        if (TintAngle < 0) TintAngle += 360;
+        TintStrength = Math.Clamp(Finite(TintStrength, 0.25), 0, 1);
+        if (!Enum.IsDefined(ImageFit))
+        {
+            ImageFit = ImageFit.Fill;
+            dropped++;
+        }
+
+        if (string.IsNullOrWhiteSpace(Image)) Image = null;
+        ImageBlur = Math.Clamp(Finite(ImageBlur, 0), 0, MaxBlur);
+        ImageDim = Math.Clamp(Finite(ImageDim, 0.4), 0, MaxDim);
+
         Status = Clean(Status, StatusColors.Keys, ref dropped);
         Dark = Clean(Dark, ThemePalette.Keys, ref dropped);
         Light = Clean(Light, ThemePalette.Keys, ref dropped);
         if (string.IsNullOrWhiteSpace(Preset)) Preset = ThemePresets.CustomId;
         return dropped;
     }
+
+    static double Finite(double value, double fallback) => double.IsFinite(value) ? value : fallback;
 
     static Dictionary<string, string> Clean(Dictionary<string, string>? colours, IReadOnlyCollection<string> allowed, ref int dropped)
     {
@@ -262,6 +353,15 @@ public static class ThemePresets
         Status = new(status ?? new(), StringComparer.OrdinalIgnoreCase),
     };
 
+    static AppearanceSettings Tinted(AppearanceSettings look, string from, string to, double strength, double angle = 135)
+    {
+        look.Tint = from;
+        look.Tint2 = to;
+        look.TintStrength = strength;
+        look.TintAngle = angle;
+        return look;
+    }
+
     static ThemePreset Preset(string id, string name, string description, AppTheme theme, AppearanceSettings look)
     {
         look.Preset = id;
@@ -292,6 +392,12 @@ public static class ThemePresets
 
         Preset("sunset", "Sunset", "Warm orange, pink for finished downloads.", AppTheme.Dark,
             Look("#F97316", BackdropKind.MicaAlt, status: new() { [StatusColors.Done] = "#EC4899" })),
+
+        Preset("aurora", "Aurora", "A teal to violet glow over Mica.", AppTheme.Dark,
+            Tinted(Look("#22D3EE", BackdropKind.Mica), "#06B6D4", "#A855F7", 0.28)),
+
+        Preset("peach", "Peach", "Light, a warm peach to pink glow.", AppTheme.Light,
+            Tinted(Look("#F97316", BackdropKind.Mica), "#FDBA74", "#F9A8D4", 0.35)),
 
         Preset("rose", "Rose", "Light, with a rose accent.", AppTheme.Light,
             Look("#E11D48", BackdropKind.Mica)),

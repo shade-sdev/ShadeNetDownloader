@@ -54,6 +54,9 @@ public sealed class AppThemeService : IThemeApplier
     /// <summary>Whether the dark palette is the one showing (in System mode, what Windows uses).</summary>
     public bool IsDark => ApplicationThemeManager.GetAppTheme() != ApplicationTheme.Light;
 
+    /// <summary>The picture and tint drawn behind the window (the main window binds a layer to it).</summary>
+    public BackgroundLayer Layer { get; } = new();
+
     /// <summary>Raised after anything of the look changed (the Appearance page refreshes its preview).</summary>
     public event Action? Applied;
 
@@ -188,6 +191,8 @@ public sealed class AppThemeService : IThemeApplier
             resources[key] = brush;
             _written.Add(key);
         }
+
+        Layer.Update(_appearance);
 
         Applied?.Invoke();
     }

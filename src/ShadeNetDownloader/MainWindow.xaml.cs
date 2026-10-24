@@ -43,6 +43,7 @@ public partial class MainWindow : FluentWindow
         // Window position/size from last time (only if it still fits on a screen).
         RestoreGeometry(settings.Current.Window);
 
+        BackgroundLayerHost.DataContext = theme.Layer;
         theme.Attach(this);
         theme.Apply(settings.Current.Theme, settings.Current.Appearance);
 
