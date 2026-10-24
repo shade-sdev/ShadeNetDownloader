@@ -10,6 +10,7 @@ import {
 } from './capture.js';
 import { MediaTracker, looksLikePlaylist, pairStreams } from './media.js';
 import { PieceTracker } from './pieces.js';
+import { RangedFileTracker } from './files.js';
 import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVideoPage } from './youtube.js';
 import { browserTimers } from './native.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
@@ -134,6 +135,12 @@ export class Controller {
       fetchHead: (url, via) => fetchHead(url, this.recorder?.lookup(via), this.chrome),
       onChange: (tabId) => this.updateMediaBadge(tabId),
       skip: (tabId) => this.media.list(tabId).some((i) => i.kind === 'master' || i.kind === 'media'),   // a playlist's pieces are its own
+    });
+    // one whole video file a player reads itself, a range at a time, under any name and type
+    this.files = new RangedFileTracker({
+      fetchHead: (url, via) => fetchHead(url, this.recorder?.lookup(via), this.chrome),
+      onChange: (tabId) => this.updateMediaBadge(tabId),
+      skip: (tabId) => this.media.list(tabId).some((i) => i.kind === 'master' || i.kind === 'media'),
     });
     this.handling = new Map();   // download id -> the hand-over in progress (or done), so each download is handled once
     this.overlayEnabled = true;  // the "Download" button on top of videos (the popup has the switch)
@@ -280,7 +287,7 @@ export class Controller {
     if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
     if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
 
-    return JSON.stringify({ tab: strip(tab.url), notes, pageScript, offered: items, pageVideos: videos, pieceRuns: runs, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
+    return JSON.stringify({ tab: strip(tab.url), notes, pageScript, offered: items, pageVideos: videos, pieceRuns: runs, filesRead: this.files.describe(tab.id), recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
   }
 
   /** Keeps the last 40 steps, newest last. Never throws. */
@@ -329,6 +336,7 @@ export class Controller {
         this.noteRefusal(details);
         this.tracks.consider(details);
         this.pieces.consider(details);
+        this.files.consider(details);
         return this.media.consider(details);
       },
       { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] },
@@ -339,6 +347,7 @@ export class Controller {
         this.media.clear(tabId);
         this.tracks.clear(tabId);
         this.pieces.clear(tabId);
+        this.files.clear(tabId);
         this.pageVideos.delete(tabId);
         this.refused.delete(tabId);
       }
@@ -347,6 +356,7 @@ export class Controller {
       this.media.clear(tabId);
       this.tracks.clear(tabId);
       this.pieces.clear(tabId);
+      this.files.clear(tabId);
       this.pageVideos.delete(tabId);
       this.refused.delete(tabId);
     });
@@ -662,7 +672,17 @@ export class Controller {
       ...(m.audioUrl ? { audioUrl: m.audioUrl } : {}), ...(m.audioOnly ? { audioOnly: true } : {}),
     }));
 
+    // a video file the player reads itself (its bytes were looked at): before the <video> addresses, which may be a front its code answers
+    for (const f of this.files.items(tab.id)) {
+      if (items.some((i) => i.url === f.url)) continue;
+      items.push({
+        url: f.url, kind: 'file', live: false, protected: f.protected, duration: this.playingLength(tab.id), maxHeight: f.maxHeight, title: name,
+        ...(f.kind === 'audio' ? { audioOnly: true } : {}),
+      });
+    }
+
     for (const v of this.fileVideos(tab.id)) {
+      if (items.some((i) => i.url === v.src)) continue;
       items.push({
         url: v.src, kind: 'file', live: false, protected: false, duration: v.duration || 0, maxHeight: v.height || 0,
         title: v.title ? cleanTitle(v.title) : name,
@@ -740,6 +760,12 @@ export class Controller {
     if (page) return this.sendPage(tab, page);
     const playing = tab ? this.tracks.current(tab.id) : null;
     if (playing && playing.video.url === url) return this.sendTracks(tab, playing);
+    const read = tab ? this.files.find(tab.id, url) : null;
+    if (read) {
+      if (read.protected) return { accepted: false, reason: 'protected' };
+      // (no referrer of its own: the one the player sent, else the player's page)
+      return this.sendFile(tab, { src: url, extension: read.format, referrerFallback: this.playerPage(tab, read.referrer) || tab.url, size: read.size });
+    }
     const file = tab ? this.fileVideos(tab.id).find((v) => v.src === url) : null;
     if (file) return this.sendFile(tab, file);
     const pieces = tab ? this.pieces.find(tab.id, url) : null;
@@ -824,11 +850,14 @@ export class Controller {
   async sendFile(tab, file) {
     try {
       if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
-      const extension = /\.(mp4|webm|mkv|mov|m4v|ogv|ogg)(?=$|[?#])/i.exec(new URL(file.src).pathname + '#')?.[1]?.toLowerCase() ?? 'mp4';
+      const extension = file.extension ?? /\.(mp4|webm|mkv|mov|m4v|ogv|ogg)(?=$|[?#])/i.exec(new URL(file.src).pathname + '#')?.[1]?.toLowerCase() ?? 'mp4';
       const message = await this.describe({
         url: file.src,
-        referrer: tab.url,
-        fileName: `${(file.title ? cleanTitle(file.title) : this.pageTitle(tab)).replace(/[.\s]+$/, '') || 'video'}.${extension}`,   // "Title." + ".mp4" would be "Title..mp4"
+        referrer: file.referrerFallback ? undefined : tab.url,
+        referrerFallback: file.referrerFallback,
+        // ("Title." + ".mp4" would be "Title..mp4", and a page that names its video "Film 1080p.mkv" does not make it "….mkv.mp4")
+        fileName: `${(file.title ? cleanTitle(file.title) : this.pageTitle(tab)).replace(/\.(mp4|mkv|webm|mov|m4v|avi|flv|ts)$/i, '').replace(/[.\s]+$/, '') || 'video'}.${extension}`,
+        size: file.size,
         source: 'video',
       });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);

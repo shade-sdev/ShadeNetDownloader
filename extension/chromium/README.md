@@ -39,6 +39,12 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   lists them too. One click hands the video over; the file is saved under the video's name. The switch "Show a Download
   button on videos" in the popup turns the button off. (`content.js` runs in every page and frame; it only reports the
   `<video>` elements to the extension and draws the answer.) Pages that were open before the extension was reloaded need a refresh.
+* **Video files a player reads itself** (its own code asks for the file a range at a time, under any name and type, such as
+  `/c/f/89a7f.4` sent as `application/octet-stream`, while the `<video>` shows a `blob:` or another address): a partial
+  answer of a big file has its first bytes looked at, and only a real video file (MP4, WebM, Matroska, FLV, MPEG-TS) is
+  offered, with its size and the player's own Referer; one whose tracks name an encryption is listed as protected. It is listed
+  before the `<video>` element's own address, which may be one the player's code answers itself. `diagnose()` lists every
+  such file it saw under `filesRead`, with what the look said (`ok`, `not-a-video-file`, `unreadable`).
 * **Dead sources are skipped.** A player that tries one source and moves on to another (the first was refused, deleted or
   broken) leaves the dead one in the page: a `<video>` whose source the browser could not load, or whose address the server
   refused the browser itself, is not offered. Only what the browser could load is.
