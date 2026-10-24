@@ -236,7 +236,12 @@ export class Controller {
    * for pieces but never for a playlist, that this is why nothing can be offered. Nothing here leaves the browser.
    */
   async diagnose({ urlIncludes = '', full = false } = {}) {
-    const tabs = (await this.chrome.tabs?.query?.(urlIncludes ? {} : { active: true, currentWindow: true })) ?? [];
+    // (the console this runs in is a window of its own, with no tabs: "the tab you are looking at" is the one in front of the
+    // browser window used last, else any tab in front)
+    const query = (q) => this.chrome.tabs?.query?.(q) ?? [];
+    const tabs = urlIncludes
+      ? await query({})
+      : [...(await query({ active: true, lastFocusedWindow: true })), ...(await query({ active: true }))].filter((t) => /^https?:/i.test(String(t.url ?? '')));
     // several tabs may match: the one in front first
     const tab = urlIncludes ? tabs.filter((t) => String(t.url ?? '').includes(urlIncludes)).sort((a, b) => Number(!!b.active) - Number(!!a.active))[0] : tabs[0];
     if (!tab) return 'No such tab.';
