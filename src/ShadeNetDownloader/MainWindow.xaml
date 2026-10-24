@@ -44,34 +44,40 @@
 
         <!-- ===================== Title bar: brand · search · live speed · theme ===================== -->
         <ui:TitleBar x:Name="TitleBar" Grid.Row="0" Height="52" Title="" ShowMaximize="True">
+            <!-- the brand sits over the sidebar and the search starts where the content does: the brand column is as wide as the
+                 sidebar, less where the title bar puts its left slot (measured in code, see AlignTitleBar) -->
             <ui:TitleBar.Header>
-                <StackPanel Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
-                    <Border Width="26" Height="26" CornerRadius="8" VerticalAlignment="Center">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="{DynamicResource SystemAccentColorSecondary}" Offset="0" />
-                                <GradientStop Color="{DynamicResource SystemAccentColorPrimary}" Offset="1" />
-                            </LinearGradientBrush>
-                        </Border.Background>
-                        <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" Filled="True" Foreground="White"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    </Border>
-                    <TextBlock Text="ShadeNet" Margin="10,0,0,0" FontSize="14" FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
-                </StackPanel>
-            </ui:TitleBar.Header>
+                <Grid x:Name="TitleBarHeader" VerticalAlignment="Stretch">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="BrandColumn" Width="234" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-            <ui:TitleBar.CenterContent>
-                <Grid Margin="24,0">
-                    <ui:TextBox x:Name="SearchBox" Width="380" Height="34" VerticalAlignment="Center"
+                    <!-- the title bar treats its slots as part of the window, so the brand area moves the window itself -->
+                    <StackPanel Orientation="Horizontal" Background="Transparent" MouseLeftButtonDown="OnBrandMouseDown">
+                        <Border Width="26" Height="26" CornerRadius="8" VerticalAlignment="Center" Margin="14,0,0,0">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop Color="{DynamicResource SystemAccentColorSecondary}" Offset="0" />
+                                    <GradientStop Color="{DynamicResource SystemAccentColorPrimary}" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" Filled="True" Foreground="White"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="ShadeNet" Margin="10,0,0,0" FontSize="14" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+                    </StackPanel>
+
+                    <ui:TextBox x:Name="SearchBox" Grid.Column="1" Width="380" Height="34" VerticalAlignment="Center"
                                 AutomationProperties.Name="Search downloads"
                                 PlaceholderText="Search downloads"
                                 ClearButtonEnabled="True"
                                 Icon="{ui:SymbolIcon Search24}"
                                 Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" />
                 </Grid>
-            </ui:TitleBar.CenterContent>
+            </ui:TitleBar.Header>
 
             <ui:TitleBar.TrailingContent>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -103,7 +109,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- Sidebar -->
-            <Grid Grid.Column="0" Margin="0,0,0,10">
+            <Grid x:Name="Sidebar" Grid.Column="0" Margin="0,0,0,10">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />

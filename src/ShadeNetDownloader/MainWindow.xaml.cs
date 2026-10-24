@@ -35,6 +35,11 @@ public partial class MainWindow : FluentWindow
 
         dialogs.SetDialogHost(DialogHost);
 
+        // (the title bar's left slot is placed by WPF-UI: measured once everything is laid out, and again when the sidebar changes)
+        Loaded += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);
+        Sidebar.SizeChanged += (_, _) => AlignTitleBar();
+        StateChanged += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);   // (maximised, the slot moves)
+
         // Window position/size from last time (only if it still fits on a screen).
         RestoreGeometry(settings.Current.Window);
 
@@ -59,6 +64,27 @@ public partial class MainWindow : FluentWindow
     }
 
     void OnThemeClick(object sender, RoutedEventArgs e) => _vm.SettingsPage.CycleTheme();
+
+    /// <summary>
+    /// The search box starts where the content does: the brand column of the title bar is as wide as the sidebar, less where
+    /// the title bar's left slot begins (WPF-UI places it a little in from the window's edge).
+    /// </summary>
+    void AlignTitleBar()
+    {
+        if (!TitleBarHeader.IsLoaded || !Sidebar.IsLoaded) return;
+        var slot = TitleBarHeader.TranslatePoint(new Point(0, 0), this).X;
+        var content = Sidebar.TranslatePoint(new Point(Sidebar.ActualWidth, 0), this).X;
+        var width = Math.Max(0, content - slot);
+        if (Math.Abs(BrandColumn.Width.Value - width) > 0.5) BrandColumn.Width = new GridLength(width);
+    }
+
+    /// <summary>The brand area moves the window (and a double click maximises it), as the rest of the title bar does.</summary>
+    void OnBrandMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2) WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        else DragMove();
+        e.Handled = true;
+    }
 
     long _limitPopupClosedAt;
 
