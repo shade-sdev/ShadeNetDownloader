@@ -35,8 +35,18 @@ function inspectIsoBmff(b) {
     if ([0x65, 0x73, 0x74, 0x70].includes(b[i]) && ENCRYPTION_BOXES.includes(text(b, i, 4))) encrypted = true;   // e, s, t, p: cheap first look
   }
 
+  // The sample entries live in the sample description ('stsd'). The same names appear elsewhere, among the brands of 'ftyp' for one
+  // ("avc1" is a brand too), where the bytes after them are no picture size: only look after 'stsd'.
+  let from = 4;
+  for (let i = 4; i + 4 <= b.length; i++) {
+    if (b[i] === 0x73 && text(b, i, 4) === 'stsd') {
+      from = i + 4;
+      break;
+    }
+  }
+
   for (const entry of VIDEO_ENTRIES) {
-    for (let i = 4; i + 32 <= b.length; i++) {
+    for (let i = from; i + 32 <= b.length; i++) {
       if (b[i] === entry.charCodeAt(0) && text(b, i, 4) === entry) {   // VisualSampleEntry: width and height 28 bytes after the name
         width = u16(b, i + 28);
         height = u16(b, i + 30);

@@ -16,6 +16,14 @@ test('an initialisation part that carries encryption boxes says so (a protected 
   assert.equal(inspectMedia(real.fmp4Both).encrypted, false);
 });
 
+test('a brand named like a codec in the file type box is not mistaken for the picture (Reddit lists "avc1" among its brands)', () => {
+  // an 'ftyp' box whose compatible brands include avc1, followed by bytes that would read as a nonsense size
+  const brands = [0, 0, 0, 28, ...'ftypisomavc1isomiso2avc1mp41'.slice(0, 24).split('').map((c) => c.charCodeAt(0))];
+  const init = new Uint8Array([...brands, ...real.fmp4Video.subarray(28)]);
+  assert.equal(inspectMedia(init).height, 240);
+  assert.equal(inspectMedia(init).kind, 'video');
+});
+
 test('an MPEG-TS piece says it through its program table', () => {
   assert.equal(inspectMedia(real.tsVideo).kind, 'video');
   assert.equal(inspectMedia(real.tsAudio).kind, 'audio');
