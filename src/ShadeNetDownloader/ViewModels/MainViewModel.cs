@@ -29,6 +29,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         _manager = manager;
         _settings = settings;
+        _isSidebarExpanded = !settings.Current.SidebarCollapsed;
         _dialogs = dialogs;
         Toasts = toasts;
         Downloads = downloads;
@@ -86,6 +87,33 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty] string _statusText = "";
     [ObservableProperty] string _diskText = "";
     [ObservableProperty] string _limitText = "Limit: off";
+
+    // ---- the sidebar: icons with their names, or icons only ----
+
+    public const double SidebarExpandedWidth = 248;
+    public const double SidebarCollapsedWidth = 68;
+
+    [ObservableProperty] bool _isSidebarExpanded;
+
+    public GridLength SidebarWidth => new(IsSidebarExpanded ? SidebarExpandedWidth : SidebarCollapsedWidth);
+
+    /// <summary>The drop hint covers the content, not the sidebar.</summary>
+    public Thickness DropMargin => new(SidebarWidth.Value, 0, 12, 12);
+
+    public string SidebarToggleTip => IsSidebarExpanded ? "Show icons only" : "Show names";
+
+    partial void OnIsSidebarExpandedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(SidebarWidth));
+        OnPropertyChanged(nameof(DropMargin));
+        OnPropertyChanged(nameof(SidebarToggleTip));
+        if (_settings.Current.SidebarCollapsed == !value) return;
+        _settings.Current.SidebarCollapsed = !value;
+        _settings.Save();
+    }
+
+    [RelayCommand]
+    void ToggleSidebar() => IsSidebarExpanded = !IsSidebarExpanded;
 
     static SymbolRegular CategoryIcon(string category) => category switch
     {

@@ -225,6 +225,32 @@ public class ViewModelTests
     }
 
     [Fact]
+    public void The_sidebar_shows_icons_only_when_asked_and_remembers_it()
+    {
+        var (manager, settings, dir) = Env();
+        using var d = dir;
+        using var m = manager;
+        var toasts = new ToastService();
+        MainViewModel Main() => new(manager, settings, new FakeDialogs(), toasts, new DownloadsViewModel(manager, toasts),
+            new SettingsViewModel(settings, new AppThemeService()));
+
+        var main = Main();
+        Assert.True(main.IsSidebarExpanded);
+        Assert.Equal(MainViewModel.SidebarExpandedWidth, main.SidebarWidth.Value);
+
+        main.ToggleSidebarCommand.Execute(null);
+        Assert.False(main.IsSidebarExpanded);
+        Assert.Equal(MainViewModel.SidebarCollapsedWidth, main.SidebarWidth.Value);
+        Assert.Equal(MainViewModel.SidebarCollapsedWidth, main.DropMargin.Left);
+        Assert.True(settings.Current.SidebarCollapsed);
+
+        var reloaded = new SettingsService(settings.DataDir);
+        reloaded.Load();
+        Assert.True(reloaded.Current.SidebarCollapsed);
+        Assert.False(Main().IsSidebarExpanded);   // the next start shows it as it was left
+    }
+
+    [Fact]
     public void Sidebar_counts_ignore_downloads_waiting_out_their_undo_window()
     {
         var (manager, settings, dir) = Env();

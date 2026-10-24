@@ -27,6 +27,9 @@ public sealed class AppSettings
     /// <summary>Accent, window material, state colours and palette: everything about the look beyond light and dark.</summary>
     public AppearanceSettings Appearance { get; set; } = new();
     public WindowGeometry Window { get; set; } = new();
+
+    /// <summary>The sidebar shows icons only (true) or icons with their names.</summary>
+    public bool SidebarCollapsed { get; set; }
     public EngineSettings Engine { get; set; } = new();
     public BrowserSettings Browser { get; set; } = new();
     public GeneralSettings General { get; set; } = new();

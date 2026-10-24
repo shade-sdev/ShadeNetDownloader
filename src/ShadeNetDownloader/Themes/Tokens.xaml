@@ -23,8 +23,7 @@
 
     <Thickness x:Key="PagePadding">32,24,32,16</Thickness>
 
-    <GridLength x:Key="SidebarWidth">248</GridLength>
-    <Thickness x:Key="DropMargin">248,0,12,12</Thickness>
+    <!-- (the sidebar's width, and the drop hint's margin that follows it, come from MainViewModel: it can show icons only) -->
 
     <!-- Motion: 150-250 ms ease-out -->
     <Duration x:Key="MotionFast">0:0:0.15</Duration>
