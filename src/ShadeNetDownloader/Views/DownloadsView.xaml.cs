@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
+using ShadeNetDownloader.Util;
 using ShadeNetDownloader.ViewModels;
 
 namespace ShadeNetDownloader.Views;
@@ -52,8 +53,8 @@ public partial class DownloadsView : UserControl
 
     void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // The slow orbit around the hero icon is decoration only: skip it when Windows asks for reduced motion.
-        if (!SystemParameters.ClientAreaAnimation) return;
+        // The slow orbit around the hero icon is decoration only: skip it when motion is off (or Windows asks for less).
+        if (!Animate.Enabled) return;
 
         var spin = new DoubleAnimation(0, 360, TimeSpan.FromSeconds(60)) { RepeatBehavior = RepeatBehavior.Forever };
         OrbitRotation.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty, spin);
@@ -63,20 +64,34 @@ public partial class DownloadsView : UserControl
 
     void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (_watched != null) _watched.PropertyChanged -= OnVmPropertyChanged;
+        if (_watched != null)
+        {
+            _watched.PropertyChanged -= OnVmPropertyChanged;
+            _watched.ListReshuffled -= OnListReshuffled;
+        }
+
         _watched = e.NewValue as DownloadsViewModel;
-        if (_watched != null) _watched.PropertyChanged += OnVmPropertyChanged;
+        if (_watched != null)
+        {
+            _watched.PropertyChanged += OnVmPropertyChanged;
+            _watched.ListReshuffled += OnListReshuffled;
+        }
     }
 
     void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // the list just became empty: its picture floats in (after the layout shows it)
+        if (e.PropertyName == nameof(DownloadsViewModel.IsEmpty) && _watched is { IsEmpty: true } && IsLoaded)
+            Dispatcher.BeginInvoke(() => Animate.FadeSlideIn(EmptyState, offsetY: 18, duration: Animate.Slow),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+
         if (e.PropertyName != nameof(DownloadsViewModel.IsDetailsOpen)) return;
 
         if (_watched is { IsDetailsOpen: true })
         {
             // slide the drawer open: the host reveals it from the left edge while the page makes room
             var width = Drawer.Width;
-            if (!SystemParameters.ClientAreaAnimation)
+            if (!Animate.Enabled)
             {
                 DrawerHost.Width = width;
                 return;
@@ -92,6 +107,14 @@ public partial class DownloadsView : UserControl
     }
 
     void OnCloseDetails(object? sender, EventArgs e) => Vm?.CloseDetails();
+
+    /// <summary>Another list or another order: the heading and the list slide in again.</summary>
+    void OnListReshuffled()
+    {
+        if (!IsLoaded) return;
+        Animate.FadeSlideIn(Heading, offsetY: 0, offsetX: -12, duration: Animate.Base);
+        Animate.FadeSlideIn(List, offsetY: 16);
+    }
 
     /// <summary>Esc closes the drawer wherever the focus is.</summary>
     void OnPreviewKeyDown(object sender, KeyEventArgs e)

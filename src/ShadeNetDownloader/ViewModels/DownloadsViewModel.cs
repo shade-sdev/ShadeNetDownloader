@@ -74,6 +74,26 @@ public sealed partial class DownloadsViewModel : ObservableObject
         _tick.Start();
 
         UpdateTexts();
+        _ready = true;
+    }
+
+    bool _ready;   // the cards there at start-up are not "new"
+
+    /// <summary>The list shows other downloads, or in another order (the view slides the list in again).</summary>
+    public event Action? ListReshuffled;
+
+    /// <summary>Sets a card's flag for a moment (what the card animates on), then clears it. Nothing when motion is off.</summary>
+    void Flash(DownloadItemViewModel item, Action<DownloadItemViewModel, bool> set, TimeSpan forHowLong)
+    {
+        if (!ShadeNetDownloader.Util.Animate.Enabled) return;
+        set(item, true);
+        var timer = new DispatcherTimer(DispatcherPriority.Background, _ui) { Interval = forHowLong };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            set(item, false);
+        };
+        timer.Start();
     }
 
     /// <summary>Raised when cards are hidden for removal or brought back by Undo (the shell recounts its badges).</summary>
@@ -118,6 +138,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
         OnPropertyChanged(nameof(IsQueueView));
         View.Refresh();
         UpdateTexts();
+        ListReshuffled?.Invoke();
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -200,6 +221,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
     void SortChanged()
     {
         ApplySort();
+        ListReshuffled?.Invoke();
         foreach (var name in new[] { nameof(SortBy), nameof(SortDescending), nameof(SortAscending), nameof(IsSortByDate), nameof(IsSortByName), nameof(IsSortByType),
                      nameof(IsSortBySize), nameof(SortLabel), nameof(AscendingLabel), nameof(DescendingLabel) })
             OnPropertyChanged(name);
@@ -302,6 +324,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
         _byId[job.Id] = item;
         item.Sequence = ++_sequence;   // (the order cards were added in breaks ties when sorting)
         Items.Insert(0, item); // newest on top
+        if (_ready) Flash(item, (i, on) => i.IsNew = on, TimeSpan.FromMilliseconds(1200));
     }
 
     void DropItem(Guid id)
@@ -364,8 +387,14 @@ public sealed partial class DownloadsViewModel : ObservableObject
         }
     }
 
-    void OnCompleted(DownloadJob job) =>
+    void OnCompleted(DownloadJob job)
+    {
         _toasts.Show($"{job.FileName} finished", ToastKind.Success, "Open", () => OpenPath(job.TargetPath));
+        _ui.BeginInvoke(() =>
+        {
+            if (_byId.TryGetValue(job.Id, out var item)) Flash(item, (i, on) => i.JustCompleted = on, TimeSpan.FromMilliseconds(1500));
+        });
+    }
 
     // ------------------------------------------------------------------------------------------------------------
     // Selection-aware actions

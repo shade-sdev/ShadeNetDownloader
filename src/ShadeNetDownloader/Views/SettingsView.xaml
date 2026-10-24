@@ -100,7 +100,7 @@
         </StackPanel>
 
         <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
-            <Grid MaxWidth="820" HorizontalAlignment="Stretch" Margin="0,4,12,24">
+            <Grid x:Name="Sections" MaxWidth="820" HorizontalAlignment="Stretch" Margin="0,4,12,24">
 
                 <!-- ================= General ================= -->
                 <StackPanel DataContext="{Binding General}" Visibility="{Binding DataContext.IsGeneral, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">

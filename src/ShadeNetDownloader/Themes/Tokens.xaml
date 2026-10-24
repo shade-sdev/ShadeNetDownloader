@@ -36,6 +36,7 @@
     <!-- Motion: 150-250 ms ease-out -->
     <Duration x:Key="MotionFast">0:0:0.15</Duration>
     <Duration x:Key="MotionBase">0:0:0.22</Duration>
+    <Duration x:Key="MotionSlow">0:0:0.32</Duration>
     <CubicEase x:Key="EaseOut" EasingMode="EaseOut" />
 
 </ResourceDictionary>

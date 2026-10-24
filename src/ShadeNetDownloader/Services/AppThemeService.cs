@@ -16,6 +16,9 @@ public interface IThemeApplier
     /// <summary>Whether the dark palette is the one showing.</summary>
     bool IsDark { get; }
 
+    /// <summary>The next change of the look is a big one (a preset, an imported theme): it blends in instead of jumping.</summary>
+    void Crossfade();
+
     /// <summary>The colour a theme brush has right now, or null when it is no plain colour.</summary>
     Color? ColorOf(string key);
 
@@ -60,6 +63,11 @@ public sealed class AppThemeService : IThemeApplier
     /// <summary>The picture and tint drawn behind the window (the main window binds a layer to it).</summary>
     public BackgroundLayer Layer { get; } = new();
 
+    /// <summary>Raised just before the look changes a lot (light and dark, a preset): the window fades the old look out.</summary>
+    public event Action? Switching;
+
+    public void Crossfade() => Switching?.Invoke();
+
     /// <summary>Raised after anything of the look changed (the Appearance page refreshes its preview).</summary>
     public event Action? Applied;
 
@@ -94,6 +102,7 @@ public sealed class AppThemeService : IThemeApplier
             return;
         }
 
+        if (_basis.HasValue && loaded) Switching?.Invoke();   // (not the first time: there is nothing to blend from)
         _basis = basis;
         _applying = true;
         try
@@ -272,11 +281,13 @@ public sealed class AppThemeService : IThemeApplier
         {
             resources.Remove("MotionFast");   // the tokens' own durations show again
             resources.Remove("MotionBase");
+            resources.Remove("MotionSlow");
         }
         else
         {
             resources["MotionFast"] = new Duration(TimeSpan.Zero);
             resources["MotionBase"] = new Duration(TimeSpan.Zero);
+            resources["MotionSlow"] = new Duration(TimeSpan.Zero);
         }
     }
 

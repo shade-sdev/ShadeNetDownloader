@@ -33,6 +33,10 @@ sealed class FakeTheme : IThemeApplier
         return ThemeColours.TryGetValue(key, out var c) ? c : null;
     }
 
+    public int Crossfades { get; private set; }
+
+    public void Crossfade() => Crossfades++;
+
     public List<LayoutSettings> LayoutCalls { get; } = new();
 
     public void ApplyLayout(LayoutSettings layout)

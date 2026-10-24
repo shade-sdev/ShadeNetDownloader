@@ -60,6 +60,10 @@
                     Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
                     SnapsToDevicePixels="True">
+                <!-- a new download slides in from above (IsNew, below) -->
+                <Border.RenderTransform>
+                    <TranslateTransform />
+                </Border.RenderTransform>
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -87,7 +91,11 @@
 
                             <!-- status chip -->
                             <Border x:Name="Chip" Grid.Column="1" Margin="12,0,0,0" Padding="9,2" CornerRadius="{DynamicResource RadiusBadge}"
-                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                                    Background="{DynamicResource SubtleFillColorSecondaryBrush}" RenderTransformOrigin="0.5,0.5">
+                                <!-- the label pops when the download finishes (JustCompleted, below) -->
+                                <Border.RenderTransform>
+                                    <ScaleTransform />
+                                </Border.RenderTransform>
                                 <TextBlock x:Name="ChipText" Text="{Binding StatusText}" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                             </Border>
@@ -162,6 +170,36 @@
                     <Setter TargetName="Card" Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
                 </DataTrigger>
 
+                <!-- motion: a new card slides in, a finished one's label pops (the flags are set only while motion is on) -->
+                <DataTrigger Binding="{Binding IsNew}" Value="True">
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="Opacity" From="0" To="1"
+                                                 Duration="{StaticResource MotionSlow}" EasingFunction="{StaticResource EaseOut}" FillBehavior="Stop" />
+                                <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="-16" To="0"
+                                                 Duration="{StaticResource MotionSlow}" EasingFunction="{StaticResource EaseOut}" FillBehavior="Stop" />
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding JustCompleted}" Value="True">
+                    <DataTrigger.EnterActions>
+                        <BeginStoryboard>
+                            <Storyboard>
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Chip" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" FillBehavior="Stop">
+                                    <EasingDoubleKeyFrame KeyTime="0:0:0.14" Value="1.2" EasingFunction="{StaticResource EaseOut}" />
+                                    <EasingDoubleKeyFrame KeyTime="0:0:0.38" Value="1" EasingFunction="{StaticResource EaseOut}" />
+                                </DoubleAnimationUsingKeyFrames>
+                                <DoubleAnimationUsingKeyFrames Storyboard.TargetName="Chip" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" FillBehavior="Stop">
+                                    <EasingDoubleKeyFrame KeyTime="0:0:0.14" Value="1.2" EasingFunction="{StaticResource EaseOut}" />
+                                    <EasingDoubleKeyFrame KeyTime="0:0:0.38" Value="1" EasingFunction="{StaticResource EaseOut}" />
+                                </DoubleAnimationUsingKeyFrames>
+                            </Storyboard>
+                        </BeginStoryboard>
+                    </DataTrigger.EnterActions>
+                </DataTrigger>
+
                 <!-- state colours -->
                 <DataTrigger Binding="{Binding State}" Value="Downloading">
                     <Setter TargetName="Bar" Property="Fill" Value="{StaticResource ProgressFillActive}" />
@@ -225,7 +263,7 @@
             </Grid.ColumnDefinitions>
 
             <!-- a grid, not a stack: the subtitle may be cut with an ellipsis when the drawer narrows the page -->
-            <Grid Grid.Column="0" VerticalAlignment="Bottom" Margin="0,0,12,0">
+            <Grid x:Name="Heading" Grid.Column="0" VerticalAlignment="Bottom" Margin="0,0,12,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
@@ -311,7 +349,7 @@
         </ListView>
 
         <!-- empty state -->
-        <Grid Grid.Row="1" Visibility="{Binding IsEmpty, Converter={StaticResource B2V}}"
+        <Grid x:Name="EmptyState" Grid.Row="1" Visibility="{Binding IsEmpty, Converter={StaticResource B2V}}"
               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,24">
             <StackPanel HorizontalAlignment="Center">
 

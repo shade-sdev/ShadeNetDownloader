@@ -56,6 +56,12 @@ public sealed partial class DownloadItemViewModel : ObservableObject
 
     partial void OnIsLiveChanged(bool value) => OnPropertyChanged(nameof(IsRecording));
 
+    /// <summary>Just added to the list: the card slides in (for a moment, then false).</summary>
+    [ObservableProperty] bool _isNew;
+
+    /// <summary>Just finished: its label pops (for a moment, then false).</summary>
+    [ObservableProperty] bool _justCompleted;
+
     /// <summary>This card's details are open in the drawer (the card is marked in the list).</summary>
     [ObservableProperty] bool _isDetailsTarget;
 

@@ -191,6 +191,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     void ApplyPreset(ThemePresetItem? item)
     {
         if (item == null) return;
+        _theme.Crossfade();
         _settings.Current.Appearance = item.Preset.Appearance.Clone();
         if (_baseTheme() != item.Preset.Theme) _setBaseTheme(item.Preset.Theme);   // (that applies the new look too)
         Apply(keepPreset: true);
@@ -524,6 +525,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         if (content.Image != null) look.Image = KeepImage(content.Image, content.ImageExtension ?? ".png");   // (a bad one says why)
 
         _beforeImport ??= (Model.Clone(), _baseTheme());   // previewing one after another: Undo goes back to before the first
+        _theme.Crossfade();
         _importing = true;
         try
         {
@@ -555,6 +557,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     void UndoImport()
     {
         if (_beforeImport is not { } before) return;
+        _theme.Crossfade();
         _importing = true;
         try
         {

@@ -37,6 +37,8 @@
         <KeyBinding Key="N" Modifiers="Control" Command="{Binding AddDownloadCommand}" />
     </ui:FluentWindow.InputBindings>
 
+    <!-- the shell: the app, and above it a picture of the old look that fades out when the theme changes -->
+    <Grid x:Name="Shell">
     <Grid x:Name="Root">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -72,7 +74,7 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- the title bar treats its slots as part of the window, so the brand area moves the window itself -->
-                    <StackPanel Orientation="Horizontal" Background="Transparent" MouseLeftButtonDown="OnBrandMouseDown"
+                    <StackPanel x:Name="Brand" Orientation="Horizontal" Background="Transparent" MouseLeftButtonDown="OnBrandMouseDown"
                                 Visibility="{Binding IsSidebarExpanded, Converter={StaticResource B2V}}">
                         <Border Width="26" Height="26" CornerRadius="8" VerticalAlignment="Center" Margin="14,0,0,0">
                             <Border.Background>
@@ -123,12 +125,13 @@
         <!-- ===================== Body ===================== -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="{Binding SidebarWidth}" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- Sidebar -->
-            <Grid x:Name="Sidebar" Grid.Column="0" Margin="0,0,0,10">
+            <!-- its width glides between names and icons only (MainWindow.AnimateSidebar); what is wider is cut off meanwhile -->
+            <Grid x:Name="Sidebar" Grid.Column="0" Margin="0,0,0,10" ClipToBounds="True">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -182,7 +185,7 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <ContentControl Grid.Row="0" Content="{Binding CurrentPage}" IsTabStop="False" />
+                    <ContentControl x:Name="PageHost" Grid.Row="0" Content="{Binding CurrentPage}" IsTabStop="False" />
 
                     <!-- status bar -->
                     <Border Grid.Row="1" Height="36" BorderThickness="0,1,0,0"
@@ -422,5 +425,8 @@
 
         <!-- host for modal dialogs (Add download) -->
         <ui:ContentDialogHost x:Name="DialogHost" Grid.RowSpan="2" />
+    </Grid>
+
+        <Image x:Name="ThemeSnapshot" IsHitTestVisible="False" Visibility="Collapsed" Stretch="Fill" />
     </Grid>
 </ui:FluentWindow>
