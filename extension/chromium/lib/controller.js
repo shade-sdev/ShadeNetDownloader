@@ -315,6 +315,44 @@ export class Controller {
       minSizeBytes: Number.isFinite(message.minSizeBytes) ? message.minSizeBytes : 0,
       pageSignIn: message.pageSignIn !== false,
     };
+    // (one look at a time: the app's hello and its settings come moments apart, and the second must see what the first stored)
+    if (message.appVersion) this.versionCheck = (this.versionCheck ?? Promise.resolve()).then(() => this.noticeAppVersion(String(message.appVersion)));
+  }
+
+  /**
+   * The extension is loaded from the app's own folder, which an app update replaces, but the browser keeps running the copy it
+   * loaded until the extension is reloaded or the browser restarts. The app says its version on every connection: when it is not
+   * the one seen last time, the app was updated, and the extension reloads itself once to run the new files. The new version is
+   * stored first (so it cannot reload again for the same one), and the reload waits until no hand-over is under way.
+   */
+  async noticeAppVersion(version) {
+    if (this.reloadScheduled) return;
+    let seen;
+    try {
+      seen = (await this.chrome.storage?.local?.get?.({ appVersion: '' }))?.appVersion;
+    } catch {
+      return;   // nothing can be remembered: never reload (it could do so on every connection)
+    }
+
+    if (seen === version) return;
+    try {
+      await this.chrome.storage.local.set({ appVersion: version });
+    } catch {
+      return;
+    }
+
+    if (!seen) return;   // the first app this extension meets: nothing was updated
+    this.reloadScheduled = true;
+    this.trace(`the app was updated (${seen} -> ${version}): the extension reloads to run its new files`);
+    let quiet = 0;
+    const tryReload = () => {
+      // a hand-over waiting for its answer, or the browser download it may still cancel, is let finish first
+      const busy = (this.link?.pending?.size ?? 0) > 0 || (this.handingOver ?? 0) > 0;
+      quiet = busy ? 0 : quiet + 1;
+      if (quiet >= 2) this.chrome.runtime?.reload?.();
+      else this.timers.setTimeout(tryReload, 3000);
+    };
+    this.timers.setTimeout(tryReload, 3000);
   }
 
   effectiveSettings() {
@@ -399,7 +437,8 @@ export class Controller {
   hold(item) {
     let work = this.handling.get(item.id);
     if (!work) {
-      work = this.handOver(item);
+      this.handingOver = (this.handingOver ?? 0) + 1;
+      work = this.handOver(item).finally(() => { this.handingOver -= 1; });
       this.handling.set(item.id, work);
       if (this.handling.size > 100) this.handling.delete(this.handling.keys().next().value);
     }

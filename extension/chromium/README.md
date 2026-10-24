@@ -33,6 +33,11 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
 * The toolbar button shows whether ShadeNet is connected and has a switch to stop capturing. It finds the app by itself:
   opening the popup (or starting the browser) looks whether ShadeNet is running **without starting it**; the popup says
   "ShadeNet is not running" (with a Start button) or "Connected", and follows the app while it is open. Nothing to click.
+* **It follows the app's updates.** The extension is loaded from the app's own folder (`browser\chromium`), which an app
+  update replaces, but a browser keeps running the copy it loaded. The app says its version each time the extension connects:
+  when it differs from the one seen last time, the extension stores the new one and reloads itself once (after any hand-over
+  under way has finished), so the browser runs the new files without a restart. A release build stamps the extension's
+  version with the app's, so the browser's extensions page shows which release runs.
 * **Videos announce themselves.** When a page plays something ShadeNet can download (a video file, an HLS/DASH stream, a
   YouTube video), a small "Download video" button appears on the video with its **name**, length and quality; with
   several videos a menu lists each by name. The toolbar badge counts them and its tooltip names them, and the popup
