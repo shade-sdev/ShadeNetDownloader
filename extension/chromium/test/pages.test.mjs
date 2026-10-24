@@ -232,3 +232,17 @@ test('a tab whose page script has reported is left alone, and a refusal is kept 
   await t.controller.ensurePageScript(8);
   assert.equal(t.controller.scriptErrors.get(8), 'Cannot access contents of the page');
 });
+
+// ---- Google Drive: the player is an embed (youtube.googleapis.com) in the Drive page, which is what yt-dlp reads ----
+
+test('a Drive video is sent as its Drive page, not as the embedded player\'s address', async () => {
+  const DRIVE = 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view';
+  const EMBED = 'https://youtube.googleapis.com/embed/?ps=docs&partnerid=30&hbut=Ci0B';
+  const t = setup({ title: 'holiday.mp4 - Google Drive', url: DRIVE });
+
+  const answer = await t.controller.onPageVideos(from(t, EMBED, 5), [blobVideo({ src: 'blob:https://youtube.googleapis.com/x' })]);
+
+  assert.deepEqual(answer.items.map((i) => [i.kind, i.url, !!i.guess]), [['page', DRIVE, false]]);
+  assert.equal(looksLikeOneVideo('https://docs.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit'), true);
+  assert.equal(looksLikeOneVideo('https://drive.google.com/drive/folders/1AbCd'), false);
+});

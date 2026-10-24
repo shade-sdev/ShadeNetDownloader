@@ -146,7 +146,7 @@
   // outside this page. The page the video belongs to is then the only address, and the extension hands that to yt-dlp.
   const isBuffer = (video) => /^blob:/i.test(sourceOf(video)) || (!sourceOf(video) && !!video.srcObject);
   // an ending in `/videos/123`, `/reel/123`, `/status/123` or `?v=123`: a single video, not a feed
-  const ONE_VIDEO = /\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$|[?&]v=|permalink\.php|\/video\.php/i;
+  const ONE_VIDEO = /\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$|\/file\/d\/[^/?#]+|[?&]v=|permalink\.php|\/video\.php/i;
   const permalinks = new WeakMap();
 
   /** The address of the post or page this video belongs to: its own address when the page is about it, else the nearest link to one. */

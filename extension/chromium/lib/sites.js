@@ -8,6 +8,7 @@ const PAGE_SITES = [
   'facebook.com', 'fb.watch', 'instagram.com', 'threads.net', 'twitter.com', 'x.com', 'tiktok.com', 'vimeo.com',
   'reddit.com', 'dailymotion.com', 'twitch.tv', 'streamable.com', 'ok.ru', 'vk.com', 'bilibili.com', 'rumble.com',
   'odysee.com', 'bitchute.com', 'kick.com', 'linkedin.com', 'pinterest.com', 'tumblr.com', 'imgur.com', 'ted.com',
+  'drive.google.com', 'docs.google.com',   // the player is an embed of another site (youtube.googleapis.com); the Drive page is what yt-dlp reads
 ];
 
 /** Is this address on a site whose pages ShadeNet can have yt-dlp read? `extra` adds hosts (tests, and your own list). */
@@ -30,7 +31,7 @@ export function isPageSite(url, extra = []) {
 export function looksLikeOneVideo(url) {
   try {
     const u = new URL(url);
-    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$/i.test(u.pathname) && !/^\/(watch|live)\/?$/i.test(u.pathname))
+    return (/\/(videos?|reels?|shorts?|status|clips?|p|posts|tv|watch|live|broadcasts?)\/[^/?#]+|\/live\/?$|\/file\/d\/[^/?#]+/i.test(u.pathname) && !/^\/(watch|live)\/?$/i.test(u.pathname))
       || u.searchParams.has('v')
       || /permalink\.php|\/video\.php/i.test(u.pathname);
   } catch {
