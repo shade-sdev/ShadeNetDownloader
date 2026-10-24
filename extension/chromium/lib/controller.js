@@ -9,6 +9,7 @@ import {
   basename, buildCapture, cookiesToHeader, evaluate, headerValue, isCapturableUrl, pickHeaders,
 } from './capture.js';
 import { MediaTracker, looksLikePlaylist, pairStreams } from './media.js';
+import { PieceTracker } from './pieces.js';
 import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVideoPage } from './youtube.js';
 import { browserTimers } from './native.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
@@ -128,6 +129,12 @@ export class Controller {
       onChange: (tabId) => this.updateMediaBadge(tabId),
     });
     this.tracks = new TracksTracker({ onChange: (tabId) => this.updateMediaBadge(tabId) });
+    // pieces a player asks for with no playlist or manifest on the network (it keeps the list itself)
+    this.pieces = new PieceTracker({
+      fetchHead: (url, via) => fetchHead(url, this.recorder?.lookup(via), this.chrome),
+      onChange: (tabId) => this.updateMediaBadge(tabId),
+      skip: (tabId) => this.media.list(tabId).some((i) => i.kind === 'master' || i.kind === 'media'),   // a playlist's pieces are its own
+    });
     this.handling = new Map();   // download id -> the hand-over in progress (or done), so each download is handled once
     this.overlayEnabled = true;  // the "Download" button on top of videos (the popup has the switch)
     this.pageVideos = new Map(); // tab id -> Map(frame id -> { url, videos }): what each frame (the page, or an iframe in it) reports
@@ -222,11 +229,13 @@ export class Controller {
     const requests = this.media.recent(tab.id, { full });
     const pieceLike = requests.filter((r) => /\.(m4s|ts|m4v|m4a|aac)$/i.test(new URL(r.url, 'http://x').pathname)).length;
     const playlists = this.media.list(tab.id).filter((i) => i.kind === 'master' || i.kind === 'media').length;
+    const runs = this.pieces.describe(tab.id).map((r) => (full ? r : { ...r, pattern: r.pattern.split('?')[0] }));
     const notes = [];
     if (items.length === 0) notes.push('ShadeNet offers nothing on this tab.');
     if (pieceLike > 0 && playlists === 0) {
-      notes.push(`The player asked for ${pieceLike} pieces of a stream (.m4s/.ts ...) but no playlist or manifest was requested over the network, `
-        + 'so there is nothing to join them with: the page may build the list itself, hide it, or protect the stream. ShadeNet does not work around that.');
+      notes.push(runs.some((r) => r.status === 'ok')
+        ? 'The player keeps its list of pieces itself (no playlist or manifest on the network): ShadeNet offers the pieces it has asked for, joined. Let the video load to the end first.'
+        : `The player asked for ${pieceLike} pieces of a stream but no playlist or manifest was requested over the network; see "pieceRuns" for why they cannot be joined.`);
     }
 
     const waiting = [...this.unattributed].map(([origin, list]) => ({ origin, requests: list.length }));
@@ -237,7 +246,7 @@ export class Controller {
     if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
     if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
 
-    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
+    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, pieceRuns: runs, recentRequests: requests, workerRequestsWaiting: waiting }, null, 2);
   }
 
   /** Keeps the last 40 steps, newest last. Never throws. */
@@ -284,6 +293,7 @@ export class Controller {
         details = this.attribute(details);
         if (!details) return undefined;
         this.tracks.consider(details);
+        this.pieces.consider(details);
         return this.media.consider(details);
       },
       { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] },
@@ -293,12 +303,14 @@ export class Controller {
       if (change.status === 'loading') {
         this.media.clear(tabId);
         this.tracks.clear(tabId);
+        this.pieces.clear(tabId);
         this.pageVideos.delete(tabId);
       }
     });
     c.tabs?.onRemoved?.addListener((tabId) => {
       this.media.clear(tabId);
       this.tracks.clear(tabId);
+      this.pieces.clear(tabId);
       this.pageVideos.delete(tabId);
     });
     c.contextMenus?.onClicked?.addListener((info, tab) => this.onContextMenu(info, tab));
@@ -531,6 +543,13 @@ export class Controller {
     return /^https?:\/\/[^/]+\/./.test(origin) ? origin : '';   // already a full address (documentUrl)
   }
 
+  /** The length the tab's longest video reports (its pieces have none of their own), 0 when none does. */
+  playingLength(tabId) {
+    let longest = 0;
+    for (const { videos } of this.pageVideos.get(tabId)?.values() ?? []) for (const v of videos) if (v.duration > longest) longest = v.duration;
+    return longest;
+  }
+
   /** The videos of this tab that are downloaded by giving their PAGE to yt-dlp. */
   pageItems(tab, name, haveOthers) {
     const pages = [];
@@ -583,6 +602,16 @@ export class Controller {
       items.push({
         url: v.src, kind: 'file', live: false, protected: false, duration: v.duration || 0, maxHeight: v.height || 0,
         title: v.title ? cleanTitle(v.title) : name,
+      });
+    }
+
+    // a player that keeps its list of pieces itself: the pieces it asked for, joined (as far as it has loaded the video)
+    for (const p of this.pieces.items(tab.id)) {
+      const count = p.pieces.length + (p.audioPieces?.length ?? 0);
+      items.push({
+        url: p.url, kind: 'pieces', live: false, protected: p.protected, duration: this.playingLength(tab.id), maxHeight: p.maxHeight, title: name,
+        ...(p.audioPieces ? { audioUrl: p.audioPieces[0] } : {}), ...(p.audioOnly ? { audioOnly: true } : {}),
+        quality: `${count} pieces loaded so far`,
       });
     }
 
@@ -648,6 +677,8 @@ export class Controller {
     if (playing && playing.video.url === url) return this.sendTracks(tab, playing);
     const file = tab ? this.fileVideos(tab.id).find((v) => v.src === url) : null;
     if (file) return this.sendFile(tab, file);
+    const pieces = tab ? this.pieces.find(tab.id, url) : null;
+    if (pieces) return this.sendPieces(tab, pieces);
     if (!tab || !this.media.get(tab.id, url)) return { accepted: false, reason: 'unknown-stream' };
 
     try {
@@ -688,6 +719,37 @@ export class Controller {
       return { accepted: !!result?.accepted, reason: result?.reason };
     } catch (error) {
       this.trace(`page hand-over failed: ${error?.message ?? error}`);
+      this.flash('!', '#c4452d');
+      return { accepted: false, reason: String(error?.message ?? error) };
+    }
+  }
+
+  /**
+   * The pieces a player asked for (it keeps their list itself): the app downloads them in this order and joins them after their
+   * initialisation part, the way it joins the pieces of a playlist. Protected ones are never sent.
+   */
+  async sendPieces(tab, item) {
+    if (item.protected) return { accepted: false, reason: 'protected' };
+    try {
+      if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      const message = await this.describe({
+        url: item.init ?? item.pieces[0], lookupUrl: item.pieces[0], referrerFallback: tab.url, fileName: this.pageTitle(tab), source: 'pieces',
+        duration: this.playingLength(tab.id),
+      });
+      message.pieces = item.pieces;
+      if (item.init) message.init = item.init;
+      if (item.audioPieces) {
+        message.audioPieces = item.audioPieces;
+        if (item.audioInit) message.audioInit = item.audioInit;
+      }
+
+      if (JSON.stringify(message).length > 3_500_000) throw new Error('too many pieces to hand over at once');
+      const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
+      this.trace(`pieces sent (${item.pieces.length}): accepted=${result?.accepted} reason=${result?.reason}`);
+      this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
+      return { accepted: !!result?.accepted, reason: result?.reason };
+    } catch (error) {
+      this.trace(`pieces hand-over failed: ${error?.message ?? error}`);
       this.flash('!', '#c4452d');
       return { accepted: false, reason: String(error?.message ?? error) };
     }

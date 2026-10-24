@@ -39,6 +39,16 @@ public sealed class HlsJobData
     /// </summary>
     public bool Record { get; set; }
 
+    /// <summary>
+    /// No playlist: the pieces a player asked for (it keeps their list itself), in that order, after their initialisation part
+    /// (none for MPEG-TS pieces). The sound's own run when it is kept apart. They are downloaded and joined like a playlist's pieces.
+    /// </summary>
+    public List<string>? Pieces { get; set; }
+
+    public string? InitUrl { get; set; }
+    public List<string>? AudioPieces { get; set; }
+    public string? AudioInitUrl { get; set; }
+
     // progress
     public long BytesDone { get; set; }
     public int Parts { get; set; }

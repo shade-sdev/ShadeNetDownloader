@@ -13,11 +13,15 @@ const u16 = (b, at) => (b[at] << 8) | b[at + 1];
 const VIDEO_ENTRIES = ['avc1', 'avc3', 'hvc1', 'hev1', 'vp09', 'av01', 'encv', 'dvh1', 'dvhe'];
 
 /** Handler types ("vide", "soun") and the picture's size from the sample entry, found by scanning the boxes' names. */
+// boxes that only an encrypted (protected) stream has: its sample entries, the scheme it uses, the licence system's data
+const ENCRYPTION_BOXES = ['encv', 'enca', 'sinf', 'tenc', 'pssh'];
+
 function inspectIsoBmff(b) {
   let video = false;
   let audio = false;
   let width = 0;
   let height = 0;
+  let encrypted = false;
 
   for (let i = 4; i + 16 <= b.length; i++) {
     if (b[i] === 0x68 && text(b, i, 4) === 'hdlr') {            // box: size, 'hdlr', version/flags, pre_defined, handler_type
@@ -25,6 +29,10 @@ function inspectIsoBmff(b) {
       if (handler === 'vide') video = true;
       else if (handler === 'soun') audio = true;
     }
+  }
+
+  for (let i = 4; i + 4 <= b.length && !encrypted; i++) {
+    if ([0x65, 0x73, 0x74, 0x70].includes(b[i]) && ENCRYPTION_BOXES.includes(text(b, i, 4))) encrypted = true;   // e, s, t, p: cheap first look
   }
 
   for (const entry of VIDEO_ENTRIES) {
@@ -39,7 +47,7 @@ function inspectIsoBmff(b) {
     if (height) break;
   }
 
-  return { kind: video && audio ? 'both' : video ? 'video' : audio ? 'audio' : 'unknown', width, height };
+  return { kind: video && audio ? 'both' : video ? 'video' : audio ? 'audio' : 'unknown', width, height, encrypted };
 }
 
 // stream types of an MPEG-TS program (ISO 13818-1 table 2-34 and the usual extensions)

@@ -218,7 +218,11 @@ internal sealed class HlsRunner : IJobRunner
     async Task<Plan> PlanAsync(HttpClient http, CancellationToken ct)
     {
         Plan plan;
-        if (Data.Direct)
+        if (Data.Pieces is { Count: > 0 })
+        {
+            plan = PlanPieces();
+        }
+        else if (Data.Direct)
         {
             plan = PlanDirect();
         }
@@ -324,6 +328,28 @@ internal sealed class HlsRunner : IJobRunner
             Live = live,
             PollSeconds = Math.Clamp(video.TargetDuration / 2, 1, 6),
         };
+    }
+
+    /// <summary>
+    /// The pieces a player asked for that keeps their list itself (no playlist or manifest): the same as a playlist of them would say,
+    /// each piece after the initialisation part (the <c>#EXT-X-MAP</c> of an fMP4 playlist), so they are fetched and joined the same way.
+    /// Their lengths are not known; the video's length (from the page) is shared out among them for progress.
+    /// </summary>
+    Plan PlanPieces()
+    {
+        static HlsMediaPlaylist PlaylistOf(IReadOnlyList<string> pieces, string? init, double seconds)
+        {
+            var map = init != null ? new HlsMap(new Uri(init), null, null) : null;
+            var each = seconds > 0 ? seconds / pieces.Count : 0;
+            var playlist = new HlsMediaPlaylist { Url = new Uri(pieces[0]), IsEnded = true, PlaylistType = "VOD", TargetDuration = Math.Max(1, each) };
+            for (var i = 0; i < pieces.Count; i++)
+                playlist.Segments.Add(new HlsSegment { Index = i, Sequence = i, Url = new Uri(pieces[i]), Duration = each, Map = map });
+            return playlist;
+        }
+
+        var tracks = new List<Track> { new() { Id = "v", First = PlaylistOf(Data.Pieces!, Data.InitUrl, Data.Seconds), CountsTime = true } };
+        if (Data.AudioPieces is { Count: > 0 } sound) tracks.Add(new Track { Id = "a", First = PlaylistOf(sound, Data.AudioInitUrl, Data.Seconds) });
+        return new Plan { Tracks = tracks };
     }
 
     /// <summary>

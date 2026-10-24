@@ -70,6 +70,12 @@ To remove everything: **Settings → Browser integration → Remove**, then remo
   apart from an endless response (a playlist on the page, or several addresses of the same format within moments). A live page whose
   stream cannot be seen this way falls back to asking yt-dlp (`lib/sites.js` lists the sites it knows), with your sign-in for that site
   if the setting in *Settings > Browser* is on.
+* **Players that keep their list of pieces themselves.** Some players (Media Source Extensions with no playlist or manifest on the
+  network, like <https://r-w-c.github.io/mse-demo/>) fetch an initialisation part and then numbered pieces that only their own code
+  lists. The extension notices such a run (one folder, names alike with a counter), checks the first bytes (MP4 fragments or MPEG-TS
+  pieces, not whole files; an initialisation part that names no encryption) and offers "Video (from its pieces)": the app downloads
+  the pieces the player has asked for, in that order, and joins them after their initialisation part, as it does a playlist's. It gets
+  what the player has loaded, so let the video load to the end first. Protected (encrypted) streams are not offered (`lib/pieces.js`).
 * ShadeNet can be started by the extension: if it is not running, the host launches it minimized.
 
 Settings that apply are set in the app (Settings → Browser integration): capturing on/off, ask first or start right

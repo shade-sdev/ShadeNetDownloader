@@ -256,6 +256,13 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            // pieces a player asked for with no playlist: the extension already knows what they are
+            if (IsCapturedLink(url) && _capture!.Source == "pieces")
+            {
+                ShowPieces(_capture);
+                return;
+            }
+
             // an endless live response: nothing to ask the server (a request would sit on the stream for ever)
             if (IsCapturedLink(url) && _capture!.Source == "record")
             {
@@ -394,6 +401,26 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         });
         Refine(FileName);
         UpdateStreamSize();
+        ProbeState = ProbeState.Ready;
+    }
+
+    /// <summary>A player that keeps its list of pieces itself: the pieces it asked for are downloaded in that order and joined.</summary>
+    void ShowPieces(CaptureInfo capture)
+    {
+        _direct = CaptureProcessor.PiecesChoice(capture);
+        IsStream = true;
+        var count = (capture.Pieces?.Count ?? 0) + (capture.AudioPieces?.Count ?? 0);
+        var name = FileNameHelper.Sanitize(string.IsNullOrWhiteSpace(capture.FileName) ? "video" : capture.FileName!);
+        if (!new[] { ".mp4", ".mkv", ".ts" }.Contains(System.IO.Path.GetExtension(name).ToLowerInvariant())) name += ".mp4";
+        var length = capture.Duration is { } s ? TimeSpan.FromSeconds(s) : (TimeSpan?)null;
+        Run(() =>
+        {
+            if (!_nameEdited) FileName = name;
+            SizeText = (length is { } l ? (l.TotalHours >= 1 ? l.ToString(@"h\:mm\:ss") : l.ToString(@"m\:ss")) + "  ·  " : "") + $"{count} pieces";
+            TypeText = "Video from the pieces your browser's player loaded";
+            Resumable = true;
+        });
+        Refine(FileName);
         ProbeState = ProbeState.Ready;
     }
 

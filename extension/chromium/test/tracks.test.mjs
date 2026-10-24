@@ -4,10 +4,16 @@ import { inspectMedia } from '../lib/tracks.js';
 import * as real from './fixtures.mjs';
 
 test('an MP4 initialisation part says which tracks it holds, and how big the picture is', () => {
-  assert.deepEqual(inspectMedia(real.fmp4Video), { kind: 'video', width: 320, height: 240 });
+  assert.deepEqual(inspectMedia(real.fmp4Video), { kind: 'video', width: 320, height: 240, encrypted: false });
   assert.equal(inspectMedia(real.fmp4Audio).kind, 'audio');
   assert.equal(inspectMedia(real.fmp4Both).kind, 'both');
   assert.equal(inspectMedia(real.fmp4Both).height, 240);
+});
+
+test('an initialisation part that carries encryption boxes says so (a protected stream)', () => {
+  const protectedInit = new Uint8Array([...real.fmp4Video, 0, 0, 0, 16, ...'pssh'.split('').map((c) => c.charCodeAt(0)), 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(inspectMedia(protectedInit).encrypted, true);
+  assert.equal(inspectMedia(real.fmp4Both).encrypted, false);
 });
 
 test('an MPEG-TS piece says it through its program table', () => {
