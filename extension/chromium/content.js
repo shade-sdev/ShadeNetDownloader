@@ -27,8 +27,30 @@
 
   // ---- finding the videos ---------------------------------------------------------------------------------------
 
+  // Players built as web components (Reddit's <shreddit-player>, ...) keep their <video> inside a shadow root, where the page's own
+  // element list does not reach. Open shadow roots are searched too; the hosts are looked up again at most every two seconds.
+  let shadowHosts = [];
+  let shadowCheckedAt = 0;
+
+  function hostsOf(root, depth, out) {
+    if (depth > 4) return;
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) {
+        out.push(el.shadowRoot);
+        hostsOf(el.shadowRoot, depth + 1, out);
+      }
+    }
+  }
+
   function videoElements() {
-    return Array.from(document.getElementsByTagName('video'));
+    const found = Array.from(document.getElementsByTagName('video'));
+    if (Date.now() - shadowCheckedAt > 2000) {
+      shadowCheckedAt = Date.now();
+      shadowHosts = [];
+      hostsOf(document, 0, shadowHosts);
+    }
+    for (const root of shadowHosts) if (root.host?.isConnected) found.push(...root.querySelectorAll('video'));
+    return found;
   }
 
   function isVisible(video) {
