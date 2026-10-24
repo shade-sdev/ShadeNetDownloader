@@ -42,6 +42,11 @@ const ENDLESS_TYPES = {
 };
 const SEGMENT_WINDOW_MS = 20000;
 
+// For diagnosis: the last media-looking responses of each tab (what a video's player asked for), kept without their query strings.
+const MAX_RECENT = 80;
+const MEDIA_TYPE = /^(video|audio)\/|mpegurl|dash\+xml|octet-stream|iso\.segment|mp2t|x-flv/i;
+const MEDIA_PATH = /\.(m3u8|mpd|m4s|m4v|m4a|ts|mp4|webm|mkv|flv|aac|mp3|vtt|key)$/i;
+
 /**
  * Is this a live stream delivered as one endless response, and in which format ('flv', 'ts', 'webm')? It has no length, because a
  * response that never ends has none (a file has one), and it answers with the whole stream (200), not a range. An FLV also by its address.
@@ -154,6 +159,7 @@ export class MediaTracker {
     this.pending = new Set();    // looks in progress, so a player asking twice costs one look
     this.looked = new Map();     // tabId -> Set(url): neutral answers already read once, so each costs one look at most
     this.endless = new Map();    // tabId -> { seen: Map(url -> time), pieces }: told apart from the pieces of a playlist or manifest
+    this.recentByTab = new Map(); // tabId -> the last media-looking responses (for diagnosis)
   }
 
   /**
@@ -190,6 +196,7 @@ export class MediaTracker {
     if (!/^https?:/i.test(url)) return;
 
     const contentType = (details.responseHeaders || []).find((h) => h?.name?.toLowerCase() === 'content-type')?.value;
+    this.remember(tabId, details, contentType);
 
     // an endless live response is never read (it does not end): the address is all there is, and the app records it
     const endless = liveStreamKind(details, contentType);
@@ -260,6 +267,32 @@ export class MediaTracker {
     return this.byTab.get(tabId)?.size ?? 0;
   }
 
+  /** Keeps a short note of a response that looks like media, for {@link recent}. Never throws. */
+  remember(tabId, details, contentType) {
+    try {
+      const path = new URL(details.url).pathname;
+      if (!MEDIA_PATH.test(path) && !MEDIA_TYPE.test(String(contentType ?? ''))) return;
+      const list = this.recentByTab.get(tabId) ?? [];
+      this.recentByTab.set(tabId, list);
+      list.push({
+        at: new Date().toISOString().slice(11, 23),
+        type: details.type,
+        status: details.statusCode,
+        contentType: String(contentType ?? '').split(';')[0].trim() || null,
+        hasLength: (details.responseHeaders || []).some((h) => h?.name?.toLowerCase() === 'content-length'),
+        url: details.url,
+      });
+      if (list.length > MAX_RECENT) list.shift();
+    } catch {
+      // a note that cannot be made is not worth a failure
+    }
+  }
+
+  /** What this tab's player asked for lately, newest last. Addresses lose their query string unless `full`. */
+  recent(tabId, { full = false } = {}) {
+    return (this.recentByTab.get(tabId) ?? []).map((r) => ({ ...r, url: full ? r.url : r.url.split('?')[0] }));
+  }
+
   get(tabId, url) {
     return this.byTab.get(tabId)?.get(url);
   }
@@ -267,6 +300,7 @@ export class MediaTracker {
   clear(tabId) {
     this.looked.delete(tabId);
     this.endless.delete(tabId);
+    this.recentByTab.delete(tabId);
     if (this.byTab.delete(tabId)) this.onChange(tabId);
   }
 }

@@ -136,6 +136,42 @@ export class Controller {
     this.ready = this.loadLocal();
   }
 
+  /**
+   * For diagnosis, in the extension's service worker console (chrome://extensions > ShadeNet > "service worker"):
+   *   await shadenet.controller.diagnose()                         the tab you are looking at
+   *   await shadenet.controller.diagnose({ urlIncludes: 'site' })  a tab whose address holds that text
+   *   await shadenet.controller.diagnose({ full: true })           with the query strings of the addresses (they can hold tokens)
+   * It says what ShadeNet found on the tab, what the page's videos report and what the player asked for, and, when the player asked
+   * for pieces but never for a playlist, that this is why nothing can be offered. Nothing here leaves the browser.
+   */
+  async diagnose({ urlIncludes = '', full = false } = {}) {
+    const tabs = (await this.chrome.tabs?.query?.(urlIncludes ? {} : { active: true, currentWindow: true })) ?? [];
+    const tab = urlIncludes ? tabs.find((t) => String(t.url ?? '').includes(urlIncludes)) : tabs[0];
+    if (!tab) return 'No such tab.';
+
+    const strip = (u) => (full ? String(u) : String(u).split('?')[0].split('#')[0]);
+    const items = (await this.itemsFor(tab)).map((i) => ({ kind: i.kind, live: !!i.live, url: strip(i.url), title: i.title }));
+    const videos = [];
+    for (const [frame, { url, videos: list }] of this.pageVideos.get(tab.id) ?? []) {
+      for (const v of list) videos.push({ frame, frameUrl: strip(url), src: strip(v.src), blob: v.blob, live: v.live, drm: v.drm, box: v.box, opacity: v.opacity, duration: v.duration });
+    }
+
+    const requests = this.media.recent(tab.id, { full });
+    const pieceLike = requests.filter((r) => /\.(m4s|ts|m4v|m4a|aac)$/i.test(new URL(r.url, 'http://x').pathname)).length;
+    const playlists = this.media.list(tab.id).filter((i) => i.kind === 'master' || i.kind === 'media').length;
+    const notes = [];
+    if (items.length === 0) notes.push('ShadeNet offers nothing on this tab.');
+    if (pieceLike > 0 && playlists === 0) {
+      notes.push(`The player asked for ${pieceLike} pieces of a stream (.m4s/.ts ...) but no playlist or manifest was requested over the network, `
+        + 'so there is nothing to join them with: the page may build the list itself, hide it, or protect the stream. ShadeNet does not work around that.');
+    }
+
+    if (videos.some((v) => v.drm)) notes.push('A player here uses DRM (a licence key): ShadeNet leaves such videos alone on purpose.');
+    if (requests.length === 0) notes.push('No media-looking response was seen on this tab: reload the page with ShadeNet enabled, press play, and try again.');
+
+    return JSON.stringify({ tab: strip(tab.url), notes, offered: items, pageVideos: videos, recentRequests: requests }, null, 2);
+  }
+
   /** Keeps the last 40 steps, newest last. Never throws. */
   trace(text) {
     this.events.push(`${new Date().toISOString().slice(11, 23)} ${text}`);

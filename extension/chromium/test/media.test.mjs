@@ -235,3 +235,32 @@ test('FLV qualities of one live stream are all listed, and a new page starts afr
   await tracker.consider(endless(7, 'https://cdn.example/a.ts', 'video/mp2t'));
   assert.equal(tracker.list(7).length, 1);
 });
+
+// ---- diagnosis: what a tab's player asked for ----
+
+test('the recent media requests of a tab are kept without their query strings, and only media-looking ones', async () => {
+  const tracker = new MediaTracker({ fetchText: async () => '' });
+  await tracker.consider(endless(7, 'https://cdn.example/v/s00062.m4s?token=secret', 'video/iso.segment', { responseHeaders: [{ name: 'Content-Type', value: 'video/iso.segment' }, { name: 'Content-Length', value: '9' }] }));
+  await tracker.consider(endless(7, 'https://cdn.example/app.js', 'text/javascript'));
+
+  const [one, ...rest] = tracker.recent(7);
+
+  assert.deepEqual(rest, []);
+  assert.equal(one.url, 'https://cdn.example/v/s00062.m4s');
+  assert.deepEqual([one.contentType, one.hasLength, one.type], ['video/iso.segment', true, 'xmlhttprequest']);
+  assert.equal(tracker.recent(7, { full: true })[0].url, 'https://cdn.example/v/s00062.m4s?token=secret');
+  tracker.clear(7);
+  assert.deepEqual(tracker.recent(7), []);
+});
+
+test('diagnose says plainly when the player asked for pieces but never for a playlist', async () => {
+  const t = setup();
+  for (const n of [1, 2, 3]) await t.chrome.webRequest.onHeadersReceived.emit({ tabId: 7, url: `https://cdn.example/v/s0000${n}.m4s?t=x`, type: 'xmlhttprequest', statusCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'video/iso.segment' }, { name: 'Content-Length', value: '9' }] });
+
+  const report = JSON.parse(await t.controller.diagnose());
+
+  assert.match(report.notes.join(' '), /asked for 3 pieces .* no playlist or manifest/);
+  assert.equal(report.recentRequests.length, 3);
+  assert.ok(!JSON.stringify(report).includes('t=x'));                                    // no query string (it can hold a token) unless asked for
+  assert.ok(JSON.stringify(JSON.parse(await t.controller.diagnose({ full: true }))).includes('t=x'));
+});
