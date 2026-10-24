@@ -23,6 +23,9 @@ public sealed class WindowGeometry
 public sealed class AppSettings
 {
     public AppTheme Theme { get; set; } = AppTheme.System;
+
+    /// <summary>Accent, window material, state colours and palette: everything about the look beyond light and dark.</summary>
+    public AppearanceSettings Appearance { get; set; } = new();
     public WindowGeometry Window { get; set; } = new();
     public EngineSettings Engine { get; set; } = new();
     public BrowserSettings Browser { get; set; } = new();

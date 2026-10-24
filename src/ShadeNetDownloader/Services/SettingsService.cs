@@ -57,6 +57,8 @@ public sealed class SettingsService
         // JSON loading replaces the dictionaries (losing their case-insensitive comparers) and trusts every value:
         // put the comparers back and clamp what must stay in range.
         loaded.Engine.Normalize();
+        loaded.Appearance ??= new AppearanceSettings();
+        loaded.Appearance.Normalize();
         loaded.Engine.ToolsFolder = Path.Combine(DataDir, "tools");
 
         Current = loaded;
