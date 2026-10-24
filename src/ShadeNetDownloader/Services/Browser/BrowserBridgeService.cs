@@ -66,21 +66,42 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
         pipeName ??= BridgeProtocol.PipeName();
 
         // Connecting to a pipe that does not exist waits out the whole timeout; checking first keeps normal starts instant.
-        if (!File.Exists(@"\\.\pipe\" + pipeName)) return false;
+        if (!PipeExists(pipeName)) return false;
 
-        await using var connection = await BridgeClient.TryConnectAsync(pipeName, TimeSpan.FromMilliseconds(800));
+        await using var connection = await BridgeClient.TryConnectAsync(pipeName, ConnectTimeout);
         if (connection == null) return false;
         await connection.SendAsync(new { type = MessageTypes.Activate });
         return true;
+    }
+
+    // The pipe is known to exist, so this is only the wait for the running instance to listen again after its last client
+    // (a busy computer can take a moment to get there).
+    static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Whether a pipe of this name is open, found by listing the pipes. Asking for its attributes (<c>File.Exists</c>) would OPEN it:
+    /// the running instance sees a client that leaves at once, and until it listens again the real connection finds the pipe busy.
+    /// </summary>
+    internal static bool PipeExists(string pipeName)
+    {
+        var path = @"\\.\pipe\" + pipeName;
+        try
+        {
+            return Directory.EnumerateFiles(@"\\.\pipe\").Any(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return true;   // the list cannot be read: the connection attempt decides
+        }
     }
 
     /// <summary>Asks a running instance to quit for real. <c>false</c> when none is running.</summary>
     public static async Task<bool> QuitRunningInstanceAsync(string? pipeName = null)
     {
         pipeName ??= BridgeProtocol.PipeName();
-        if (!File.Exists(@"\\.\pipe\" + pipeName)) return false;
+        if (!PipeExists(pipeName)) return false;
 
-        await using var connection = await BridgeClient.TryConnectAsync(pipeName, TimeSpan.FromMilliseconds(800));
+        await using var connection = await BridgeClient.TryConnectAsync(pipeName, ConnectTimeout);
         if (connection == null) return false;
         await connection.SendAsync(new { type = MessageTypes.Quit });
         return true;

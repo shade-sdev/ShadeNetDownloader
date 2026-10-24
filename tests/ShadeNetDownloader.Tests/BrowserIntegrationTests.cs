@@ -460,6 +460,21 @@ public class BrowserBridgeServiceTests
     }
 
     [Fact]
+    public async Task A_running_instance_is_found_without_connecting_to_it()
+    {
+        // (opening the pipe to see whether it exists would take the place of the client that wants to connect)
+        var name = Pipe();
+        var connections = 0;
+        await using var server = new BridgeServer(name, _ => { Interlocked.Increment(ref connections); return Task.CompletedTask; });
+        Assert.True(server.Start());
+
+        Assert.True(BrowserBridgeService.PipeExists(name));
+        Assert.False(BrowserBridgeService.PipeExists(Pipe()));
+        await Task.Delay(300);
+        Assert.Equal(0, connections);
+    }
+
+    [Fact]
     public async Task With_no_instance_running_there_is_nothing_to_activate()
     {
         Assert.False(await BrowserBridgeService.ActivateRunningInstanceAsync(Pipe()));
