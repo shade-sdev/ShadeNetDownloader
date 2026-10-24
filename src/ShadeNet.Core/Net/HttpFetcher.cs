@@ -163,6 +163,76 @@ internal static class HttpFetcher
         return uri.GetLeftPart(UriPartial.Authority);
     }
 
+    /// <summary>
+    /// What a refusing server says about it, when it says something short and readable: the XML error of S3, Google Cloud Storage and
+    /// Azure (<c>&lt;Code&gt;AccessDenied&lt;/Code&gt;</c> with its message), the <c>error</c>/<c>message</c> of a JSON answer, or one line of plain
+    /// text. A web page, or anything long, says nothing useful here: null. Reads at most 8 KB, for at most 3 seconds.
+    /// </summary>
+    public static async Task<string?> ReasonAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var type = response.Content.Headers.ContentType?.MediaType ?? "";
+            if (!type.Contains("xml", StringComparison.OrdinalIgnoreCase) && !type.Contains("json", StringComparison.OrdinalIgnoreCase)
+                && !type.Equals("text/plain", StringComparison.OrdinalIgnoreCase)) return null;
+            if (response.Content.Headers.ContentLength is > 64 * 1024) return null;
+
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            limit.CancelAfter(TimeSpan.FromSeconds(3));
+            await using var stream = await response.Content.ReadAsStreamAsync(limit.Token).ConfigureAwait(false);
+            var buffer = new byte[8192];
+            var length = 0;
+            int n;
+            while (length < buffer.Length && (n = await stream.ReadAsync(buffer.AsMemory(length), limit.Token).ConfigureAwait(false)) > 0) length += n;
+            return ReasonFrom(System.Text.Encoding.UTF8.GetString(buffer, 0, length));
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException or HttpRequestException or ObjectDisposedException or InvalidOperationException)
+        {
+            return null;   // the reason is a courtesy: never the reason a download fails differently
+        }
+    }
+
+    /// <summary>The readable reason in an error body (see <see cref="ReasonAsync"/>), or null.</summary>
+    public static string? ReasonFrom(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+
+        string? Tag(string name)
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(body, $"<{name}>([^<]{{1,600}})</{name}>");
+            return m.Success ? WebUtility.HtmlDecode(m.Groups[1].Value).Trim() : null;
+        }
+
+        var code = Tag("Code");
+        var said = Tag("Details") ?? Tag("Message");
+        if (code != null || said != null) return Clip(string.Join(": ", new[] { code, said }.Where(s => !string.IsNullOrEmpty(s))));
+
+        var trimmed = body.TrimStart();
+        if (trimmed.StartsWith('{'))
+        {
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(trimmed);
+                var root = doc.RootElement;
+                static string? Str(System.Text.Json.JsonElement e, string name) =>
+                    e.ValueKind == System.Text.Json.JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+                var error = root.ValueKind == System.Text.Json.JsonValueKind.Object && root.TryGetProperty("error", out var e) ? e : default;
+                var text = Str(error, "message") ?? Str(root, "message") ?? Str(root, "error_description") ?? Str(root, "error") ?? Str(root, "detail");
+                return string.IsNullOrWhiteSpace(text) ? null : Clip(text.Trim());
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return null;
+            }
+        }
+
+        if (trimmed.StartsWith('<')) return null;   // a web page or markup without the usual fields
+        var line = trimmed.Split('\n', 2)[0].Trim();
+        return line.Length is > 0 and <= 200 ? line : null;
+    }
+
+    static string Clip(string text) => text.Length > 300 ? text[..300] + "…" : text;
+
     public static TimeSpan? RetryAfter(HttpResponseMessage response)
     {
         RetryConditionHeaderValue? ra = response.Headers.RetryAfter;

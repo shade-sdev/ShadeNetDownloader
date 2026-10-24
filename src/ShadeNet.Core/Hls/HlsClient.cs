@@ -82,7 +82,7 @@ internal static class HlsClient
         using (response)
         {
             if ((int)response.StatusCode >= 400)
-                throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response));
+                throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response), await HttpFetcher.ReasonAsync(response, ct).ConfigureAwait(false));
 
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var buffer = new MemoryStream();

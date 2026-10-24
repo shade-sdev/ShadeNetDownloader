@@ -796,7 +796,7 @@ internal sealed class HlsRunner : IJobRunner
 
         using (response)
         {
-            if ((int)response.StatusCode >= 400) throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response));
+            if ((int)response.StatusCode >= 400) throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response), await HttpFetcher.ReasonAsync(response, ct).ConfigureAwait(false));
             if (length != null && (int)response.StatusCode != 206)
                 throw new DownloadException(JobErrorKind.RangeIgnored, "The server ignored the byte range of a stream segment.");
 
@@ -943,7 +943,7 @@ internal sealed class HlsRunner : IJobRunner
         var (response, _) = await HttpFetcher.GetAsync(http, Spec(url.AbsoluteUri), S.UserAgent, null, ct).ConfigureAwait(false);
         using (response)
         {
-            if ((int)response.StatusCode >= 400) throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response));
+            if ((int)response.StatusCode >= 400) throw new HttpStatusException((int)response.StatusCode, HttpFetcher.RetryAfter(response), await HttpFetcher.ReasonAsync(response, ct).ConfigureAwait(false));
             var key = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
             if (key.Length != 16)
                 throw new DownloadException(JobErrorKind.Unsupported, $"The stream's key is {key.Length} bytes long instead of 16: it is not a plain AES-128 key (the site probably protects it).");

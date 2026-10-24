@@ -15,13 +15,17 @@ public sealed class HttpStatusException : DownloadException
     public int StatusCode { get; }
     public TimeSpan? RetryAfter { get; }
 
-    public HttpStatusException(int statusCode, TimeSpan? retryAfter = null)
+    /// <param name="serverReason">What the server said about the refusal, when it said something short and readable (see HttpFetcher.ReasonAsync).</param>
+    public HttpStatusException(int statusCode, TimeSpan? retryAfter = null, string? serverReason = null)
         : base(statusCode is 403 or 404 or 410 ? JobErrorKind.AddressExpired : JobErrorKind.HttpStatus,
-            $"The server answered {statusCode} {Reason(statusCode)}.")
+            $"The server answered {statusCode} {Reason(statusCode)}." + (string.IsNullOrWhiteSpace(serverReason) ? "" : $" It said: {serverReason}"))
     {
         StatusCode = statusCode;
         RetryAfter = retryAfter;
+        ServerReason = serverReason;
     }
+
+    public string? ServerReason { get; }
 
     /// <summary>Worth another attempt (server hiccup or rate limiting) rather than failing the job.</summary>
     public bool IsTransient => StatusCode is 408 or 429 or 500 or 502 or 503 or 504;
