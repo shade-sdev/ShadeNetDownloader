@@ -144,3 +144,42 @@ test('the default timers work in a browser, where setTimeout throws unless calle
     globalThis.clearTimeout = realClear;
   }
 });
+
+test('after the app goes away, the link looks for it again (never starting it) and reconnects once it is back', async () => {
+  const { link, app, timers } = setup();
+  const settle = () => new Promise((r) => setTimeout(r, 5));
+  assert.equal(await link.ensureConnected(1000), true);
+
+  app.running = false;              // an update closes the app ...
+  await app.ports[0].close();
+  assert.equal(link.connected, false);
+  timers.fire((t) => t.ms === 3000);
+  await settle();
+  assert.equal(app.launches, 0, 'a look never starts the app');
+  assert.equal(link.connected, false);
+
+  app.running = true;               // ... and the new one is up a moment later
+  timers.fire((t) => t.ms === 10000);
+  await settle();
+  assert.equal(link.connected, true);
+  assert.equal(timers.count(), 0, 'no more looks once it answers');
+});
+
+test('a closed app is looked for a few times, then left alone; a link that never connected does not look at all', async () => {
+  const { link, app, timers } = setup();
+  const settle = () => new Promise((r) => setTimeout(r, 5));
+  await link.ensureConnected(1000);
+  app.running = false;
+  await app.ports[0].close();
+  for (let i = 0; i < 10; i++) {
+    timers.fire((t) => t.ms >= 3000 && t.ms !== 4000);   // the looks, not a look's own wait for an answer
+    await settle();
+  }
+  assert.equal(app.ports.length, 6);   // the connection, then five looks
+  assert.equal(timers.count(), 0);
+
+  const fresh = setup((a) => { a.running = false; });
+  assert.equal(await fresh.link.probe(1000), false);   // the app was never there: nothing to look for
+  await settle();
+  assert.equal(fresh.timers.count(), 0);
+});

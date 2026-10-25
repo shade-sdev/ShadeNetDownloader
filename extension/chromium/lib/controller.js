@@ -322,8 +322,9 @@ export class Controller {
   /**
    * The extension is loaded from the app's own folder, which an app update replaces, but the browser keeps running the copy it
    * loaded until the extension is reloaded or the browser restarts. The app says its version on every connection: when it is not
-   * the one seen last time, the app was updated, and the extension reloads itself once to run the new files. The new version is
-   * stored first (so it cannot reload again for the same one), and the reload waits until no hand-over is under way.
+   * the one seen last time, the app was updated, and the extension reloads itself once to run the new files. The reload waits until
+   * no hand-over is under way; the new version is stored just before it (so it cannot reload again for the same one), not when it
+   * is noticed: a service worker stopped in between would otherwise never reload for that version.
    */
   async noticeAppVersion(version) {
     if (this.reloadScheduled) return;
@@ -335,22 +336,33 @@ export class Controller {
     }
 
     if (seen === version) return;
-    try {
-      await this.chrome.storage.local.set({ appVersion: version });
-    } catch {
+    const remember = async () => {
+      try {
+        await this.chrome.storage.local.set({ appVersion: version });
+        return true;
+      } catch {
+        return false;   // nothing can be remembered: never reload (it could do so on every connection)
+      }
+    };
+
+    if (!seen) {
+      await remember();   // the first app this extension meets: nothing was updated
       return;
     }
 
-    if (!seen) return;   // the first app this extension meets: nothing was updated
     this.reloadScheduled = true;
     this.trace(`the app was updated (${seen} -> ${version}): the extension reloads to run its new files`);
     let quiet = 0;
-    const tryReload = () => {
+    const tryReload = async () => {
       // a hand-over waiting for its answer, or the browser download it may still cancel, is let finish first
       const busy = (this.link?.pending?.size ?? 0) > 0 || (this.handingOver ?? 0) > 0;
       quiet = busy ? 0 : quiet + 1;
-      if (quiet >= 2) this.chrome.runtime?.reload?.();
-      else this.timers.setTimeout(tryReload, 3000);
+      if (quiet < 2) {
+        this.timers.setTimeout(tryReload, 3000);
+        return;
+      }
+      if (await remember()) this.chrome.runtime?.reload?.();
+      else this.reloadScheduled = false;
     };
     this.timers.setTimeout(tryReload, 3000);
   }
