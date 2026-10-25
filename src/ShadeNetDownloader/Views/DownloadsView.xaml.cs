@@ -12,7 +12,31 @@ public partial class DownloadsView : UserControl
 {
     DownloadsViewModel? _watched;
 
-    public DownloadsView() => InitializeComponent();
+    public DownloadsView()
+    {
+        InitializeComponent();
+        // the selection bar shows its buttons' names while they fit, icons only when the page is too narrow for them
+        if (SelectionBar.Parent is FrameworkElement host) host.SizeChanged += (_, _) => FitSelectionBar();
+    }
+
+    double _barFullWidth;
+
+    /// <summary>
+    /// The bar's width with every name showing is measured whenever it shows them (the count's text changes it a little);
+    /// where the page is narrower than that, the names hide ("compact") and the tooltips carry them.
+    /// </summary>
+    void FitSelectionBar()
+    {
+        if (SelectionBar.Parent is not FrameworkElement host || host.ActualWidth <= 0 || SelectionBar.Visibility != Visibility.Visible) return;
+        if (!Equals(SelectionBar.Tag, "compact"))
+        {
+            SelectionBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            _barFullWidth = SelectionBar.DesiredSize.Width;
+        }
+
+        var room = host.ActualWidth - SelectionBar.Margin.Left - SelectionBar.Margin.Right;
+        SelectionBar.Tag = _barFullWidth > room ? "compact" : null;
+    }
 
     DownloadsViewModel? Vm => DataContext as DownloadsViewModel;
 
@@ -82,8 +106,13 @@ public partial class DownloadsView : UserControl
     {
         // a selection began: its bar rises from the bottom
         if (e.PropertyName == nameof(DownloadsViewModel.HasSelection) && _watched is { HasSelection: true } && IsLoaded)
-            Dispatcher.BeginInvoke(() => Animate.FadeSlideIn(SelectionBar, offsetY: 24),
-                System.Windows.Threading.DispatcherPriority.Loaded);
+            Dispatcher.BeginInvoke(() =>
+            {
+                FitSelectionBar();
+                Animate.FadeSlideIn(SelectionBar, offsetY: 24);
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
+        if (e.PropertyName == nameof(DownloadsViewModel.SelectionText) && IsLoaded)
+            Dispatcher.BeginInvoke(FitSelectionBar, System.Windows.Threading.DispatcherPriority.Loaded);
 
         // the list just became empty: its picture floats in (after the layout shows it)
         if (e.PropertyName == nameof(DownloadsViewModel.IsEmpty) && _watched is { IsEmpty: true } && IsLoaded)

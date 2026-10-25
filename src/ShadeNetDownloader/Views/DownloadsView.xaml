@@ -54,6 +54,37 @@
             <Setter Property="ContextMenu" Value="{StaticResource CardMenu}" />
         </Style>
 
+        <!-- a card's action buttons: one size, one gap (each button keeps 6 px to the one before it) -->
+        <Style x:Key="CardAction" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Setter Property="Appearance" Value="Transparent" />
+            <Setter Property="Width" Value="34" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+        </Style>
+
+        <!-- the selection bar's buttons: one gap; the name (in Tag) is hidden when the bar is narrow ("compact") -->
+        <Style x:Key="BarButton" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+            <Setter Property="Appearance" Value="Transparent" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="10,0" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="Content" Value="{Binding Tag, RelativeSource={RelativeSource Self}}" />
+            <Setter Property="AutomationProperties.Name" Value="{Binding Tag, RelativeSource={RelativeSource Self}}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Tag, ElementName=SelectionBar}" Value="compact">
+                    <Setter Property="Content" Value="{x:Null}" />
+                    <Setter Property="Padding" Value="9,0" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
+        <Style x:Key="BarDivider" TargetType="Rectangle">
+            <Setter Property="Width" Value="1" />
+            <Setter Property="Margin" Value="8,6,4,6" />
+            <Setter Property="Fill" Value="{DynamicResource DividerStrokeColorDefaultBrush}" />
+        </Style>
+
         <!-- the round check on a card: adds the card to the selection, or takes it out, without touching the others -->
         <Style x:Key="SelectCheck" TargetType="CheckBox">
             <Setter Property="Focusable" Value="False" />
@@ -160,26 +191,27 @@
                     </StackPanel>
 
                     <!-- actions: primary is always there, the rest appears on hover / selection -->
+                    <!-- every button 34 px with 6 px between (CardAction); the first has no gap before it -->
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                         <StackPanel x:Name="Extras" Orientation="Horizontal" Opacity="0">
-                            <ui:Button Appearance="Transparent" Width="34" Height="34" Padding="0"
+                            <ui:Button Style="{StaticResource CardAction}" Margin="0"
                                        ToolTip="Details (Alt+Enter)" AutomationProperties.Name="Details"
                                        Command="{Binding ShowDetailsCommand}">
                                 <ui:SymbolIcon Symbol="Info24" FontSize="18" />
                             </ui:Button>
-                            <ui:Button Appearance="Transparent" Width="34" Height="34" Padding="0"
+                            <ui:Button Style="{StaticResource CardAction}"
                                        ToolTip="Show in folder" AutomationProperties.Name="Show in folder"
                                        Command="{Binding ShowInFolderCommand}">
                                 <ui:SymbolIcon Symbol="FolderOpen24" FontSize="18" />
                             </ui:Button>
-                            <ui:Button Appearance="Transparent" Width="34" Height="34" Padding="0"
+                            <ui:Button Style="{StaticResource CardAction}"
                                        ToolTip="Remove from list" AutomationProperties.Name="Remove from list"
                                        Command="{Binding RemoveFromListCommand}">
                                 <ui:SymbolIcon Symbol="Dismiss24" FontSize="18" />
                             </ui:Button>
                         </StackPanel>
 
-                        <ui:Button Appearance="Secondary" Width="38" Height="38" Padding="0" Margin="4,0,0,0"
+                        <ui:Button Style="{StaticResource CardAction}" Appearance="Secondary"
                                    ToolTip="{Binding PrimaryTooltip}" AutomationProperties.Name="{Binding PrimaryTooltip}"
                                    Command="{Binding PrimaryActionCommand}"
                                    Visibility="{Binding HasPrimaryAction, Converter={StaticResource B2V}}">
@@ -397,7 +429,7 @@
 
         <!-- the selection bar: floats over the list while any download is selected, and acts on all of them -->
         <Border x:Name="SelectionBar" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,0,16,16"
-                Padding="14,8,8,8" CornerRadius="12" BorderThickness="1"
+                Padding="8" CornerRadius="12" BorderThickness="1"
                 Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
                 Visibility="{Binding HasSelection, Converter={StaticResource B2V}}">
@@ -405,24 +437,24 @@
                 <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270" Opacity="0.3" Color="Black" />
             </Border.Effect>
             <StackPanel Orientation="Horizontal">
-                <ui:Button Appearance="Transparent" Padding="6" Margin="0,0,6,0" Icon="{ui:SymbolIcon Dismiss16}"
+                <ui:Button Style="{StaticResource BarButton}" Margin="0" Padding="9,0" Tag="{x:Null}" Icon="{ui:SymbolIcon Dismiss16}"
                            Click="OnClearSelection" ToolTip="Clear the selection  (Esc)" AutomationProperties.Name="Clear the selection" />
-                <TextBlock Text="{Binding SelectionText}" FontWeight="SemiBold" VerticalAlignment="Center" MinWidth="78" Margin="0,0,10,0" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon SelectAllOn24}" Content="All"
+                <TextBlock Text="{Binding SelectionText}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0,6,0" />
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon SelectAllOn24}" Tag="All"
                            Click="OnSelectAll" ToolTip="Select every download in this list  (Ctrl+A)" />
-                <Rectangle Width="1" Margin="6,4" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Play24}" Content="Resume"
+                <Rectangle Style="{StaticResource BarDivider}" />
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon Play24}" Tag="Resume"
                            Command="{Binding ResumeSelectedCommand}" ToolTip="Resume the selected downloads that are paused or failed" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Pause24}" Content="Pause"
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon Pause24}" Tag="Pause"
                            Command="{Binding PauseSelectedCommand}" ToolTip="Pause the selected downloads that are running" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon ArrowEnterUp24}" Content="Queue"
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon ArrowEnterUp24}" Tag="Queue"
                            Command="{Binding QueueSelectedCommand}" ToolTip="Add the selected paused or failed downloads to the queue" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Link24}" Content="Copy links"
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon Link24}" Tag="Copy links"
                            Command="{Binding CopySelectedLinksCommand}" ToolTip="Copy the selected downloads' addresses" />
-                <Rectangle Width="1" Margin="6,4" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
-                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Dismiss24}" Content="Remove"
+                <Rectangle Style="{StaticResource BarDivider}" />
+                <ui:Button Style="{StaticResource BarButton}" Icon="{ui:SymbolIcon Dismiss24}" Tag="Remove"
                            Command="{Binding RemoveSelectedCommand}" ToolTip="Remove from the list, keep the files  (Delete)" />
-                <ui:Button Appearance="Danger" Padding="10,5" Icon="{ui:SymbolIcon Delete24}" Content="Delete files"
+                <ui:Button Style="{StaticResource BarButton}" Appearance="Danger" Icon="{ui:SymbolIcon Delete24}" Tag="Delete files"
                            Command="{Binding DeleteSelectedCommand}" ToolTip="Remove from the list and delete the files (you can undo for a few seconds)" />
             </StackPanel>
         </Border>
