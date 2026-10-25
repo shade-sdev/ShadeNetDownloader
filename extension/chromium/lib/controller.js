@@ -704,7 +704,8 @@ export class Controller {
         const title = v.title ? cleanTitle(v.title) : name;
         if (address) {
           add(address, title, false, v.live);
-        } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && /^https?:\/\//i.test(frameUrl)) {
+        } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && !isVideoPage(frameUrl) && /^https?:\/\//i.test(frameUrl)) {
+          // (a YouTube watch page is already listed above under the tab's own address; its player frame may spell that address differently)
           // a site yt-dlp is not known for, and nothing on the network that names the video: the frame's own page is the one thing
           // left to try. It may not work; the button says so, and the dialog explains if yt-dlp cannot read it.
           add(frameUrl, title, true);

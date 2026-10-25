@@ -246,3 +246,15 @@ test('a Drive video is sent as its Drive page, not as the embedded player\'s add
   assert.equal(looksLikeOneVideo('https://docs.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/edit'), true);
   assert.equal(looksLikeOneVideo('https://drive.google.com/drive/folders/1AbCd'), false);
 });
+
+test('a YouTube watch page is listed once, even when its player frame reports the address with an extra parameter', async () => {
+  const watch = 'https://www.youtube.com/watch?v=aqz-KE-bpKQ';
+  const t = setup({ title: 'Big Buck Bunny - YouTube', url: watch });
+  const frame = `${watch}&themeRefresh=1`;   // the page's script rewrites its own address; the tab's address is the one without it
+  const answer = await t.controller.onPageVideos(from(t, frame), [{ title: 'Big Buck Bunny', src: 'blob:https://www.youtube.com/z', blob: true, drm: false, permalink: '' }]);
+  const pages = (await t.controller.itemsFor(t.chrome.tabs.active)).filter((i) => i.kind === 'page');
+  assert.equal(pages.length, 1, JSON.stringify(pages.map((p) => p.url)));
+  assert.equal(pages[0].url, watch);
+  assert.equal(pages[0].guess, false);
+  assert.ok(answer);
+});

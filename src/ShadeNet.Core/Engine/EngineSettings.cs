@@ -160,6 +160,19 @@ public sealed class EngineSettings
     /// <summary>A live recording stops by itself after this long (zero = it goes on until the stream ends or the user stops it).</summary>
     public TimeSpan MaxRecordingLength { get; set; } = TimeSpan.Zero;
 
+    /// <summary>
+    /// A live recording begins this far behind the live edge, like a player does, not at the start of the stream's list of pieces: for
+    /// some sites (YouTube among them) that list reaches back for hours, and recording it all would be gigabytes nobody asked for.
+    /// Zero = everything the list names.
+    /// </summary>
+    public TimeSpan LiveBacklog { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// After "Stop and save" (or the recording length limit) the pieces already being fetched, and those already waiting, get this long
+    /// to arrive; what is not there by then is left out of the file, so stopping never waits on a slow or stuck server.
+    /// </summary>
+    public TimeSpan StopGrace { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>A stream that is one big file (DASH on-demand) is fetched in pieces of this size, in parallel and resumable.</summary>
     public int StreamChunkBytes { get; set; } = 4 * 1024 * 1024;
 

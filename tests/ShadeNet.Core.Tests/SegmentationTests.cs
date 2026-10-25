@@ -30,10 +30,14 @@ public class SegmentationTests
         await using var h = await Harness.CreateAsync();
         var m = h.NewManager(tweak: Quick);
         // Every NEW tcp connection costs 2.5 s, reused ones are free: the cheap way to finish is to reuse.
-        var job = await Download(h, m, h.Server.FileUrl(8 * MiB, name: "takeover.bin", kbps: 2048, connLatencyMs: 2500), 8, 90);
+        // The speed is chosen so that BOTH hold, with room on each side: the first connection is slow enough that the engine
+        // still splits the file (it adds none when the file would be done within the 3 s lookahead anyway: above ~2.2 MB/s
+        // for 8 MiB), and fast enough to finish its half before the new connection has shaken hands (below ~1.5 MB/s it
+        // does not, and the new connection is already receiving). 2048 KiB/s was at the edge of the first, and flaky.
+        var job = await Download(h, m, h.Server.FileUrl(8 * MiB, name: "takeover.bin", kbps: 1792, connLatencyMs: 2500), 8, 90);
 
         AssertByteExact(job, 8 * MiB);
-        Assert.True(job.Stats.Takeovers >= 1, $"takeovers {job.Stats.Takeovers}");
+        Assert.True(job.Stats.Takeovers >= 1, $"takeovers {job.Stats.Takeovers} splits {job.Stats.Splits} peak {job.Stats.PeakConnections} retries {job.Stats.Retries} segments {job.Segments.Count}");
     }
 
     [Fact]

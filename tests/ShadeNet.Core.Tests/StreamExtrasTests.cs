@@ -443,6 +443,158 @@ public class StreamExtrasTests
         Assert.False(m.FinishRecording(job.Id), "nothing is running any more");
     }
 
+    /// <summary>A live playlist that already lists <paramref name="behind"/> pieces when the recording starts (a DVR window: YouTube keeps hours) and one more per request.</summary>
+    static void LiveWithLongWindow(HlsServer server, string name, int behind, int extra)
+    {
+        for (var i = 0; i < behind + extra; i++) server.Files[$"/{name}/seg{i}.ts"] = HlsServer.Bytes(name, i, 6_000);
+
+        var requests = 0;
+        server.Intercept = ctx =>
+        {
+            if (ctx.Request.Url!.AbsolutePath != $"/{name}/index.m3u8") return false;
+            var n = Math.Min(behind + extra, behind + Interlocked.Increment(ref requests));
+            var sb = new StringBuilder("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-MEDIA-SEQUENCE:0\n");
+            for (var i = 0; i < n; i++) sb.Append($"#EXTINF:2,\nseg{i}.ts\n");
+
+            var body = Encoding.UTF8.GetBytes(sb.ToString());
+            ctx.Response.ContentType = "application/vnd.apple.mpegurl";
+            ctx.Response.ContentLength64 = body.Length;
+            ctx.Response.OutputStream.Write(body);
+            ctx.Response.Close();
+            return true;
+        };
+    }
+
+    [Fact]
+    public async Task Stop_and_save_does_not_wait_for_hours_of_backlog_in_a_long_live_window()
+    {
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer { DelayMs = 100 };
+        LiveWithLongWindow(server, "dvr", behind: 1500, extra: 100);   // 1500 pieces of 2 s: fifty minutes behind the live edge
+        var m = Manager(h);
+        var seen = new ConcurrentQueue<JobSnapshot>();
+        m.JobUpdated += s => seen.Enqueue(s);
+
+        var job = AddStream(m, server.Url("/dvr/index.m3u8"));
+        await WaitUntil(() => seen.Any(s => s.Id == job.Id && s.PartsDone >= 4), 60, "four pieces");
+
+        var sw = Stopwatch.StartNew();
+        Assert.True(m.FinishRecording(job.Id));
+        await Finished(job, 60);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.True(sw.Elapsed.TotalSeconds < 12, $"saving took {sw.Elapsed.TotalSeconds:0.0} s after pressing stop");
+        Assert.True(new FileInfo(job.TargetPath).Length >= 4 * 6_000);
+    }
+
+    [Fact]
+    public async Task Stop_and_save_does_not_wait_for_pieces_the_server_never_answers()
+    {
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        LiveWithLongWindow(server, "stuck", behind: 10, extra: 100);
+        var window = server.Intercept!;
+        server.Intercept = ctx =>
+        {
+            var path = ctx.Request.Url!.AbsolutePath;
+            if (path.StartsWith("/stuck/seg") && int.TryParse(path[10..^3], out var n) && n >= 8)
+            {
+                Thread.Sleep(30_000);   // a request that is accepted and then goes quiet
+                ctx.Response.Abort();
+                return true;
+            }
+
+            return window(ctx);
+        };
+        var m = h.NewManager(connections: 4, tweak: s =>
+        {
+            s.FfmpegPath = Path.Combine(h.Root, "no-such-ffmpeg.exe");
+            s.StopGrace = TimeSpan.FromSeconds(2);
+        });
+        var seen = new ConcurrentQueue<JobSnapshot>();
+        m.JobUpdated += s => seen.Enqueue(s);
+
+        var job = AddStream(m, server.Url("/stuck/index.m3u8"));
+        await WaitUntil(() => seen.Any(s => s.Id == job.Id && s.PartsDone >= 8), 60, "eight pieces");
+
+        var sw = Stopwatch.StartNew();
+        Assert.True(m.FinishRecording(job.Id));
+        await Finished(job, 60);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.True(sw.Elapsed.TotalSeconds < 10, $"saving took {sw.Elapsed.TotalSeconds:0.0} s after pressing stop");
+        Assert.Equal(8 * 6_000, new FileInfo(job.TargetPath).Length);   // the eight pieces that arrived, nothing else
+    }
+
+    [Fact]
+    public async Task A_recording_starts_near_the_live_edge_not_at_the_start_of_a_long_window()
+    {
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        LiveWithLongWindow(server, "dvr", behind: 1500, extra: 100);
+        var m = Manager(h);
+        var seen = new ConcurrentQueue<JobSnapshot>();
+        m.JobUpdated += s => seen.Enqueue(s);
+
+        var job = AddStream(m, server.Url("/dvr/index.m3u8"));
+        await WaitUntil(() => seen.Any(s => s.Id == job.Id && s.PartsDone >= 20), 60, "twenty pieces");
+        Assert.True(m.FinishRecording(job.Id));
+        await Finished(job, 60);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.False(server.Hits.ContainsKey("/dvr/seg0.ts"), "the first piece of the window was fetched: the recording began fifty minutes ago");
+        Assert.True(server.Hits.Keys.Count(k => k.StartsWith("/dvr/seg")) < 400, "far more pieces than a couple of minutes were fetched");
+    }
+
+    [Fact]
+    public async Task A_live_dash_recording_also_starts_near_the_live_edge_and_stops_at_once()
+    {
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        var start = DateTimeOffset.UtcNow.AddSeconds(-3000);   // fifty minutes of time-shift buffer: 3000 one-second pieces
+        server.Files["/l/init.mp4"] = HlsServer.Bytes("linit", 0, 400);
+        server.Intercept = ctx =>
+        {
+            var path = ctx.Request.Url!.AbsolutePath;
+            if (path == "/l/manifest.mpd")
+            {
+                var xml = Mpd("""<AdaptationSet contentType="video" mimeType="video/mp4"><SegmentTemplate timescale="1" duration="1" startNumber="1" initialization="init.mp4" media="seg-$Number$.m4s"/><Representation id="v" bandwidth="800000" width="640" height="360"/></AdaptationSet>""",
+                    "dynamic", $"availabilityStartTime=\"{start:O}\" timeShiftBufferDepth=\"PT3000S\" minimumUpdatePeriod=\"PT1S\"");
+                var body = Encoding.UTF8.GetBytes(xml);
+                ctx.Response.ContentType = "application/dash+xml";
+                ctx.Response.OutputStream.Write(body);
+                ctx.Response.Close();
+                return true;
+            }
+
+            if (path.StartsWith("/l/seg-") && int.TryParse(path[7..^4], out var n))
+            {
+                var body = HlsServer.Bytes("lseg", n, 2_000);
+                ctx.Response.ContentLength64 = body.Length;
+                ctx.Response.OutputStream.Write(body);
+                ctx.Response.Close();
+                return true;
+            }
+
+            return false;
+        };
+        var m = Manager(h);
+        var seen = new ConcurrentQueue<JobSnapshot>();
+        m.JobUpdated += s => seen.Enqueue(s);
+
+        var job = AddStream(m, server.Url("/l/manifest.mpd"));
+        await WaitUntil(() => seen.Any(s => s.Id == job.Id && s.PartsDone >= 20), 60, "twenty pieces");
+        var sw = Stopwatch.StartNew();
+        Assert.True(m.FinishRecording(job.Id));
+        await Finished(job, 60);
+
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.True(sw.Elapsed.TotalSeconds < 12, $"saving took {sw.Elapsed.TotalSeconds:0.0} s after pressing stop");
+        var numbers = server.Hits.Keys.Where(k => k.StartsWith("/l/seg-")).Select(k => int.Parse(k[7..^4])).ToList();
+        Assert.True(numbers.Min() > 2800, $"the recording began at piece {numbers.Min()} of about 3000");
+        Assert.True(numbers.Count < 400, $"{numbers.Count} pieces were fetched");
+    }
+
     [Fact]
     public async Task A_live_dash_stream_is_recorded_from_the_growing_manifest()
     {

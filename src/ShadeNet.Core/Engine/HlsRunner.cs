@@ -57,6 +57,9 @@ internal sealed class HlsRunner : IJobRunner
         /// <summary>The track whose duration is "how much has been downloaded / recorded" (the first media track).</summary>
         public bool CountsTime { get; set; }
 
+        /// <summary>A live track: pieces numbered below this are older than the recording wants (see <see cref="EngineSettings.LiveBacklog"/>).</summary>
+        public long? Floor { get; set; }
+
         public List<Part> Parts { get; } = new();
         public HashSet<long> Known { get; } = new();
     }
@@ -105,6 +108,7 @@ internal sealed class HlsRunner : IJobRunner
 
     public void RequestFinish()
     {
+        if (Data.Live) _note = "Saving the recording…";   // the card says so at once, while the last pieces arrive
         try
         {
             _finish.Cancel();
@@ -478,12 +482,34 @@ internal sealed class HlsRunner : IJobRunner
 
     string PartPath(Track track, long sequence) => Path.Combine(Work, $"{track.Id}{sequence:D16}.seg");
 
+    /// <summary>
+    /// Where a live recording begins: the first piece of the last <see cref="EngineSettings.LiveBacklog"/> of the list (never fewer than the
+    /// last three pieces, which is what a player keeps from the live edge). A list shorter than that is recorded whole.
+    /// </summary>
+    long? LiveFloor(HlsMediaPlaylist playlist)
+    {
+        var backlog = S.LiveBacklog.TotalSeconds;
+        if (backlog <= 0) return null;
+
+        var seconds = 0.0;
+        for (int i = playlist.Segments.Count - 1, kept = 0; i >= 0; i--)
+        {
+            seconds += playlist.Segments[i].Duration;
+            kept++;
+            if (seconds >= backlog && kept >= 3) return playlist.Segments[i].Sequence;
+        }
+
+        return null;
+    }
+
     /// <summary>Registers the segments of a playlist that are new to the track; finished ones are on disk already, the rest are queued.</summary>
     int AddSegments(Track track, HlsMediaPlaylist playlist)
     {
         var added = 0;
         foreach (var segment in playlist.Segments)
         {
+            if (track.Floor is { } floor && segment.Sequence < floor) continue;   // behind the point where the recording begins
+
             Part part;
             lock (track.Known)
             {
@@ -557,6 +583,7 @@ internal sealed class HlsRunner : IJobRunner
     {
         foreach (var track in plan.Tracks)
         {
+            if (plan.Live) track.Floor = LiveFloor(track.First);
             AddSegments(track, track.First);
             if (plan.Live) AdoptRecordedPieces(track);
         }
@@ -595,6 +622,20 @@ internal sealed class HlsRunner : IJobRunner
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop);
         Exception? fatal = null;
         _pollingDone = false;
+
+        // "Stop and save": the pieces being fetched and those waiting get a short while to arrive, then the transfer ends and what
+        // is on disk is saved. Without this a long backlog, or one stuck request, would keep a stopped recording going.
+        using var graceAfterFinish = _finish.Token.Register(() =>
+        {
+            try
+            {
+                linked.CancelAfter(S.StopGrace < TimeSpan.Zero ? TimeSpan.Zero : S.StopGrace);
+            }
+            catch (ObjectDisposedException)
+            {
+                // the transfer is over already
+            }
+        });
 
         var pollers = plan.Tracks.Select(t => Task.Run(() => PollAsync(plan, t, linked.Token))).ToArray();
         var pollersTask = Task.Run(async () =>
