@@ -120,6 +120,85 @@ public sealed class UpdateEngineTests : IDisposable
         Assert.NotNull(run?.GetValue("ShadeNetDownloader"));                          // start with Windows: the user's choice is kept
     }
 
+    // ---- the shortcuts' pictures (Explorer keeps the icon it saw first, so a new icon needs the shortcuts saved again) ----
+
+    string Lnk(string folder) => Path.Combine(Dir(folder), "ShadeNet Downloader.lnk");
+
+    static readonly DateTime LongAgo = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>A shortcut as a user could have changed it: the icon, or what it starts.</summary>
+    static string IconOf(string link)
+    {
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+        return (string)shell.CreateShortcut(link).IconLocation;
+    }
+
+    static void ChangeShortcut(string link, string? icon = null, string? target = null)
+    {
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+        dynamic l = shell.CreateShortcut(link);
+        if (icon != null) l.IconLocation = icon;
+        if (target != null) l.TargetPath = target;
+        l.Save();
+    }
+
+    [Fact]
+    public void An_update_saves_the_shortcuts_again_and_tells_Explorer_so_a_new_icon_shows()
+    {
+        InstallV1();
+        File.SetLastWriteTimeUtc(Lnk("startmenu"), LongAgo);
+        File.SetLastWriteTimeUtc(Lnk("desktop"), LongAgo);
+        var told = new List<string>();
+        var engine = new InstallEngine(Options()) { ShellIconsChanged = told.AddRange };
+
+        engine.Update(Zip(V2), "1.0.2");
+
+        Assert.True(File.GetLastWriteTimeUtc(Lnk("startmenu")) > LongAgo.AddYears(1));
+        Assert.True(File.GetLastWriteTimeUtc(Lnk("desktop")) > LongAgo.AddYears(1));
+        Assert.Equal(Installed("ShadeNetDownloader.exe") + ",0", IconOf(Lnk("desktop")));
+        Assert.Equal(Installed("ShadeNetDownloader.exe"), Shortcuts.TargetOf(Lnk("desktop")));
+        Assert.Contains(Lnk("startmenu"), told);
+        Assert.Contains(Lnk("desktop"), told);
+    }
+
+    [Fact]
+    public void A_shortcut_the_user_pointed_elsewhere_or_gave_an_icon_is_not_overwritten_by_an_update()
+    {
+        InstallV1();
+        var elsewhere = Installed("other.exe");
+        File.WriteAllText(elsewhere, "not ours");
+        ChangeShortcut(Lnk("desktop"), target: elsewhere);                       // the desktop one now starts something else
+        ChangeShortcut(Lnk("startmenu"), icon: elsewhere + ",0");                // the Start menu one has an icon of the user's choice
+        File.SetLastWriteTimeUtc(Lnk("desktop"), LongAgo);
+        var told = new List<string>();
+
+        new InstallEngine(Options()) { ShellIconsChanged = told.AddRange }.Update(Zip(V2), "1.0.2");
+
+        Assert.Equal(LongAgo, File.GetLastWriteTimeUtc(Lnk("desktop")));         // not ours any more: untouched
+        Assert.DoesNotContain(Lnk("desktop"), told);
+        Assert.Equal(elsewhere + ",0", IconOf(Lnk("startmenu")));                // still the user's icon
+    }
+
+    [Fact]
+    public void An_install_tells_Explorer_about_the_shortcuts_it_made()
+    {
+        var told = new List<string>();
+        new InstallEngine(Options()) { ShellIconsChanged = told.AddRange }.Install(Zip(V1), "1.0.1");
+
+        Assert.Contains(Lnk("startmenu"), told);
+        Assert.Contains(Lnk("desktop"), told);
+    }
+
+    [Fact]
+    public void An_update_still_succeeds_when_Explorer_cannot_be_told()
+    {
+        InstallV1();
+        var engine = new InstallEngine(Options()) { ShellIconsChanged = _ => throw new InvalidOperationException("no shell") };
+
+        Assert.Equal("1.0.2", engine.Update(Zip(V2), "1.0.2"));
+        Assert.Equal("app v2", Text(Installed("ShadeNetDownloader.exe")));
+    }
+
     [Fact]
     public void An_update_then_an_uninstall_leaves_nothing_but_the_users_data()
     {

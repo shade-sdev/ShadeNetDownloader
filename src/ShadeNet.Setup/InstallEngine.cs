@@ -40,6 +40,12 @@ public sealed class InstallEngine
         _log = log ?? (_ => { });
     }
 
+    /// <summary>
+    /// Told which shortcuts' pictures may have changed (see <see cref="RefreshShellIcons"/>). Unset, the real Explorer is told, unless this
+    /// is a sandbox (a throw-away registry key: tests and dry runs) where nothing outside it may be touched. Tests set it to look.
+    /// </summary>
+    internal Action<IReadOnlyList<string>>? ShellIconsChanged { get; set; }
+
     string ManifestPath => Path.Combine(_o.InstallDir, ManifestName);
     string UninstallKeyPath => $@"{_o.RegistryRoot}\Microsoft\Windows\CurrentVersion\Uninstall\{UninstallKeyName}";
     string RunKeyPath => $@"{_o.RegistryRoot}\Microsoft\Windows\CurrentVersion\Run";
@@ -92,6 +98,7 @@ public sealed class InstallEngine
             _o.RegistryRoot != "Software" ? _o.RegistryRoot : null, _o.DataDir != new InstallOptions().DataDir ? _o.DataDir : null);
         File.WriteAllText(ManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
 
+        RefreshShellIcons(new[] { startMenu, desktop }, rewrite: false);   // (just written; Explorer may still hold the picture of an older program here)
         RegisterUninstallEntry(version, files);
         SetStartup(_o.StartWithWindows);
         if (_o.BrowserIntegration) RunApp("--install-browser-integration");
@@ -198,6 +205,7 @@ public sealed class InstallEngine
             File.WriteAllText(ManifestPath, JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
             File.WriteAllText(Path.Combine(staging, "committed"), version);   // from here an interruption must not undo anything
 
+            RefreshShellIcons(new[] { previous.StartMenuShortcut, previous.DesktopShortcut }, rewrite: true);
             RegisterUninstallEntry(version, all);
             _log($"updated {previous.Version} -> {version} in {_o.InstallDir}");
             return version;
@@ -476,6 +484,36 @@ public sealed class InstallEngine
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             _log($"{argument} failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Makes Windows show the program's CURRENT icon on the shortcuts: Explorer keeps the picture it saw first (for the desktop, the
+    /// Start menu and the taskbar button of the running program, which takes its picture from the Start menu shortcut), so after an
+    /// update that brings a new icon the old one stays until the shortcuts are saved again and Explorer is told. The shortcuts of ours
+    /// are saved again (<paramref name="rewrite"/>), the ones the user pinned are touched, and Explorer is told. Never fails the
+    /// install or the update: at worst the picture catches up later.
+    /// </summary>
+    void RefreshShellIcons(IEnumerable<string?> shortcuts, bool rewrite)
+    {
+        try
+        {
+            var changed = new List<string>();
+            foreach (var path in shortcuts)
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
+                if (!rewrite || Shortcuts.Refresh(path, _o.AppExe)) changed.Add(path);
+            }
+
+            var notify = ShellIconsChanged ?? (_o.RegistryRoot == "Software" ? ShellIcons.Notify : null);
+            if (notify == null) return;   // a sandbox: Explorer is not ours to disturb
+
+            if (ShellIconsChanged == null) changed.AddRange(ShellIcons.PinnedShortcutsTo(_o.AppExe));
+            notify(changed);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log($"the shortcuts' icons were not refreshed: {ex.Message}");
         }
     }
 
