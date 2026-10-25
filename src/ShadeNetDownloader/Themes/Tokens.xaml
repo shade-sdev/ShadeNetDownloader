@@ -26,6 +26,14 @@
     <Thickness x:Key="DownloadCardGap">0,0,0,8</Thickness>
     <sys:Double x:Key="NavItemHeight">38</sys:Double>
 
+    <!-- the brand: the wordmark's font (embedded, so it looks the same on every PC) and the icon's gradient -->
+    <FontFamily x:Key="BrandFont">pack://application:,,,/Assets/Fonts/#Lexend</FontFamily>
+    <LinearGradientBrush x:Key="BrandGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+        <GradientStop Color="#06B6D4" Offset="0" />
+        <GradientStop Color="#6366F1" Offset="0.55" />
+        <GradientStop Color="#D946EF" Offset="1" />
+    </LinearGradientBrush>
+
     <sys:Double x:Key="FontCaption">12</sys:Double>
     <sys:Double x:Key="FontBody">14</sys:Double>
 

@@ -32,6 +32,9 @@
         <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
         <!-- the title bar's mark (tools/brand/render-icons.mjs makes it, with app.ico, from the icon's SVG sources) -->
         <Resource Include="Assets\logo.png" />
+        <!-- the wordmark's font (Lexend Bold, SIL Open Font License: its licence ships beside it) -->
+        <Resource Include="Assets\Fonts\Lexend-Bold.ttf" />
+        <Content Include="Assets\Fonts\OFL.txt" CopyToOutputDirectory="PreserveNewest" />
         <!-- the other app icons one can choose (Settings > Appearance > App icon), with their names in icons.json -->
         <Content Include="Assets\Icons\*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
