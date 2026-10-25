@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0.00" stop-color="#FFFFFF"/><stop offset="0.50" stop-color="#F1F5F9"/><stop offset="1.00" stop-color="#E2E8F0"/></linearGradient>
+<linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/><stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+<linearGradient id="ft" x1="0" y1="0" x2="0" y2="1"><stop offset="0.00" stop-color="#475569"/><stop offset="1.00" stop-color="#334155"/></linearGradient>
+<linearGradient id="fl" x1="0" y1="0" x2="1" y2="1"><stop offset="0.00" stop-color="#64748B"/><stop offset="1.00" stop-color="#475569"/></linearGradient>
+<linearGradient id="fr" x1="1" y1="0" x2="0" y2="1"><stop offset="0.00" stop-color="#334155"/><stop offset="1.00" stop-color="#1E293B"/></linearGradient>
+<linearGradient id="etch" gradientUnits="userSpaceOnUse" x1="70" y1="70" x2="190" y2="200"><stop offset="0.00" stop-color="#CBD5E1"/><stop offset="0.50" stop-color="#E2E8F0"/><stop offset="1.00" stop-color="#CBD5E1"/></linearGradient>
+<filter id="drop" filterUnits="userSpaceOnUse" x="0" y="0" width="256" height="256"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#2E1065" flood-opacity="0.35"/></filter>
+<clipPath id="inner"><path d="M76 88 L180 88 L128 184 Z"/></clipPath></defs><rect x="8" y="8" width="240" height="240" rx="58" fill="url(#bg)"/><g filter="url(#drop)" stroke-linejoin="round" stroke-width="14">
+<path d="M64 80 L192 80 L128 122 Z" fill="url(#ft)" stroke="url(#ft)"/>
+<path d="M64 80 L128 122 L128 198 Z" fill="url(#fl)" stroke="url(#fl)"/>
+<path d="M192 80 L128 122 L128 198 Z" fill="url(#fr)" stroke="url(#fr)"/></g><rect x="8" y="8" width="240" height="240" rx="58" fill="url(#sheen)"/><rect x="9" y="9" width="238" height="238" rx="57" fill="none" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/></svg>

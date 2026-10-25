@@ -25,7 +25,7 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
 
     readonly HwndSource _window;
     readonly uint _taskbarCreated;
-    readonly IntPtr _icon;
+    IntPtr _icon;
     string _tooltip = "ShadeNet Downloader";
     bool _visible;
     object? _balloonTag;
@@ -39,6 +39,18 @@ public sealed class TrayIcon : ITrayNotifier, IDisposable
 
         var size = GetSystemMetrics(49 /* SM_CXSMICON */);
         _icon = File.Exists(iconPath) ? LoadImage(IntPtr.Zero, iconPath, 1 /* IMAGE_ICON */, size, size, 0x10 /* LR_LOADFROMFILE */) : IntPtr.Zero;
+    }
+
+    /// <summary>Shows another icon (the app icon the user chose); a file that cannot be read leaves the one shown.</summary>
+    public void SetIcon(string iconPath)
+    {
+        var size = GetSystemMetrics(49 /* SM_CXSMICON */);
+        var icon = File.Exists(iconPath) ? LoadImage(IntPtr.Zero, iconPath, 1 /* IMAGE_ICON */, size, size, 0x10 /* LR_LOADFROMFILE */) : IntPtr.Zero;
+        if (icon == IntPtr.Zero) return;
+        var old = _icon;
+        _icon = icon;
+        if (_visible) Notify(NIM_MODIFY, NIF_ICON);
+        if (old != IntPtr.Zero) DestroyIcon(old);
     }
 
     /// <summary>The user clicked the icon (or pressed Enter on it): open the window.</summary>

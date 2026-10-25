@@ -45,6 +45,9 @@ public sealed class AppSettings
 
     /// <summary>Font, zoom, list density, corners and motion.</summary>
     public LayoutSettings Layout { get; set; } = new();
+
+    /// <summary>The app icon chosen (Settings > Appearance > App icon): "shadenet", or one of Assets/Icons/icons.json.</summary>
+    public string AppIcon { get; set; } = AppIconService.DefaultId;
     public WindowGeometry Window { get; set; } = new();
 
     /// <summary>The sidebar shows icons only (true) or icons with their names.</summary>

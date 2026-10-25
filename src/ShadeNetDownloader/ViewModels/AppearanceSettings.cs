@@ -132,6 +132,23 @@ public sealed partial class ColorSettingItem : ObservableObject
     }
 }
 
+/// <summary>One app icon of the picker.</summary>
+public sealed partial class AppIconItem : ObservableObject
+{
+    public AppIconItem(string id, string name, ImageSource? preview)
+    {
+        Id = id;
+        Name = name;
+        Preview = preview;
+    }
+
+    public string Id { get; }
+    public string Name { get; }
+    public ImageSource? Preview { get; }
+
+    [ObservableProperty] bool _isSelected;
+}
+
 /// <summary>The palette colours of one group ("Text", "Surfaces" ...), for the Advanced section.</summary>
 public sealed record ColorGroup(string Name, IReadOnlyList<ColorSettingItem> Items);
 
@@ -144,6 +161,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     DispatcherTimer? _saveTimer;
     bool _refreshing;
     readonly Func<string?> _pickImage;
+    readonly IAppIconApplier? _icons;
     readonly Func<string, string?> _pickExportFile;
     readonly Func<string?> _pickThemeFile;
 
@@ -153,8 +171,13 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     /// <param name="pickExportFile">Asks where to save a theme (given a name for it); tests pass their own.</param>
     /// <param name="pickThemeFile">Asks for a theme file to import; tests pass their own.</param>
     public AppearanceSettingsViewModel(SettingsService settings, IThemeApplier theme, Func<AppTheme> baseTheme, Action<AppTheme> setBaseTheme,
-        Func<string?>? pickImage = null, Func<string, string?>? pickExportFile = null, Func<string?>? pickThemeFile = null)
+        Func<string?>? pickImage = null, Func<string, string?>? pickExportFile = null, Func<string?>? pickThemeFile = null,
+        IAppIconApplier? icons = null)
     {
+        _icons = icons;
+        AppIcons = (icons?.Choices ?? Array.Empty<AppIconChoice>())
+            .Select(c => new AppIconItem(c.Id, c.Name, AppIconService.Picture(c.Preview)))
+            .ToList();
         _pickImage = pickImage ?? PickImageFile;
         _pickExportFile = pickExportFile ?? PickExportFile;
         _pickThemeFile = pickThemeFile ?? PickThemeFile;
@@ -490,6 +513,20 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         set => SetNumber(Model.ImageDim, Math.Clamp(value, 0, AppearanceSettings.MaxDim * 100) / 100, v => Model.ImageDim = v);
     }
 
+    // ---- the app icon (the user's own, like text and layout: never part of a theme or a preset) ----
+
+    public IReadOnlyList<AppIconItem> AppIcons { get; }
+
+    [RelayCommand]
+    void ChooseAppIcon(AppIconItem? item)
+    {
+        if (item == null || _icons == null) return;
+        _settings.Current.AppIcon = item.Id;
+        _icons.Apply(item.Id);
+        Refresh();
+        SaveSoon();
+    }
+
     // ---- sharing: a look as a theme file ----
 
     /// <summary>What happened to the last export or import (saved where, why a file was refused), or null.</summary>
@@ -774,6 +811,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         try
         {
             foreach (var item in Presets.Concat(GradientPresets)) item.IsSelected = string.Equals(item.Preset.Id, Model.Preset, StringComparison.OrdinalIgnoreCase);
+            foreach (var icon in AppIcons) icon.IsSelected = string.Equals(icon.Id, _settings.Current.AppIcon, StringComparison.OrdinalIgnoreCase);
             foreach (var item in StatusItems) item.Refresh();
             foreach (var item in PaletteGroups.SelectMany(g => g.Items)) item.Refresh();
             foreach (var name in new[]

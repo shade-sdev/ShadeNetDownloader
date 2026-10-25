@@ -32,6 +32,8 @@
         <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
         <!-- the title bar's mark (tools/brand/render-icons.mjs makes it, with app.ico, from the icon's SVG sources) -->
         <Resource Include="Assets\logo.png" />
+        <!-- the other app icons one can choose (Settings > Appearance > App icon), with their names in icons.json -->
+        <Content Include="Assets\Icons\*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <!-- yt-dlp and ffmpeg (tools\get-tools.ps1) travel with the app when they have been fetched; the installer ships them. -->

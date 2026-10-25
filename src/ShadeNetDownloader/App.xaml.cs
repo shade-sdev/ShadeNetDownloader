@@ -101,6 +101,8 @@ public partial class App : Application
         services.AddSingleton<AppController>();
         services.AddSingleton<IAppShell>(sp => sp.GetRequiredService<AppController>());
         services.AddSingleton(sp => new TrayIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")));
+        services.AddSingleton(sp => new AppIconService(sp.GetRequiredService<TrayIcon>()));
+        services.AddSingleton<IAppIconApplier>(sp => sp.GetRequiredService<AppIconService>());
         services.AddSingleton<ITrayNotifier>(sp => sp.GetRequiredService<TrayIcon>());
         services.AddSingleton<StartupRegistration>();
         services.AddSingleton<IPowerService>(sp => new WindowsPowerService(() => sp.GetRequiredService<AppController>().Exit()));

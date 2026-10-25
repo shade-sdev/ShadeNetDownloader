@@ -693,4 +693,73 @@ public class AppearanceTests
         Assert.NotNull(page.ThemeFileMessage);
         Assert.Equal(ThemePresets.DefaultId, settings.Current.Appearance.Preset);
     }
+
+    // ---- app icons ----
+
+    sealed class FakeIcons : IAppIconApplier
+    {
+        public IReadOnlyList<AppIconChoice> Choices { get; } = new[]
+        {
+            new AppIconChoice(AppIconService.DefaultId, "ShadeNet", "app.ico", "app.png"),
+            new AppIconChoice("sunset", "Sunset", "sunset.ico", "sunset.png"),
+        };
+
+        public List<string> Applied { get; } = new();
+        public void Apply(string id) => Applied.Add(id);
+    }
+
+    [Fact]
+    public void The_app_icons_are_shadenets_own_and_those_listed_whose_files_are_there()
+    {
+        using var dir = new TempDir();
+        var icons = Path.Combine(dir.Path, "Icons");
+        Directory.CreateDirectory(icons);
+        File.WriteAllText(Path.Combine(dir.Path, "app.ico"), "");
+        File.WriteAllText(Path.Combine(icons, "icons.json"),
+            "[ {\"id\": \"sunset\", \"name\": \"Sunset\"}, {\"id\": \"gone\", \"name\": \"Gone\"}, {\"id\": \"../evil\", \"name\": \"Evil\"} ]");
+        File.WriteAllText(Path.Combine(icons, "sunset.ico"), "");
+        File.WriteAllText(Path.Combine(icons, "sunset.png"), "");
+
+        var service = new AppIconService(folder: dir.Path);
+        Assert.Equal(new[] { AppIconService.DefaultId, "sunset" }, service.Choices.Select(c => c.Id));
+        Assert.Equal("Sunset", service.Choices[1].Name);
+
+        service.Apply("SUNSET");
+        Assert.Equal("sunset", service.Current);
+        service.Apply("no-such-icon");   // an unknown one is ShadeNet's own
+        Assert.Equal(AppIconService.DefaultId, service.Current);
+    }
+
+    [Fact]
+    public void Without_a_list_there_is_only_shadenets_own_icon()
+    {
+        using var dir = new TempDir();
+        Assert.Single(new AppIconService(folder: dir.Path).Choices);
+    }
+
+    [Fact]
+    public void An_app_icon_is_chosen_shown_and_remembered_and_a_preset_never_changes_it()
+    {
+        using var dir = new TempDir();
+        var settings = new SettingsService(dir.Path);
+        settings.Load();
+        var icons = new FakeIcons();
+        var current = AppTheme.System;
+        var page = new AppearanceSettingsViewModel(settings, new FakeTheme(), () => current, t => current = t, icons: icons);
+        Assert.Equal(2, page.AppIcons.Count);
+        Assert.True(page.AppIcons[0].IsSelected);
+
+        page.ChooseAppIconCommand.Execute(page.AppIcons[1]);
+        Assert.Equal(new[] { "sunset" }, icons.Applied);
+        Assert.True(page.AppIcons[1].IsSelected);
+        Assert.False(page.AppIcons[0].IsSelected);
+
+        page.ApplyPresetCommand.Execute(page.Presets.Single(p => p.Preset.Id == "nord"));
+        page.ResetAllCommand.Execute(null);
+        Assert.Equal("sunset", settings.Current.AppIcon);
+
+        var reloaded = new SettingsService(dir.Path);
+        reloaded.Load();
+        Assert.Equal("sunset", reloaded.Current.AppIcon);
+    }
 }

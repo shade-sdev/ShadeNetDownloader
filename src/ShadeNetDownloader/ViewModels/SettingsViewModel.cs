@@ -33,7 +33,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel(SettingsService settings, AppThemeService theme,
         BrowserIntegrationInstaller? installer = null, IBrowserBridge? bridge = null,
         DownloadManager? manager = null, FinishWatcher? finish = null, StartupRegistration? startup = null,
-        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null)
+        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null,
+        IAppIconApplier? appIcons = null)
     {
         _settings = settings;
         _theme = theme;
@@ -61,7 +62,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         Tools = new ToolsSettingsViewModel(settings, tools, toolUpdates ?? new ToolUpdateService(tools, settings, new ToastService()), ApplyEngine);
 
         if (appUpdates != null) Updates = new UpdatesSettingsViewModel(settings, appUpdates);
-        Appearance = new AppearanceSettingsViewModel(settings, theme, () => SelectedTheme, t => SelectedTheme = t);
+        Appearance = new AppearanceSettingsViewModel(settings, theme, () => SelectedTheme, t => SelectedTheme = t, icons: appIcons);
 
         RefreshIntegration();
         if (_bridge != null) _bridge.StatusChanged += () => Application.Current?.Dispatcher.BeginInvoke(RefreshIntegration);

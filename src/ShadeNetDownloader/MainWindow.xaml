@@ -76,7 +76,8 @@
                     <!-- the title bar treats its slots as part of the window, so the brand area moves the window itself -->
                     <StackPanel x:Name="Brand" Orientation="Horizontal" Background="Transparent" MouseLeftButtonDown="OnBrandMouseDown"
                                 Visibility="{Binding IsSidebarExpanded, Converter={StaticResource B2V}}">
-                        <Image Source="pack://application:,,,/Assets/logo.png" Width="26" Height="26" Margin="14,0,0,0"
+                        <!-- the app icon chosen in Settings > Appearance (AppIconService.Logo) -->
+                        <Image x:Name="BrandLogo" Source="{Binding Logo}" Width="26" Height="26" Margin="14,0,0,0"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
                         <TextBlock Text="ShadeNet" Margin="10,0,0,0" FontSize="14" FontWeight="SemiBold"
                                    VerticalAlignment="Center"

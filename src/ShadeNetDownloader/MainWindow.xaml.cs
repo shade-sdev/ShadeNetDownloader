@@ -24,7 +24,7 @@ public partial class MainWindow : FluentWindow
     readonly AppController _app;
 
     public MainWindow(MainViewModel vm, SettingsService settings, AppThemeService theme,
-        IContentDialogService dialogs, IDialogService dialogService, ToastService toasts, AppController app)
+        IContentDialogService dialogs, IDialogService dialogService, ToastService toasts, AppController app, AppIconService icons)
     {
         _vm = vm;
         _settings = settings;
@@ -52,6 +52,9 @@ public partial class MainWindow : FluentWindow
         RestoreGeometry(settings.Current.Window);
 
         BackgroundLayerHost.DataContext = theme.Layer;
+        BrandLogo.DataContext = icons;
+        icons.Attach(this);
+        icons.Apply(settings.Current.AppIcon);
         theme.Switching += CrossfadeTheme;
         theme.Attach(this);
         theme.Apply(settings.Current.Theme, settings.Current.Appearance);

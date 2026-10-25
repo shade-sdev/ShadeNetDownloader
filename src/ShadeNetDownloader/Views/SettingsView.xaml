@@ -834,6 +834,55 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <!-- the app icon: the window's, the taskbar's, the tray's and the title bar's -->
+                    <TextBlock Text="App icon" Style="{StaticResource SectionTitle}" />
+                    <TextBlock Style="{StaticResource CardHint}" Margin="2,-4,0,10"
+                               Text="Changes ShadeNet's icon in its window, on the taskbar, in Alt+Tab and in the notification area. Shortcuts keep the usual one." />
+                    <ItemsControl DataContext="{Binding Appearance}" ItemsSource="{Binding AppIcons}" Focusable="False" Margin="-4,0,-4,16">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Margin="4" Width="60" Height="60" Padding="0" Cursor="Hand" ToolTip="{Binding Name}"
+                                        AutomationProperties.Name="{Binding Name}"
+                                        Command="{Binding DataContext.ChooseAppIconCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Grid>
+                                                <Border x:Name="Frame" CornerRadius="14" BorderThickness="2" Padding="4" BorderBrush="Transparent">
+                                                    <Image Source="{Binding Preview}" RenderOptions.BitmapScalingMode="HighQuality" />
+                                                </Border>
+                                                <Border x:Name="Mark" Width="20" Height="20" CornerRadius="10" HorizontalAlignment="Right"
+                                                        VerticalAlignment="Top" Margin="0,-4,-4,0" Visibility="Collapsed"
+                                                        Background="{DynamicResource AccentFillColorDefaultBrush}">
+                                                    <ui:SymbolIcon Symbol="Checkmark12" FontSize="11" Filled="True"
+                                                                   Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                                                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                </Border>
+                                            </Grid>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ControlStrongStrokeColorDefaultBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                                    <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                </Trigger>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                                    <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
                     <!-- sharing: a look as a file anyone with ShadeNet can import -->
                     <Grid DataContext="{Binding Appearance}" Margin="0,-8,0,20">
                         <Grid.ColumnDefinitions>
