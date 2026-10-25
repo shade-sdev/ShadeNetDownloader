@@ -23,6 +23,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // before any window: the taskbar button then shows the window's icon (see AppIdentity)
+        AppIdentity.Set();
+
         // Command-line switches for scripts and the installer: register or remove the browser integration, then leave.
         if (e.Args.Contains("--install-browser-integration") || e.Args.Contains("--uninstall-browser-integration"))
         {
