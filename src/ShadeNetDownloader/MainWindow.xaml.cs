@@ -41,10 +41,17 @@ public partial class MainWindow : FluentWindow
         Loaded += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);
         Sidebar.SizeChanged += (_, _) => AlignTitleBar();
         Sidebar.Width = vm.SidebarWidth.Value;
+        ShowPage(vm.CurrentPage);
+        // the settings page is the heaviest: it is made while nothing else happens after start-up, so its first opening is instant
+        Loaded += (_, _) => Dispatcher.BeginInvoke(() => Prepare(vm.SettingsPage), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
         vm.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(MainViewModel.IsSidebarExpanded)) AnimateSidebar();
-            else if (e.PropertyName == nameof(MainViewModel.CurrentPage)) Animate.FadeSlideIn(PageHost, 14);
+            else if (e.PropertyName == nameof(MainViewModel.CurrentPage))
+            {
+                ShowPage(vm.CurrentPage);
+                Animate.FadeSlideIn(PageHost, 14);
+            }
         };
         StateChanged += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);   // (maximised, the slot moves)
 
@@ -95,6 +102,37 @@ public partial class MainWindow : FluentWindow
         var content = Sidebar.TranslatePoint(new Point(Sidebar.ActualWidth, 0), Root).X;
         var width = Math.Max(0, content - slot);
         if (Math.Abs(BrandColumn.Width.Value - width) > 0.5) BrandColumn.Width = new GridLength(width);
+    }
+
+    readonly Dictionary<object, FrameworkElement> _pages = new();
+
+    /// <summary>The view of a page, made the first time and kept (a page made again on every visit made switching slow).</summary>
+    FrameworkElement? PageFor(object? page)
+    {
+        if (page == null) return null;
+        if (_pages.TryGetValue(page, out var view)) return view;
+        view = page switch
+        {
+            DownloadsViewModel => new Views.DownloadsView(),
+            SettingsViewModel => new Views.SettingsView(),
+            _ => null,
+        };
+        if (view == null) return null;
+        view.DataContext = page;
+        _pages[page] = view;
+        return view;
+    }
+
+    void ShowPage(object? page) => PageHost.Content = PageFor(page);
+
+    /// <summary>A page is made and laid out once off screen, at the size it will show at: its lists and controls are built then.</summary>
+    void Prepare(object? page)
+    {
+        if (PageFor(page) is not { Parent: null } view || ReferenceEquals(PageHost.Content, view)) return;
+        var size = PageHost.RenderSize;
+        if (size.Width < 1 || size.Height < 1) return;
+        view.Measure(size);
+        view.Arrange(new Rect(size));
     }
 
     /// <summary>The sidebar glides to its new width; the brand fades back in beside it when the names return.</summary>

@@ -20,12 +20,6 @@
         <conv:ThemeNameConverter x:Key="ThemeName" />
         <BooleanToVisibilityConverter x:Key="B2V" />
 
-        <DataTemplate DataType="{x:Type vm:DownloadsViewModel}">
-            <views:DownloadsView />
-        </DataTemplate>
-        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
-            <views:SettingsView />
-        </DataTemplate>
     </ui:FluentWindow.Resources>
 
     <!-- overall progress of the running downloads on the taskbar button -->
@@ -178,7 +172,8 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <ContentControl x:Name="PageHost" Grid.Row="0" Content="{Binding CurrentPage}" IsTabStop="False" />
+                    <!-- the page showing: each is made once and kept (MainWindow.ShowPage), so switching is instant -->
+                    <ContentControl x:Name="PageHost" Grid.Row="0" IsTabStop="False" />
 
                     <!-- status bar -->
                     <Border Grid.Row="1" Height="36" BorderThickness="0,1,0,0"

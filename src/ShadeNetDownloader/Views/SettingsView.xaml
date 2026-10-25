@@ -1123,6 +1123,7 @@
                                 </StackPanel>
                             </ui:CardControl.Header>
                             <ComboBox Width="240" ItemsSource="{Binding FontChoices}" SelectedItem="{Binding SelectedFont, Mode=TwoWay}"
+                                      DropDownOpened="OnFontsOpening"
                                       AutomationProperties.Name="Font" IsTextSearchEnabled="True">
                                 <ComboBox.ItemsPanel>
                                     <ItemsPanelTemplate>

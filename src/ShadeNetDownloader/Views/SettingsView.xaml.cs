@@ -28,6 +28,9 @@ public partial class SettingsView : UserControl
         if (_watched != null) _watched.PropertyChanged += OnVmPropertyChanged;
     }
 
+    /// <summary>The installed fonts are read when their list first opens (not when the page is made).</summary>
+    void OnFontsOpening(object? sender, EventArgs e) => _watched?.Appearance.LoadFonts();
+
     /// <summary>Another section: it slides in.</summary>
     void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {

@@ -665,8 +665,20 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     public const string WindowsFont = "Windows font (Segoe UI)";
     IReadOnlyList<string>? _fonts;
 
-    /// <summary>The Windows font first, then every font installed (read when the list is first opened).</summary>
-    public IReadOnlyList<string> FontChoices => _fonts ??= new[] { WindowsFont }.Concat(AppThemeService.InstalledFonts()).ToList();
+    /// <summary>
+    /// The Windows font first, then every font installed. Reading the fonts takes a moment, so until the list is first opened
+    /// (<see cref="LoadFonts"/>) it holds only the Windows font and the one chosen.
+    /// </summary>
+    public IReadOnlyList<string> FontChoices => _fonts ?? (Layout.Font is { } chosen ? new[] { WindowsFont, chosen } : new[] { WindowsFont });
+
+    /// <summary>The list of fonts is about to open: every installed font joins it.</summary>
+    public void LoadFonts()
+    {
+        if (_fonts != null) return;
+        _fonts = new[] { WindowsFont }.Concat(AppThemeService.InstalledFonts()).ToList();
+        OnPropertyChanged(nameof(FontChoices));
+        OnPropertyChanged(nameof(SelectedFont));
+    }
 
     public string SelectedFont
     {
