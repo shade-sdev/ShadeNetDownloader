@@ -76,16 +76,8 @@
                     <!-- the title bar treats its slots as part of the window, so the brand area moves the window itself -->
                     <StackPanel x:Name="Brand" Orientation="Horizontal" Background="Transparent" MouseLeftButtonDown="OnBrandMouseDown"
                                 Visibility="{Binding IsSidebarExpanded, Converter={StaticResource B2V}}">
-                        <Border Width="26" Height="26" CornerRadius="8" VerticalAlignment="Center" Margin="14,0,0,0">
-                            <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="{DynamicResource SystemAccentColorSecondary}" Offset="0" />
-                                    <GradientStop Color="{DynamicResource SystemAccentColorPrimary}" Offset="1" />
-                                </LinearGradientBrush>
-                            </Border.Background>
-                            <ui:SymbolIcon Symbol="ArrowDownload24" FontSize="16" Filled="True" Foreground="White"
-                                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
+                        <Image Source="pack://application:,,,/Assets/logo.png" Width="26" Height="26" Margin="14,0,0,0"
+                               VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
                         <TextBlock Text="ShadeNet" Margin="10,0,0,0" FontSize="14" FontWeight="SemiBold"
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
