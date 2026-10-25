@@ -54,6 +54,36 @@
             <Setter Property="ContextMenu" Value="{StaticResource CardMenu}" />
         </Style>
 
+        <!-- the round check on a card: adds the card to the selection, or takes it out, without touching the others -->
+        <Style x:Key="SelectCheck" TargetType="CheckBox">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Width="22" Height="22" Background="Transparent">
+                            <Ellipse x:Name="Ring" StrokeThickness="1.5"
+                                     Fill="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                                     Stroke="{DynamicResource ControlStrongStrokeColorDefaultBrush}" />
+                            <ui:SymbolIcon x:Name="Tick" Symbol="Checkmark12" FontSize="12" Filled="True" Visibility="Collapsed"
+                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Ring" Property="Fill" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                <Setter TargetName="Tick" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- one download card -->
         <DataTemplate x:Key="DownloadCard" DataType="{x:Type vm:DownloadItemViewModel}">
             <Border x:Name="Card" Margin="{DynamicResource DownloadCardGap}" Padding="{DynamicResource DownloadCardPadding}" CornerRadius="{DynamicResource CardRadius}" BorderThickness="1"
@@ -71,12 +101,18 @@
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- file-type icon -->
-                    <Border Grid.Column="0" Width="46" Height="46" CornerRadius="11" VerticalAlignment="Top"
-                            Background="{DynamicResource SubtleFillColorSecondaryBrush}">
-                        <Image Source="{Binding Icon}" Width="30" Height="30"
-                               RenderOptions.BitmapScalingMode="HighQuality" />
-                    </Border>
+                    <!-- file-type icon, with the selection check on its corner -->
+                    <Grid Grid.Column="0" VerticalAlignment="Top">
+                        <Border Width="46" Height="46" CornerRadius="11"
+                                Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                            <Image Source="{Binding Icon}" Width="30" Height="30"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Border>
+                        <CheckBox x:Name="Check" Style="{StaticResource SelectCheck}" Opacity="0"
+                                  HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-7,-7,0,0"
+                                  ToolTip="Select (add to the selection)" AutomationProperties.Name="Select"
+                                  IsChecked="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}, Mode=TwoWay}" />
+                    </Grid>
 
                     <!-- name, progress, details -->
                     <StackPanel Grid.Column="1" Margin="14,0,10,0" VerticalAlignment="Center">
@@ -155,11 +191,17 @@
 
             <DataTemplate.Triggers>
                 <!-- hover / selection reveal the secondary actions -->
+                <DataTrigger Binding="{Binding DataContext.HasSelection, RelativeSource={RelativeSource AncestorType=ListView}}" Value="True">
+                    <Setter TargetName="Check" Property="Opacity" Value="1" />
+                </DataTrigger>
                 <Trigger SourceName="Card" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Check" Property="Opacity" Value="1" />
                     <Setter TargetName="Extras" Property="Opacity" Value="1" />
                     <Setter TargetName="Card" Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
                 </Trigger>
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}}" Value="True">
+                    <Setter TargetName="Check" Property="Opacity" Value="1" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}" />
                     <Setter TargetName="Extras" Property="Opacity" Value="1" />
                     <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
                 </DataTrigger>
@@ -327,7 +369,7 @@
         <ListView x:Name="List" Grid.Row="1" ItemsSource="{Binding View}"
                   ItemTemplate="{StaticResource DownloadCard}"
                   ItemContainerStyle="{StaticResource DownloadRow}"
-                  SelectionMode="Extended" Background="Transparent" BorderThickness="0" Padding="0,2,0,12"
+                  SelectionMode="Extended" Background="Transparent" BorderThickness="0"
                   Foreground="{DynamicResource TextFillColorPrimaryBrush}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -339,7 +381,12 @@
             <ListView.Style>
                 <Style TargetType="ListView">
                     <Setter Property="Visibility" Value="Visible" />
+                    <Setter Property="Padding" Value="0,2,0,12" />
                     <Style.Triggers>
+                        <!-- the selection bar floats over the bottom: the last card can still scroll above it -->
+                        <DataTrigger Binding="{Binding HasSelection}" Value="True">
+                            <Setter Property="Padding" Value="0,2,0,84" />
+                        </DataTrigger>
                         <DataTrigger Binding="{Binding IsEmpty}" Value="True">
                             <Setter Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
@@ -347,6 +394,38 @@
                 </Style>
             </ListView.Style>
         </ListView>
+
+        <!-- the selection bar: floats over the list while any download is selected, and acts on all of them -->
+        <Border x:Name="SelectionBar" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="16,0,16,16"
+                Padding="14,8,8,8" CornerRadius="12" BorderThickness="1"
+                Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Visibility="{Binding HasSelection, Converter={StaticResource B2V}}">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="4" Direction="270" Opacity="0.3" Color="Black" />
+            </Border.Effect>
+            <StackPanel Orientation="Horizontal">
+                <ui:Button Appearance="Transparent" Padding="6" Margin="0,0,6,0" Icon="{ui:SymbolIcon Dismiss16}"
+                           Click="OnClearSelection" ToolTip="Clear the selection  (Esc)" AutomationProperties.Name="Clear the selection" />
+                <TextBlock Text="{Binding SelectionText}" FontWeight="SemiBold" VerticalAlignment="Center" MinWidth="78" Margin="0,0,10,0" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon SelectAllOn24}" Content="All"
+                           Click="OnSelectAll" ToolTip="Select every download in this list  (Ctrl+A)" />
+                <Rectangle Width="1" Margin="6,4" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Play24}" Content="Resume"
+                           Command="{Binding ResumeSelectedCommand}" ToolTip="Resume the selected downloads that are paused or failed" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Pause24}" Content="Pause"
+                           Command="{Binding PauseSelectedCommand}" ToolTip="Pause the selected downloads that are running" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon ArrowEnterUp24}" Content="Queue"
+                           Command="{Binding QueueSelectedCommand}" ToolTip="Add the selected paused or failed downloads to the queue" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Link24}" Content="Copy links"
+                           Command="{Binding CopySelectedLinksCommand}" ToolTip="Copy the selected downloads' addresses" />
+                <Rectangle Width="1" Margin="6,4" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
+                <ui:Button Appearance="Transparent" Padding="8,5" Margin="0,0,2,0" Icon="{ui:SymbolIcon Dismiss24}" Content="Remove"
+                           Command="{Binding RemoveSelectedCommand}" ToolTip="Remove from the list, keep the files  (Delete)" />
+                <ui:Button Appearance="Danger" Padding="10,5" Icon="{ui:SymbolIcon Delete24}" Content="Delete files"
+                           Command="{Binding DeleteSelectedCommand}" ToolTip="Remove from the list and delete the files (you can undo for a few seconds)" />
+            </StackPanel>
+        </Border>
 
         <!-- empty state -->
         <Grid x:Name="EmptyState" Grid.Row="1" Visibility="{Binding IsEmpty, Converter={StaticResource B2V}}"

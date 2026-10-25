@@ -404,10 +404,52 @@ public sealed partial class DownloadsViewModel : ObservableObject
     public void SetSelection(IEnumerable<DownloadItemViewModel> selected)
     {
         _selection = selected.ToList();
+        SelectedCount = _selection.Count;
 
         // an open drawer shows whatever single download is selected now
         if (Details != null && _selection.Count == 1 && !ReferenceEquals(_selection[0], Details.Item)) OpenDetails(_selection[0]);
     }
+
+    /// <summary>How many downloads are selected (the selection bar shows while any are).</summary>
+    [ObservableProperty] int _selectedCount;
+
+    public bool HasSelection => SelectedCount > 0;
+    public string SelectionText => SelectedCount == 1 ? "1 selected" : $"{SelectedCount} selected";
+
+    partial void OnSelectedCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionText));
+    }
+
+    // the selection bar: each acts on every selected download it applies to (pausing what runs, resuming what is paused ...)
+
+    [RelayCommand]
+    void PauseSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanPause)) _manager.Pause(i.Id);
+    }
+
+    [RelayCommand]
+    void ResumeSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanResume)) _manager.Start(i.Id);
+    }
+
+    [RelayCommand]
+    void QueueSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanQueue)) _manager.Enqueue(i.Id);
+    }
+
+    [RelayCommand]
+    void CopySelectedLinks()
+    {
+        if (_selection.Count > 0) CopyLinks(_selection[0]);
+    }
+
+    [RelayCommand]
+    void DeleteSelected() => RemoveWithUndo(_selection.ToList(), deleteFiles: true);
 
     /// <summary>The cards an action applies to: the whole selection if the clicked card is in it, else just that card.</summary>
     List<DownloadItemViewModel> Targets(DownloadItemViewModel clicked) =>
@@ -593,7 +635,8 @@ public sealed partial class DownloadsViewModel : ObservableObject
     public void RemoveSelectionOf(DownloadItemViewModel clicked, bool deleteFiles) =>
         RemoveWithUndo(Targets(clicked), deleteFiles);
 
-    /// <summary>Delete key.</summary>
+    /// <summary>Delete key, and Remove on the selection bar.</summary>
+    [RelayCommand]
     public void RemoveSelected() => RemoveWithUndo(_selection.ToList(), deleteFiles: false);
 
     [RelayCommand]

@@ -273,6 +273,35 @@ public class ViewModelTests
         Assert.Equal(expected, Math.Sign(DownloadSortComparer.NaturalCompare(a, b)));
 
     [Fact]
+    public void The_selection_bar_counts_the_selection_and_acts_on_all_of_it()
+    {
+        var (manager, _, dir) = Env();
+        using var d = dir;
+        using var m = manager;
+        manager.SetQueueRunning(false);   // so queued ones stay queued
+        AddHeld(manager, "a.zip", "b.zip", "c.zip");
+        var vm = new DownloadsViewModel(manager, new ToastService());
+        Assert.False(vm.HasSelection);
+
+        var picked = vm.Items.Where(i => i.FileName != "b.zip").ToList();
+        vm.SetSelection(picked);
+        Assert.True(vm.HasSelection);
+        Assert.Equal("2 selected", vm.SelectionText);
+
+        vm.QueueSelectedCommand.Execute(null);
+        Assert.All(picked, i => Assert.Equal(DownloadState.Queued, manager.Jobs.Single(j => j.Id == i.Id).State));
+        Assert.NotEqual(DownloadState.Queued, manager.Jobs.Single(j => j.FileName == "b.zip").State);
+
+        vm.RemoveSelectedCommand.Execute(null);
+        Assert.All(picked, i => Assert.True(i.IsPendingRemoval));
+        Assert.Equal(1, vm.View.Count);   // only b.zip shows (the two wait out their undo window)
+
+        vm.SetSelection(Array.Empty<DownloadItemViewModel>());
+        Assert.False(vm.HasSelection);
+        Assert.Equal("0 selected", vm.SelectionText);
+    }
+
+    [Fact]
     public void The_sidebar_shows_icons_only_when_asked_and_remembers_it()
     {
         var (manager, settings, dir) = Env();

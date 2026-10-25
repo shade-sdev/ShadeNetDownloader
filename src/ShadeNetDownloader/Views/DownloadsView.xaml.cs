@@ -80,6 +80,11 @@ public partial class DownloadsView : UserControl
 
     void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // a selection began: its bar rises from the bottom
+        if (e.PropertyName == nameof(DownloadsViewModel.HasSelection) && _watched is { HasSelection: true } && IsLoaded)
+            Dispatcher.BeginInvoke(() => Animate.FadeSlideIn(SelectionBar, offsetY: 24),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+
         // the list just became empty: its picture floats in (after the layout shows it)
         if (e.PropertyName == nameof(DownloadsViewModel.IsEmpty) && _watched is { IsEmpty: true } && IsLoaded)
             Dispatcher.BeginInvoke(() => Animate.FadeSlideIn(EmptyState, offsetY: 18, duration: Animate.Slow),
@@ -116,15 +121,27 @@ public partial class DownloadsView : UserControl
         Animate.FadeSlideIn(List, offsetY: 16);
     }
 
-    /// <summary>Esc closes the drawer wherever the focus is.</summary>
+    /// <summary>Esc closes the drawer wherever the focus is; with the drawer closed, it clears the selection.</summary>
     void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && Vm is { IsDetailsOpen: true } vm && !IsEditingText(e.OriginalSource))
+        if (e.Key != Key.Escape || IsEditingText(e.OriginalSource)) return;
+        if (Vm is { IsDetailsOpen: true } vm)
         {
             vm.CloseDetails();
             e.Handled = true;
         }
+        else if (List.SelectedItems.Count > 0)
+        {
+            List.UnselectAll();
+            e.Handled = true;
+        }
     }
+
+    // ---- the selection bar ----
+
+    void OnSelectAll(object sender, RoutedEventArgs e) => List.SelectAll();
+
+    void OnClearSelection(object sender, RoutedEventArgs e) => List.UnselectAll();
 
     static bool IsEditingText(object source) => source is System.Windows.Controls.Primitives.TextBoxBase;
 
