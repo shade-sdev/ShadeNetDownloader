@@ -33,7 +33,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     public SettingsViewModel(SettingsService settings, AppThemeService theme,
         BrowserIntegrationInstaller? installer = null, IBrowserBridge? bridge = null,
         DownloadManager? manager = null, FinishWatcher? finish = null, StartupRegistration? startup = null,
-        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null)
+        AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null,
+        IAppIconApplier? appIcons = null)
     {
         _settings = settings;
         _theme = theme;
@@ -61,6 +62,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         Tools = new ToolsSettingsViewModel(settings, tools, toolUpdates ?? new ToolUpdateService(tools, settings, new ToastService()), ApplyEngine);
 
         if (appUpdates != null) Updates = new UpdatesSettingsViewModel(settings, appUpdates);
+        Appearance = new AppearanceSettingsViewModel(settings, theme, () => SelectedTheme, t => SelectedTheme = t, icons: appIcons);
 
         RefreshIntegration();
         if (_bridge != null) _bridge.StatusChanged += () => Application.Current?.Dispatcher.BeginInvoke(RefreshIntegration);
@@ -73,6 +75,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>yt-dlp and ffmpeg: where they are, their versions, a different location, updates.</summary>
     public ToolsSettingsViewModel Tools { get; }
+
+    /// <summary>Presets, accent, window material, state colours and the palette (Settings > Appearance).</summary>
+    public AppearanceSettingsViewModel Appearance { get; }
 
     /// <summary>The newer-version check of ShadeNet itself (Settings > About); null in a view model made without the service.</summary>
     public UpdatesSettingsViewModel? Updates { get; }
@@ -130,8 +135,9 @@ public sealed partial class SettingsViewModel : ObservableObject
 
         if (_settings.Current.Theme == value) return;
         _settings.Current.Theme = value;
-        _theme.Apply(value);
+        _theme.Apply(value, _settings.Current.Appearance);
         _settings.Save();
+        Appearance?.Refresh();   // (the palette being edited is the light or the dark one)
     }
 
     /// <summary>Quick toggle used by the title bar button: System → Light → Dark → System.</summary>

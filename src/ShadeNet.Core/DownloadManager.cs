@@ -215,6 +215,7 @@ public sealed class DownloadManager : IDisposable
                 job.Hls = new HlsJobData { Height = stream.Height, Bandwidth = stream.Bandwidth, AudioName = stream.AudioName, Subtitles = stream.Subtitles, EmbedSubtitles = stream.EmbedSubtitles,
                     Direct = stream.Direct, AudioUrl = stream.AudioUrl, Seconds = stream.Seconds, Record = stream.Record, Live = stream.Record,
                     Pieces = stream.Pieces?.ToList(), InitUrl = stream.Init, AudioPieces = stream.AudioPieces?.ToList(), AudioInitUrl = stream.AudioInit,
+                    Played = stream.Played?.ToList(),
                 };
             }
 

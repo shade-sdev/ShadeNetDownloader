@@ -3,7 +3,8 @@
                     xmlns:sys="clr-namespace:System;assembly=System.Runtime">
 
     <!-- Design tokens: spacing (4-pt grid), radii and type sizes. Colours always come from WPF-UI's theme brushes so
-         light / dark / accent switching never needs a second code path. -->
+         light / dark / accent switching never needs a second code path. Radii, density and motion can be changed in
+         Settings > Appearance (AppThemeService.ApplyLayout writes over these), so they are looked up with DynamicResource. -->
 
     <sys:Double x:Key="Space1">4</sys:Double>
     <sys:Double x:Key="Space2">8</sys:Double>
@@ -17,18 +18,35 @@
     <CornerRadius x:Key="RadiusLg">12</CornerRadius>
     <!-- small status badges and count badges: a rounded rectangle, not an oval -->
     <CornerRadius x:Key="RadiusBadge">5</CornerRadius>
+    <CornerRadius x:Key="CardRadius">10</CornerRadius>
+    <CornerRadius x:Key="SheetRadius">12</CornerRadius>
+
+    <!-- the room the download list gives each download, and the sidebar items' height (Settings > Appearance > density) -->
+    <Thickness x:Key="DownloadCardPadding">16,14,12,14</Thickness>
+    <Thickness x:Key="DownloadCardGap">0,0,0,8</Thickness>
+    <sys:Double x:Key="NavItemHeight">38</sys:Double>
+
+    <!-- the brand: the wordmark's font (embedded, so it looks the same on every PC) and the icon's gradient -->
+    <FontFamily x:Key="BrandFont">pack://application:,,,/Assets/Fonts/#Lexend</FontFamily>
+    <LinearGradientBrush x:Key="BrandGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+        <GradientStop Color="#06B6D4" Offset="0" />
+        <GradientStop Color="#6366F1" Offset="0.55" />
+        <GradientStop Color="#D946EF" Offset="1" />
+    </LinearGradientBrush>
+    <!-- the name in the title bar: the text colour, the accent or the gradient, as chosen (AppThemeService writes it) -->
+    <SolidColorBrush x:Key="WordmarkBrush" Color="#F3F3F3" />
 
     <sys:Double x:Key="FontCaption">12</sys:Double>
     <sys:Double x:Key="FontBody">14</sys:Double>
 
     <Thickness x:Key="PagePadding">32,24,32,16</Thickness>
 
-    <GridLength x:Key="SidebarWidth">248</GridLength>
-    <Thickness x:Key="DropMargin">248,0,12,12</Thickness>
+    <!-- (the sidebar's width, and the drop hint's margin that follows it, come from MainViewModel: it can show icons only) -->
 
     <!-- Motion: 150-250 ms ease-out -->
     <Duration x:Key="MotionFast">0:0:0.15</Duration>
     <Duration x:Key="MotionBase">0:0:0.22</Duration>
+    <Duration x:Key="MotionSlow">0:0:0.32</Duration>
     <CubicEase x:Key="EaseOut" EasingMode="EaseOut" />
 
 </ResourceDictionary>

@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
+using ShadeNetDownloader.Util;
 using ShadeNetDownloader.ViewModels;
 
 namespace ShadeNetDownloader.Views;
@@ -11,7 +12,31 @@ public partial class DownloadsView : UserControl
 {
     DownloadsViewModel? _watched;
 
-    public DownloadsView() => InitializeComponent();
+    public DownloadsView()
+    {
+        InitializeComponent();
+        // the selection bar shows its buttons' names while they fit, icons only when the page is too narrow for them
+        if (SelectionBar.Parent is FrameworkElement host) host.SizeChanged += (_, _) => FitSelectionBar();
+    }
+
+    double _barFullWidth;
+
+    /// <summary>
+    /// The bar's width with every name showing is measured whenever it shows them (the count's text changes it a little);
+    /// where the page is narrower than that, the names hide ("compact") and the tooltips carry them.
+    /// </summary>
+    void FitSelectionBar()
+    {
+        if (SelectionBar.Parent is not FrameworkElement host || host.ActualWidth <= 0 || SelectionBar.Visibility != Visibility.Visible) return;
+        if (!Equals(SelectionBar.Tag, "compact"))
+        {
+            SelectionBar.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            _barFullWidth = SelectionBar.DesiredSize.Width;
+        }
+
+        var room = host.ActualWidth - SelectionBar.Margin.Left - SelectionBar.Margin.Right;
+        SelectionBar.Tag = _barFullWidth > room ? "compact" : null;
+    }
 
     DownloadsViewModel? Vm => DataContext as DownloadsViewModel;
 
@@ -42,10 +67,18 @@ public partial class DownloadsView : UserControl
     /// <summary>Page width below which the drawer overlays the list instead of pushing it.</summary>
     const double OverlayBelowWidth = 880;
 
+    /// <summary>The sort button opens its menu under it (a right click does too).</summary>
+    void OnSortClick(object sender, RoutedEventArgs e)
+    {
+        if (SortButton.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = SortButton;
+        menu.IsOpen = true;
+    }
+
     void OnLoaded(object sender, RoutedEventArgs e)
     {
-        // The slow orbit around the hero icon is decoration only: skip it when Windows asks for reduced motion.
-        if (!SystemParameters.ClientAreaAnimation) return;
+        // The slow orbit around the hero icon is decoration only: skip it when motion is off (or Windows asks for less).
+        if (!Animate.Enabled) return;
 
         var spin = new DoubleAnimation(0, 360, TimeSpan.FromSeconds(60)) { RepeatBehavior = RepeatBehavior.Forever };
         OrbitRotation.BeginAnimation(System.Windows.Media.RotateTransform.AngleProperty, spin);
@@ -55,20 +88,44 @@ public partial class DownloadsView : UserControl
 
     void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (_watched != null) _watched.PropertyChanged -= OnVmPropertyChanged;
+        if (_watched != null)
+        {
+            _watched.PropertyChanged -= OnVmPropertyChanged;
+            _watched.ListReshuffled -= OnListReshuffled;
+        }
+
         _watched = e.NewValue as DownloadsViewModel;
-        if (_watched != null) _watched.PropertyChanged += OnVmPropertyChanged;
+        if (_watched != null)
+        {
+            _watched.PropertyChanged += OnVmPropertyChanged;
+            _watched.ListReshuffled += OnListReshuffled;
+        }
     }
 
     void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // a selection began: its bar rises from the bottom
+        if (e.PropertyName == nameof(DownloadsViewModel.HasSelection) && _watched is { HasSelection: true } && IsLoaded)
+            Dispatcher.BeginInvoke(() =>
+            {
+                FitSelectionBar();
+                Animate.FadeSlideIn(SelectionBar, offsetY: 24);
+            }, System.Windows.Threading.DispatcherPriority.Loaded);
+        if (e.PropertyName == nameof(DownloadsViewModel.SelectionText) && IsLoaded)
+            Dispatcher.BeginInvoke(FitSelectionBar, System.Windows.Threading.DispatcherPriority.Loaded);
+
+        // the list just became empty: its picture floats in (after the layout shows it)
+        if (e.PropertyName == nameof(DownloadsViewModel.IsEmpty) && _watched is { IsEmpty: true } && IsLoaded)
+            Dispatcher.BeginInvoke(() => Animate.FadeSlideIn(EmptyState, offsetY: 18, duration: Animate.Slow),
+                System.Windows.Threading.DispatcherPriority.Loaded);
+
         if (e.PropertyName != nameof(DownloadsViewModel.IsDetailsOpen)) return;
 
         if (_watched is { IsDetailsOpen: true })
         {
             // slide the drawer open: the host reveals it from the left edge while the page makes room
             var width = Drawer.Width;
-            if (!SystemParameters.ClientAreaAnimation)
+            if (!Animate.Enabled)
             {
                 DrawerHost.Width = width;
                 return;
@@ -85,15 +142,35 @@ public partial class DownloadsView : UserControl
 
     void OnCloseDetails(object? sender, EventArgs e) => Vm?.CloseDetails();
 
-    /// <summary>Esc closes the drawer wherever the focus is.</summary>
+    /// <summary>Another list or another order: the heading and the list slide in again.</summary>
+    void OnListReshuffled()
+    {
+        if (!IsLoaded) return;
+        Animate.FadeSlideIn(Heading, offsetY: 0, offsetX: -12, duration: Animate.Base);
+        Animate.FadeSlideIn(List, offsetY: 16);
+    }
+
+    /// <summary>Esc closes the drawer wherever the focus is; with the drawer closed, it clears the selection.</summary>
     void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape && Vm is { IsDetailsOpen: true } vm && !IsEditingText(e.OriginalSource))
+        if (e.Key != Key.Escape || IsEditingText(e.OriginalSource)) return;
+        if (Vm is { IsDetailsOpen: true } vm)
         {
             vm.CloseDetails();
             e.Handled = true;
         }
+        else if (List.SelectedItems.Count > 0)
+        {
+            List.UnselectAll();
+            e.Handled = true;
+        }
     }
+
+    // ---- the selection bar ----
+
+    void OnSelectAll(object sender, RoutedEventArgs e) => List.SelectAll();
+
+    void OnClearSelection(object sender, RoutedEventArgs e) => List.UnselectAll();
 
     static bool IsEditingText(object source) => source is System.Windows.Controls.Primitives.TextBoxBase;
 

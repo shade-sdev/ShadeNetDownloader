@@ -356,6 +356,48 @@ public static class HlsParser
 /// <summary>Which quality to download when the user did not choose.</summary>
 public static class HlsChoice
 {
+    /// <summary>How many masters deep a quality may lead (some servers nest them); deeper is a loop, not a stream.</summary>
+    public const int MaxNesting = 4;
+
+    /// <summary>
+    /// The address the browser's player loaded a playlist from, when it is the one the list of qualities names with parameters
+    /// of the player's own added (a key some players append, which the server then wants on every playlist and piece);
+    /// otherwise the address as the list names it. A refreshed link (other values for the list's own parameters) keeps its own.
+    /// </summary>
+    public static Uri AsPlayed(Uri listed, IEnumerable<string>? played)
+    {
+        if (played == null) return listed;
+        var mine = System.Web.HttpUtility.ParseQueryString(listed.Query);
+        foreach (var address in played)
+        {
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var seen)) continue;
+            if (seen.Scheme != listed.Scheme || !string.Equals(seen.Authority, listed.Authority, StringComparison.OrdinalIgnoreCase)
+                || seen.AbsolutePath != listed.AbsolutePath) continue;
+            var theirs = System.Web.HttpUtility.ParseQueryString(seen.Query);
+            if (mine.AllKeys.All(k => theirs.GetValues(k) is { } values && (mine.GetValues(k) ?? []).All(v => values.Contains(v)))) return seen;
+        }
+
+        return listed;
+    }
+
+    /// <summary>
+    /// Why a quality never led to the video: the address asked for, where the answer came from (when the server sent ShadeNet
+    /// elsewhere) and where that answer leads, by file name, so the message says whether the server keeps answering with
+    /// the same list or sends ShadeNet back to the start.
+    /// </summary>
+    public static string NoVideoMessage(Uri asked, Uri answeredFrom, HlsMasterPlaylist answer)
+    {
+        var redirected = !string.Equals(Name(asked), Name(answeredFrom), StringComparison.Ordinal)
+            ? $" (the server sent ShadeNet to {Name(answeredFrom)} instead)"
+            : "";
+        var next = answer.Variants.Count > 0 ? Name(Best(answer.Variants).Url) : "?";
+        return "The stream's lists of qualities point to one another without ever reaching the video: asking for "
+               + $"{Name(asked)} gave another list of qualities{redirected}, which leads to {next}. Your browser may be getting "
+               + "a different answer from this server than ShadeNet does.";
+
+        static string Name(Uri u) => u.Segments.Length > 0 && u.Segments[^1].Length > 0 ? Uri.UnescapeDataString(u.Segments[^1]) : u.Host;
+    }
+
     /// <summary>The sharpest picture; the higher bit rate breaks a tie.</summary>
     public static HlsVariant Best(IEnumerable<HlsVariant> variants) =>
         variants.OrderByDescending(v => v.Height).ThenByDescending(v => v.Bandwidth).First();

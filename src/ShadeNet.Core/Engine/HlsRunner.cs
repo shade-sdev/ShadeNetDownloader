@@ -57,6 +57,9 @@ internal sealed class HlsRunner : IJobRunner
         /// <summary>The track whose duration is "how much has been downloaded / recorded" (the first media track).</summary>
         public bool CountsTime { get; set; }
 
+        /// <summary>A live track: pieces numbered below this are older than the recording wants (see <see cref="EngineSettings.LiveBacklog"/>).</summary>
+        public long? Floor { get; set; }
+
         public List<Part> Parts { get; } = new();
         public HashSet<long> Known { get; } = new();
     }
@@ -105,6 +108,7 @@ internal sealed class HlsRunner : IJobRunner
 
     public void RequestFinish()
     {
+        if (Data.Live) _note = "Saving the recording…";   // the card says so at once, while the last pieces arrive
         try
         {
             _finish.Cancel();
@@ -260,26 +264,43 @@ internal sealed class HlsRunner : IJobRunner
         if (playlist is HlsMasterPlaylist master)
         {
             // The quality is remembered by height and bit rate, not by address: after a refreshed link the same
-            // qualities may live at other URLs.
-            var variant = Data.Height > 0 || Data.Bandwidth > 0
-                ? HlsChoice.Match(master.Variants, Data.Height, Data.Bandwidth)
-                : HlsChoice.Best(master.Variants);
-            Data.Height = variant.Height;
-            Data.Bandwidth = variant.Bandwidth;
+            // qualities may live at other URLs. A quality may lead to a master of its own (some servers nest them): the
+            // choice is made again there, and its sound and subtitles are the ones used.
+            HlsVariant variant;
+            for (var depth = 0; ; depth++)
+            {
+                variant = Data.Height > 0 || Data.Bandwidth > 0
+                    ? HlsChoice.Match(master.Variants, Data.Height, Data.Bandwidth)
+                    : HlsChoice.Best(master.Variants);
 
-            videoUrl = variant.Url;
-            video = await LoadMediaAsync(http, videoUrl, ct).ConfigureAwait(false);
+                var (text, finalUrl) = await FetchPlaylistAsync(http, HlsChoice.AsPlayed(variant.Url, Data.Played).AbsoluteUri, ct).ConfigureAwait(false);
+                var next = HlsParser.Parse(text, finalUrl);
+                if (next is HlsMasterPlaylist inner && depth < HlsChoice.MaxNesting)
+                {
+                    master = inner;
+                    continue;
+                }
+
+                video = next as HlsMediaPlaylist
+                        ?? throw new HlsFormatException(HlsChoice.NoVideoMessage(variant.Url, finalUrl, (HlsMasterPlaylist)next));
+                break;
+            }
+
+            // (a quality nested in another may say no height of its own: the one chosen keeps what is known)
+            if (variant.Height > 0 || Data.Height == 0) Data.Height = variant.Height;
+            if (variant.Bandwidth > 0 || Data.Bandwidth == 0) Data.Bandwidth = variant.Bandwidth;
+            videoUrl = HlsChoice.AsPlayed(variant.Url, Data.Played);   // (as named, not where it redirected: a live stream's playlist is asked for again here)
 
             if (HlsChoice.AudioFor(master, variant, Data.AudioName) is { Url: { } found } rendition)
             {
                 Data.AudioName = rendition.Name;
-                audioUrl = found;
-                audio = await LoadMediaAsync(http, found, ct).ConfigureAwait(false);
+                audioUrl = HlsChoice.AsPlayed(found, Data.Played);
+                audio = await LoadMediaAsync(http, audioUrl, ct).ConfigureAwait(false);
             }
 
             if (Data.Subtitles)
                 foreach (var r in HlsChoice.SubtitlesFor(master, variant))
-                    subtitles.Add((r.Name, r.Language ?? r.Name, r.Url!));
+                    subtitles.Add((r.Name, r.Language ?? r.Name, HlsChoice.AsPlayed(r.Url!, Data.Played)));
         }
         else
         {
@@ -461,12 +482,34 @@ internal sealed class HlsRunner : IJobRunner
 
     string PartPath(Track track, long sequence) => Path.Combine(Work, $"{track.Id}{sequence:D16}.seg");
 
+    /// <summary>
+    /// Where a live recording begins: the first piece of the last <see cref="EngineSettings.LiveBacklog"/> of the list (never fewer than the
+    /// last three pieces, which is what a player keeps from the live edge). A list shorter than that is recorded whole.
+    /// </summary>
+    long? LiveFloor(HlsMediaPlaylist playlist)
+    {
+        var backlog = S.LiveBacklog.TotalSeconds;
+        if (backlog <= 0) return null;
+
+        var seconds = 0.0;
+        for (int i = playlist.Segments.Count - 1, kept = 0; i >= 0; i--)
+        {
+            seconds += playlist.Segments[i].Duration;
+            kept++;
+            if (seconds >= backlog && kept >= 3) return playlist.Segments[i].Sequence;
+        }
+
+        return null;
+    }
+
     /// <summary>Registers the segments of a playlist that are new to the track; finished ones are on disk already, the rest are queued.</summary>
     int AddSegments(Track track, HlsMediaPlaylist playlist)
     {
         var added = 0;
         foreach (var segment in playlist.Segments)
         {
+            if (track.Floor is { } floor && segment.Sequence < floor) continue;   // behind the point where the recording begins
+
             Part part;
             lock (track.Known)
             {
@@ -540,6 +583,7 @@ internal sealed class HlsRunner : IJobRunner
     {
         foreach (var track in plan.Tracks)
         {
+            if (plan.Live) track.Floor = LiveFloor(track.First);
             AddSegments(track, track.First);
             if (plan.Live) AdoptRecordedPieces(track);
         }
@@ -578,6 +622,20 @@ internal sealed class HlsRunner : IJobRunner
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop);
         Exception? fatal = null;
         _pollingDone = false;
+
+        // "Stop and save": the pieces being fetched and those waiting get a short while to arrive, then the transfer ends and what
+        // is on disk is saved. Without this a long backlog, or one stuck request, would keep a stopped recording going.
+        using var graceAfterFinish = _finish.Token.Register(() =>
+        {
+            try
+            {
+                linked.CancelAfter(S.StopGrace < TimeSpan.Zero ? TimeSpan.Zero : S.StopGrace);
+            }
+            catch (ObjectDisposedException)
+            {
+                // the transfer is over already
+            }
+        });
 
         var pollers = plan.Tracks.Select(t => Task.Run(() => PollAsync(plan, t, linked.Token))).ToArray();
         var pollersTask = Task.Run(async () =>

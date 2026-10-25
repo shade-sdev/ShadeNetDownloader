@@ -108,6 +108,10 @@ internal static class HttpFetcher
             var cookie = jar.HeaderFor(uri);
             if (cookie != null) request.Headers.TryAddWithoutValidation("Cookie", cookie);
 
+            // A Chromium browser sends its client hints to every host; a Chrome User-Agent without them reads as a bot
+            foreach (var (k, v) in ClientHints.For(spec.UserAgent ?? defaultUserAgent, spec.Headers))
+                request.Headers.TryAddWithoutValidation(k, v);
+
             if (sameHost && spec.Headers != null)
             {
                 foreach (var (k, v) in spec.Headers)

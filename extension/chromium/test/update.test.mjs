@@ -39,19 +39,37 @@ test('the same app version again changes nothing', async () => {
   assert.equal(t.reloads(), 0);
 });
 
-test('an updated app makes the extension reload once, after a quiet moment, with the new version stored first', async () => {
+test('an updated app makes the extension reload once, after a quiet moment, storing the new version just before', async () => {
   const t = setup({ appVersion: '1.0.2' });
   t.controller.applyAppSettings({ appVersion: '1.0.3' });
   t.controller.applyAppSettings({ appVersion: '1.0.3' });   // (settings may come twice: hello-ack, then settings)
   await settle();
-  assert.equal(await stored(t), '1.0.3');
+  assert.equal(await stored(t), '1.0.2', 'not yet: a worker stopped before the reload must try again next time');
   assert.equal(t.reloads(), 0);
 
   t.timers.fire();
+  await settle();
   assert.equal(t.reloads(), 0);   // one quiet check is not enough
   t.timers.fire();
+  await settle();
   assert.equal(t.reloads(), 1);
+  assert.equal(await stored(t), '1.0.3');
   assert.equal(t.timers.count(), 0);
+});
+
+test('a worker stopped before its reload reloads when it next meets the updated app', async () => {
+  const first = setup({ appVersion: '1.0.2' });
+  first.controller.applyAppSettings({ appVersion: '1.0.3' });
+  await settle();   // ... and the browser stops the worker here, before its timers run
+
+  const second = setup({ appVersion: await stored(first) });   // what the first left stored, a fresh worker
+  second.controller.applyAppSettings({ appVersion: '1.0.3' });
+  await settle();
+  second.timers.fire();
+  await settle();
+  second.timers.fire();
+  await settle();
+  assert.equal(second.reloads(), 1);
 });
 
 test('a hand-over waiting for the app is let finish before the reload', async () => {
@@ -59,12 +77,17 @@ test('a hand-over waiting for the app is let finish before the reload', async ()
   t.link.pending.set('x', {});
   t.controller.applyAppSettings({ appVersion: '1.0.3' });
   await settle();
-  for (let i = 0; i < 5; i++) t.timers.fire();
+  for (let i = 0; i < 5; i++) {
+    t.timers.fire();
+    await settle();
+  }
   assert.equal(t.reloads(), 0);
 
   t.link.pending.delete('x');
   t.timers.fire();
+  await settle();
   t.timers.fire();
+  await settle();
   assert.equal(t.reloads(), 1);
 });
 

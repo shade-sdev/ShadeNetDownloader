@@ -16,7 +16,7 @@
 
     <!-- ===== Sidebar item ===== -->
     <Style x:Key="NavItemButton" TargetType="Button">
-        <Setter Property="Height" Value="38" />
+        <Setter Property="Height" Value="{DynamicResource NavItemHeight}" />
         <Setter Property="Margin" Value="8,1" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -26,8 +26,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Border x:Name="Bg" CornerRadius="{StaticResource RadiusMd}" Background="Transparent"
+                    <!-- pressed, the item gives a little (a scale, not a layout change) -->
+                    <Grid x:Name="Press" RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <ScaleTransform />
+                        </Grid.RenderTransform>
+                        <Border x:Name="Bg" CornerRadius="{DynamicResource RadiusMd}" Background="Transparent"
                                 BorderThickness="1" BorderBrush="Transparent" />
 
                         <!-- accent indicator that grows in when the item is selected -->
@@ -56,9 +60,9 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
 
                             <Border x:Name="Badge" Grid.Column="2" MinWidth="22" Height="18" Padding="6,0"
-                                    CornerRadius="{StaticResource RadiusBadge}" VerticalAlignment="Center"
+                                    CornerRadius="{DynamicResource RadiusBadge}" VerticalAlignment="Center"
                                     Background="{DynamicResource SubtleFillColorTertiaryBrush}">
-                                <TextBlock Text="{Binding Count}" FontSize="11" FontWeight="SemiBold"
+                                <TextBlock x:Name="BadgeText" Text="{Binding Count}" FontSize="11" FontWeight="SemiBold"
                                            HorizontalAlignment="Center" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                             </Border>
@@ -66,6 +70,20 @@
                     </Grid>
 
                     <ControlTemplate.Triggers>
+                        <!-- an icon-only sidebar: the name becomes the tooltip and the count a small badge on the icon -->
+                        <DataTrigger Binding="{Binding DataContext.IsSidebarExpanded, RelativeSource={RelativeSource AncestorType=Window}}" Value="False">
+                            <Setter TargetName="Label" Property="Visibility" Value="Collapsed" />
+                            <Setter TargetName="Badge" Property="Grid.Column" Value="0" />
+                            <Setter TargetName="Badge" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Badge" Property="VerticalAlignment" Value="Top" />
+                            <Setter TargetName="Badge" Property="Margin" Value="0,3,-10,0" />
+                            <Setter TargetName="Badge" Property="MinWidth" Value="15" />
+                            <Setter TargetName="Badge" Property="Height" Value="15" />
+                            <Setter TargetName="Badge" Property="Padding" Value="4,0" />
+                            <Setter TargetName="BadgeText" Property="FontSize" Value="9" />
+                            <Setter Property="ToolTip" Value="{Binding Title}" />
+                        </DataTrigger>
+
                         <DataTrigger Binding="{Binding Count}" Value="0">
                             <Setter TargetName="Badge" Property="Visibility" Value="Collapsed" />
                         </DataTrigger>
@@ -77,6 +95,26 @@
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bg" Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                            <Trigger.EnterActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                         To="0.96" Duration="{StaticResource MotionFast}" EasingFunction="{StaticResource EaseOut}" />
+                                        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                         To="0.96" Duration="{StaticResource MotionFast}" EasingFunction="{StaticResource EaseOut}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.EnterActions>
+                            <Trigger.ExitActions>
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                                                         To="1" Duration="{StaticResource MotionBase}" EasingFunction="{StaticResource EaseOut}" />
+                                        <DoubleAnimation Storyboard.TargetName="Press" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                                                         To="1" Duration="{StaticResource MotionBase}" EasingFunction="{StaticResource EaseOut}" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </Trigger.ExitActions>
                         </Trigger>
 
                         <DataTrigger Binding="{Binding IsSelected}" Value="True">
@@ -129,7 +167,7 @@
 
     <!-- ===== Rounded content sheet that floats on the Mica backdrop ===== -->
     <Style x:Key="Sheet" TargetType="Border">
-        <Setter Property="CornerRadius" Value="12" />
+        <Setter Property="CornerRadius" Value="{DynamicResource SheetRadius}" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
         <Setter Property="Background" Value="{DynamicResource LayerFillColorDefaultBrush}" />
@@ -138,7 +176,7 @@
 
     <!-- ===== Small badge (speed readout, feature chips): a rounded rectangle ===== -->
     <Style x:Key="Pill" TargetType="Border">
-        <Setter Property="CornerRadius" Value="{StaticResource RadiusMd}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource RadiusMd}" />
         <Setter Property="Padding" Value="12,4" />
         <Setter Property="BorderThickness" Value="1" />
         <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}" />
@@ -231,7 +269,7 @@
                 <ControlTemplate TargetType="ListViewItem">
                     <Grid>
                         <ContentPresenter />
-                        <Border x:Name="KeyboardRing" Margin="0,0,0,8" CornerRadius="10" BorderThickness="2"
+                        <Border x:Name="KeyboardRing" Margin="{DynamicResource DownloadCardGap}" CornerRadius="{DynamicResource CardRadius}" BorderThickness="2"
                                 BorderBrush="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed"
                                 IsHitTestVisible="False" />
                     </Grid>

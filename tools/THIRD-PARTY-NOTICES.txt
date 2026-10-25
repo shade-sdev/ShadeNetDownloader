@@ -30,4 +30,10 @@ Microsoft.Extensions.* (Hosting, Logging, ...)     MIT        https://github.com
 Microsoft.Data.Sqlite and SQLitePCLRaw             MIT        https://github.com/dotnet/efcore , https://github.com/ericsink/SQLitePCL.raw
 SQLite                                             Public domain   https://sqlite.org
 
+Fonts inside ShadeNet Downloader
+--------------------------------
+
+Lexend (Bold), for the ShadeNet wordmark   SIL Open Font License 1.1   https://github.com/googlefonts/lexend
+    Copyright 2018 The Lexend Project Authors. The licence text is in Assets\Fonts\OFL.txt next to the program.
+
 The browser extension (browser\chromium) uses no third-party code.

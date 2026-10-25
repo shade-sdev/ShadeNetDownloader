@@ -27,6 +27,9 @@ public sealed class HlsJobData
 
     public string? AudioUrl { get; set; }
 
+    /// <summary>The addresses the browser's player loaded the master's playlists from (see <see cref="HlsChoice.AsPlayed"/>).</summary>
+    public List<string>? Played { get; set; }
+
     /// <summary>The length of a direct download in seconds.</summary>
     public double Seconds { get; set; }
 

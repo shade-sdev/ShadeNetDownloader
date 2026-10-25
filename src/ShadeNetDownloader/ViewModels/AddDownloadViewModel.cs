@@ -101,6 +101,9 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
     /// <summary>The sound's own playlist when the page's player asked for picture and sound separately (sent by the extension).</summary>
     string? SoundPlaylist => _capture is { Source: "media", AudioUrl: { Length: > 0 } sound } && Links.Count > 0 && IsCapturedLink(Links[0]) ? sound : null;
 
+    /// <summary>The addresses the browser's player loaded the captured list of qualities' playlists from (it may add a key of its own).</summary>
+    IReadOnlyList<string>? PlayedPlaylists => _capture is { Source: "media", Played: { Count: > 0 } played } && Links.Count > 0 && IsCapturedLink(Links[0]) ? played : null;
+
     public ObservableCollection<QualityOption> Qualities { get; } = new();
 
     [ObservableProperty] QualityOption? _selectedQuality;
@@ -643,7 +646,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             Mode = mode,
             Stream = single && _direct != null ? _direct
                 : source != null ? SelectedQuality!.Choice
-                : single && IsStream ? (SelectedQuality?.Choice ?? new StreamChoice()) with { Subtitles = IncludeSubtitles, EmbedSubtitles = IncludeSubtitles && EmbedSubtitles, AudioUrl = SoundPlaylist }
+                : single && IsStream ? (SelectedQuality?.Choice ?? new StreamChoice()) with { Subtitles = IncludeSubtitles, EmbedSubtitles = IncludeSubtitles && EmbedSubtitles, AudioUrl = SoundPlaylist, Played = PlayedPlaylists }
                 : !single && DownloadManager.IsStreamAddress(url) ? new StreamChoice() : null,
         }, single && !IsStream ? _probe : null)).ToList();
     }

@@ -26,6 +26,9 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     /// <summary>A video stream (HLS): pieces instead of byte ranges, no connection map.</summary>
     public bool IsStream => Job.Kind == DownloadKind.Hls;
     public DateTimeOffset CreatedAt => Job.CreatedAt;
+
+    /// <summary>When the card was added to the list, as a counter (the later, the higher): breaks ties when sorting.</summary>
+    internal long Sequence { get; set; }
     public string Host { get; }
     public string Url => Job.Url;
     public ImageSource? Icon => FileIconCache.Get(FileName);
@@ -52,6 +55,12 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     public bool IsRecording => IsLive && State == DownloadState.Downloading;
 
     partial void OnIsLiveChanged(bool value) => OnPropertyChanged(nameof(IsRecording));
+
+    /// <summary>Just added to the list: the card slides in (for a moment, then false).</summary>
+    [ObservableProperty] bool _isNew;
+
+    /// <summary>Just finished: its label pops (for a moment, then false).</summary>
+    [ObservableProperty] bool _justCompleted;
 
     /// <summary>This card's details are open in the drawer (the card is marked in the list).</summary>
     [ObservableProperty] bool _isDetailsTarget;

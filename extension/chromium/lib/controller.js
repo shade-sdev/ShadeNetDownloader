@@ -322,8 +322,9 @@ export class Controller {
   /**
    * The extension is loaded from the app's own folder, which an app update replaces, but the browser keeps running the copy it
    * loaded until the extension is reloaded or the browser restarts. The app says its version on every connection: when it is not
-   * the one seen last time, the app was updated, and the extension reloads itself once to run the new files. The new version is
-   * stored first (so it cannot reload again for the same one), and the reload waits until no hand-over is under way.
+   * the one seen last time, the app was updated, and the extension reloads itself once to run the new files. The reload waits until
+   * no hand-over is under way; the new version is stored just before it (so it cannot reload again for the same one), not when it
+   * is noticed: a service worker stopped in between would otherwise never reload for that version.
    */
   async noticeAppVersion(version) {
     if (this.reloadScheduled) return;
@@ -335,22 +336,33 @@ export class Controller {
     }
 
     if (seen === version) return;
-    try {
-      await this.chrome.storage.local.set({ appVersion: version });
-    } catch {
+    const remember = async () => {
+      try {
+        await this.chrome.storage.local.set({ appVersion: version });
+        return true;
+      } catch {
+        return false;   // nothing can be remembered: never reload (it could do so on every connection)
+      }
+    };
+
+    if (!seen) {
+      await remember();   // the first app this extension meets: nothing was updated
       return;
     }
 
-    if (!seen) return;   // the first app this extension meets: nothing was updated
     this.reloadScheduled = true;
     this.trace(`the app was updated (${seen} -> ${version}): the extension reloads to run its new files`);
     let quiet = 0;
-    const tryReload = () => {
+    const tryReload = async () => {
       // a hand-over waiting for its answer, or the browser download it may still cancel, is let finish first
       const busy = (this.link?.pending?.size ?? 0) > 0 || (this.handingOver ?? 0) > 0;
       quiet = busy ? 0 : quiet + 1;
-      if (quiet >= 2) this.chrome.runtime?.reload?.();
-      else this.timers.setTimeout(tryReload, 3000);
+      if (quiet < 2) {
+        this.timers.setTimeout(tryReload, 3000);
+        return;
+      }
+      if (await remember()) this.chrome.runtime?.reload?.();
+      else this.reloadScheduled = false;
     };
     this.timers.setTimeout(tryReload, 3000);
   }
@@ -526,7 +538,7 @@ export class Controller {
   // ---- shared -------------------------------------------------------------------------------------------------
 
   /** Everything the app needs to repeat the request: the cookies and headers the site saw, the page, the agent. */
-  async describe({ url, lookupUrl, originalUrl, referrer, referrerFallback, fileName, mimeType, size, source, audioUrl, audioSize, duration }) {
+  async describe({ url, lookupUrl, originalUrl, referrer, referrerFallback, fileName, mimeType, size, source, audioUrl, audioSize, duration, played }) {
     const recorded = this.recorder?.lookup(lookupUrl ?? url);
     let cookies = headerValue(recorded, 'cookie');
     if (!cookies) {
@@ -549,6 +561,7 @@ export class Controller {
       audioUrl,
       audioSize,
       duration,
+      played,
     });
   }
 
@@ -691,7 +704,8 @@ export class Controller {
         const title = v.title ? cleanTitle(v.title) : name;
         if (address) {
           add(address, title, false, v.live);
-        } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && /^https?:\/\//i.test(frameUrl)) {
+        } else if (!embedded && !isPageSite(frameUrl, this.extraSites) && !isVideoPage(frameUrl) && /^https?:\/\//i.test(frameUrl)) {
+          // (a YouTube watch page is already listed above under the tab's own address; its player frame may spell that address differently)
           // a site yt-dlp is not known for, and nothing on the network that names the video: the frame's own page is the one thing
           // left to try. It may not work; the button says so, and the dialog explains if yt-dlp cannot read it.
           add(frameUrl, title, true);
@@ -740,8 +754,13 @@ export class Controller {
 
     // pages ShadeNet asks yt-dlp about: a YouTube page (the player's own requests cannot be used any more), a YouTube player
     // embedded in another page, and videos whose picture comes through a buffer (Facebook, Instagram ...: no address at all)
-    const pages = this.pageItems(tab, name, items.length > 0 || this.media.list(tab.id).length > 0);
-    for (const page of pages.reverse()) items.unshift(page);
+    // The tab's own video page leads (a YouTube watch page). A player embedded in another page (a trailer beside the film, say)
+    // follows the streams and files that page's own player loaded: those are the video being watched.
+    const others = items.length > 0 || this.media.list(tab.id).length > 0;
+    const pages = this.pageItems(tab, name, others);
+    const leads = (page) => !others || page.url === tab.url;
+    for (const page of pages.filter(leads).reverse()) items.unshift(page);
+    items.push(...pages.filter((page) => !leads(page)).map((page) => ({ ...page, embedded: true })));
 
     // picture and sound the page's player is fetching as files (some other sites)
     const playing = this.tracks.current(tab.id);
@@ -817,7 +836,8 @@ export class Controller {
       const referrerFallback = this.playerPage(tab, this.media.get(tab.id, url)?.referrer) || tab.url;
       const audioUrl = (await this.itemsFor(tab)).find((i) => i.url === url)?.audioUrl;   // the sound's own playlist, when it has one
       const recording = this.media.get(tab.id, url)?.kind === 'record';   // a live FLV pull: the app records it with ffmpeg
-      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl });
+      const played = this.media.get(tab.id, url)?.played;   // a list of qualities: where the player loaded its playlists (with its own key, perhaps)
+      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl, played });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`stream ${url} sent: accepted=${result?.accepted} reason=${result?.reason}`);
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');

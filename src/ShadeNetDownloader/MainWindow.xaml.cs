@@ -4,6 +4,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using ShadeNetDownloader.Services;
 using ShadeNetDownloader.Services.Tray;
 using ShadeNetDownloader.Util;
@@ -22,7 +24,7 @@ public partial class MainWindow : FluentWindow
     readonly AppController _app;
 
     public MainWindow(MainViewModel vm, SettingsService settings, AppThemeService theme,
-        IContentDialogService dialogs, IDialogService dialogService, ToastService toasts, AppController app)
+        IContentDialogService dialogs, IDialogService dialogService, ToastService toasts, AppController app, AppIconService icons)
     {
         _vm = vm;
         _settings = settings;
@@ -35,11 +37,35 @@ public partial class MainWindow : FluentWindow
 
         dialogs.SetDialogHost(DialogHost);
 
+        // (the title bar's left slot is placed by WPF-UI: measured once everything is laid out, and again when the sidebar changes)
+        Loaded += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);
+        Sidebar.SizeChanged += (_, _) => AlignTitleBar();
+        Sidebar.Width = vm.SidebarWidth.Value;
+        ShowPage(vm.CurrentPage);
+        // the settings page is the heaviest: it is made while nothing else happens after start-up, so its first opening is instant
+        Loaded += (_, _) => Dispatcher.BeginInvoke(() => Prepare(vm.SettingsPage), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.IsSidebarExpanded)) AnimateSidebar();
+            else if (e.PropertyName == nameof(MainViewModel.CurrentPage))
+            {
+                ShowPage(vm.CurrentPage);
+                Animate.FadeSlideIn(PageHost, 14);
+            }
+        };
+        StateChanged += (_, _) => Dispatcher.BeginInvoke(AlignTitleBar, System.Windows.Threading.DispatcherPriority.Loaded);   // (maximised, the slot moves)
+
         // Window position/size from last time (only if it still fits on a screen).
         RestoreGeometry(settings.Current.Window);
 
+        BackgroundLayerHost.DataContext = theme.Layer;
+        BrandLogo.DataContext = icons;
+        icons.Attach(this);
+        icons.Apply(settings.Current.AppIcon);
+        theme.Switching += CrossfadeTheme;
         theme.Attach(this);
-        theme.Apply(settings.Current.Theme);
+        theme.Apply(settings.Current.Theme, settings.Current.Appearance);
+        theme.ApplyLayout(settings.Current.Layout);
 
         // The limit flyout sits above its button with the right edges aligned (the button is at the window's right edge,
         // so a centred popup would hang outside the window). 14 = the transparent margin around the popup's card.
@@ -58,7 +84,107 @@ public partial class MainWindow : FluentWindow
             Key.OemComma, ModifierKeys.Control));
     }
 
-    void OnThemeClick(object sender, RoutedEventArgs e) => _vm.SettingsPage.CycleTheme();
+    void OnThemeClick(object sender, RoutedEventArgs e)
+    {
+        Animate.Pop(ThemeButton, 1.15);
+        _vm.SettingsPage.CycleTheme();
+    }
+
+    /// <summary>
+    /// The search box starts where the content does: the brand column of the title bar is as wide as the sidebar, less where
+    /// the title bar's left slot begins (WPF-UI places it a little in from the window's edge).
+    /// </summary>
+    void AlignTitleBar()
+    {
+        if (!TitleBarHeader.IsLoaded || !Sidebar.IsLoaded) return;
+        // (measured inside the zoomed content, so the width is in the same units as the column it sets)
+        var slot = TitleBarHeader.TranslatePoint(new Point(0, 0), Root).X;
+        var content = Sidebar.TranslatePoint(new Point(Sidebar.ActualWidth, 0), Root).X;
+        var width = Math.Max(0, content - slot);
+        if (Math.Abs(BrandColumn.Width.Value - width) > 0.5) BrandColumn.Width = new GridLength(width);
+    }
+
+    readonly Dictionary<object, FrameworkElement> _pages = new();
+
+    /// <summary>The view of a page, made the first time and kept (a page made again on every visit made switching slow).</summary>
+    FrameworkElement? PageFor(object? page)
+    {
+        if (page == null) return null;
+        if (_pages.TryGetValue(page, out var view)) return view;
+        view = page switch
+        {
+            DownloadsViewModel => new Views.DownloadsView(),
+            SettingsViewModel => new Views.SettingsView(),
+            _ => null,
+        };
+        if (view == null) return null;
+        view.DataContext = page;
+        _pages[page] = view;
+        return view;
+    }
+
+    void ShowPage(object? page) => PageHost.Content = PageFor(page);
+
+    /// <summary>A page is made and laid out once off screen, at the size it will show at: its lists and controls are built then.</summary>
+    void Prepare(object? page)
+    {
+        if (PageFor(page) is not { Parent: null } view || ReferenceEquals(PageHost.Content, view)) return;
+        var size = PageHost.RenderSize;
+        if (size.Width < 1 || size.Height < 1) return;
+        view.Measure(size);
+        view.Arrange(new Rect(size));
+    }
+
+    /// <summary>The sidebar glides to its new width; the brand fades back in beside it when the names return.</summary>
+    void AnimateSidebar()
+    {
+        Animate.To(Sidebar, WidthProperty, _vm.SidebarWidth.Value, Animate.Base);
+        if (_vm.IsSidebarExpanded) Animate.FadeSlideIn(Brand, offsetY: 0, offsetX: -10);
+    }
+
+    bool _crossfading;
+
+    /// <summary>
+    /// The theme is about to change: a picture of the window as it looks now is laid over it and fades out, so light and dark,
+    /// a preset or an imported theme blend into each other instead of jumping.
+    /// </summary>
+    void CrossfadeTheme()
+    {
+        if (!Animate.Enabled || !IsLoaded || !IsVisible || _crossfading || Root.ActualWidth < 1 || Root.ActualHeight < 1) return;
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(Root);
+            var picture = new RenderTargetBitmap(
+                (int)Math.Ceiling(Root.ActualWidth * dpi.DpiScaleX), (int)Math.Ceiling(Root.ActualHeight * dpi.DpiScaleY),
+                dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+            picture.Render(Root);
+            picture.Freeze();
+            ThemeSnapshot.Source = picture;
+        }
+        catch (Exception ex) when (ex is OutOfMemoryException or ArgumentException or InvalidOperationException)
+        {
+            return;   // no picture: the theme simply changes
+        }
+
+        _crossfading = true;
+        ThemeSnapshot.Opacity = 1;
+        ThemeSnapshot.Visibility = Visibility.Visible;
+        // (once the new look has been drawn under it)
+        Dispatcher.BeginInvoke(() => Animate.To(ThemeSnapshot, OpacityProperty, 0, Animate.Slow, done: () =>
+        {
+            ThemeSnapshot.Visibility = Visibility.Collapsed;
+            ThemeSnapshot.Source = null;
+            _crossfading = false;
+        }), System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    /// <summary>The brand area moves the window (and a double click maximises it), as the rest of the title bar does.</summary>
+    void OnBrandMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2) WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        else DragMove();
+        e.Handled = true;
+    }
 
     long _limitPopupClosedAt;
 

@@ -29,6 +29,9 @@ public sealed partial class DownloadsViewModel : ObservableObject
     readonly DownloadManager _manager;
     readonly ToastService _toasts;
     readonly IBrowserBridge? _bridge;
+    readonly SettingsService? _settings;
+    readonly ListSortSettings _sort;
+    long _sequence;
     readonly Dispatcher _ui;
     readonly DispatcherTimer _tick;
     readonly ConcurrentDictionary<Guid, JobSnapshot> _pending = new();
@@ -38,11 +41,13 @@ public sealed partial class DownloadsViewModel : ObservableObject
     NavItem _filter = new(NavKind.All, "All downloads", Wpf.Ui.Controls.SymbolRegular.ArrowDownload24);
     string _search = "";
 
-    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null)
+    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null, SettingsService? settings = null)
     {
         _manager = manager;
         _toasts = toasts;
         _bridge = bridge;
+        _settings = settings;
+        _sort = settings?.Current.Sort ?? new ListSortSettings();
         _ui = Dispatcher.CurrentDispatcher;
 
         Items = new ObservableCollection<DownloadItemViewModel>();
@@ -52,6 +57,9 @@ public sealed partial class DownloadsViewModel : ObservableObject
         View.LiveFilteringProperties.Add(nameof(DownloadItemViewModel.IsPendingRemoval));
         View.IsLiveSorting = true;
         View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.Priority));
+        View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.FileName));
+        View.LiveSortingProperties.Add(nameof(DownloadItemViewModel.TotalBytes));
+        ApplySort();
         ((INotifyCollectionChanged)View).CollectionChanged += (_, _) => UpdateTexts();
 
         foreach (var job in _manager.Jobs.OrderBy(j => j.CreatedAt)) AddItem(job);
@@ -66,6 +74,26 @@ public sealed partial class DownloadsViewModel : ObservableObject
         _tick.Start();
 
         UpdateTexts();
+        _ready = true;
+    }
+
+    bool _ready;   // the cards there at start-up are not "new"
+
+    /// <summary>The list shows other downloads, or in another order (the view slides the list in again).</summary>
+    public event Action? ListReshuffled;
+
+    /// <summary>Sets a card's flag for a moment (what the card animates on), then clears it. Nothing when motion is off.</summary>
+    void Flash(DownloadItemViewModel item, Action<DownloadItemViewModel, bool> set, TimeSpan forHowLong)
+    {
+        if (!ShadeNetDownloader.Util.Animate.Enabled) return;
+        set(item, true);
+        var timer = new DispatcherTimer(DispatcherPriority.Background, _ui) { Interval = forHowLong };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            set(item, false);
+        };
+        timer.Start();
     }
 
     /// <summary>Raised when cards are hidden for removal or brought back by Undo (the shell recounts its badges).</summary>
@@ -106,20 +134,98 @@ public sealed partial class DownloadsViewModel : ObservableObject
     {
         _filter = item;
 
-        // The queue is shown in the order it will run; every other list keeps "newest first".
-        using (View.DeferRefresh())
-        {
-            View.SortDescriptions.Clear();
-            if (item.Kind == NavKind.Queued)
-            {
-                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.Priority), ListSortDirection.Descending));
-                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.CreatedAt), ListSortDirection.Ascending));
-            }
-        }
-
+        ApplySort();
         OnPropertyChanged(nameof(IsQueueView));
         View.Refresh();
         UpdateTexts();
+        ListReshuffled?.Invoke();
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Sorting
+    // ------------------------------------------------------------------------------------------------------------
+
+    /// <summary>The queue is shown in the order it will run; every other list in the order the user chose.</summary>
+    void ApplySort()
+    {
+        using (View.DeferRefresh())
+        {
+            if (_filter.Kind == NavKind.Queued)
+            {
+                View.CustomSort = null;
+                View.SortDescriptions.Clear();
+                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.Priority), ListSortDirection.Descending));
+                View.SortDescriptions.Add(new SortDescription(nameof(DownloadItemViewModel.CreatedAt), ListSortDirection.Ascending));
+            }
+            else
+            {
+                View.CustomSort = new DownloadSortComparer(_sort.By, _sort.Descending);   // (replaces any sort descriptions)
+            }
+        }
+    }
+
+    public DownloadSortKey SortBy => _sort.By;
+    public bool SortDescending => _sort.Descending;
+    public bool SortAscending => !_sort.Descending;
+    public bool IsSortByDate => SortBy == DownloadSortKey.Date;
+    public bool IsSortByName => SortBy == DownloadSortKey.Name;
+    public bool IsSortByType => SortBy == DownloadSortKey.FileType;
+    public bool IsSortBySize => SortBy == DownloadSortKey.Size;
+
+    public string SortLabel => SortBy switch
+    {
+        DownloadSortKey.Name => "Name",
+        DownloadSortKey.FileType => "File type",
+        DownloadSortKey.Size => "Size",
+        _ => "Date added",
+    };
+
+    /// <summary>What "ascending" means for the order chosen.</summary>
+    public string AscendingLabel => SortBy switch
+    {
+        DownloadSortKey.Size => "Smallest first",
+        DownloadSortKey.Date => "Oldest first",
+        _ => "A to Z",
+    };
+
+    public string DescendingLabel => SortBy switch
+    {
+        DownloadSortKey.Size => "Largest first",
+        DownloadSortKey.Date => "Newest first",
+        _ => "Z to A",
+    };
+
+    /// <summary>Sorts by another key, in the direction most useful for it (names A to Z, the largest and the newest first).</summary>
+    [RelayCommand]
+    void SortByKey(DownloadSortKey key)
+    {
+        if (key == _sort.By) return;
+        _sort.By = key;
+        _sort.Descending = key is DownloadSortKey.Size or DownloadSortKey.Date;
+        SortChanged();
+    }
+
+    [RelayCommand]
+    void SetAscending() => SetDirection(false);
+
+    [RelayCommand]
+    void SetDescending() => SetDirection(true);
+
+    void SetDirection(bool descending)
+    {
+        if (descending == _sort.Descending) return;
+        _sort.Descending = descending;
+        SortChanged();
+    }
+
+    void SortChanged()
+    {
+        ApplySort();
+        ListReshuffled?.Invoke();
+        foreach (var name in new[] { nameof(SortBy), nameof(SortDescending), nameof(SortAscending), nameof(IsSortByDate), nameof(IsSortByName), nameof(IsSortByType),
+                     nameof(IsSortBySize), nameof(SortLabel), nameof(AscendingLabel), nameof(DescendingLabel) })
+            OnPropertyChanged(name);
+        _settings?.Save();
     }
 
     /// <summary>The Queued list is showing (it gets the start/stop button and the order controls).</summary>
@@ -216,7 +322,9 @@ public sealed partial class DownloadsViewModel : ObservableObject
         if (_byId.ContainsKey(job.Id)) return;
         var item = new DownloadItemViewModel(job, _manager.Snapshot(job), this);
         _byId[job.Id] = item;
+        item.Sequence = ++_sequence;   // (the order cards were added in breaks ties when sorting)
         Items.Insert(0, item); // newest on top
+        if (_ready) Flash(item, (i, on) => i.IsNew = on, TimeSpan.FromMilliseconds(1200));
     }
 
     void DropItem(Guid id)
@@ -279,8 +387,14 @@ public sealed partial class DownloadsViewModel : ObservableObject
         }
     }
 
-    void OnCompleted(DownloadJob job) =>
+    void OnCompleted(DownloadJob job)
+    {
         _toasts.Show($"{job.FileName} finished", ToastKind.Success, "Open", () => OpenPath(job.TargetPath));
+        _ui.BeginInvoke(() =>
+        {
+            if (_byId.TryGetValue(job.Id, out var item)) Flash(item, (i, on) => i.JustCompleted = on, TimeSpan.FromMilliseconds(1500));
+        });
+    }
 
     // ------------------------------------------------------------------------------------------------------------
     // Selection-aware actions
@@ -290,10 +404,52 @@ public sealed partial class DownloadsViewModel : ObservableObject
     public void SetSelection(IEnumerable<DownloadItemViewModel> selected)
     {
         _selection = selected.ToList();
+        SelectedCount = _selection.Count;
 
         // an open drawer shows whatever single download is selected now
         if (Details != null && _selection.Count == 1 && !ReferenceEquals(_selection[0], Details.Item)) OpenDetails(_selection[0]);
     }
+
+    /// <summary>How many downloads are selected (the selection bar shows while any are).</summary>
+    [ObservableProperty] int _selectedCount;
+
+    public bool HasSelection => SelectedCount > 0;
+    public string SelectionText => SelectedCount == 1 ? "1 selected" : $"{SelectedCount} selected";
+
+    partial void OnSelectedCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionText));
+    }
+
+    // the selection bar: each acts on every selected download it applies to (pausing what runs, resuming what is paused ...)
+
+    [RelayCommand]
+    void PauseSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanPause)) _manager.Pause(i.Id);
+    }
+
+    [RelayCommand]
+    void ResumeSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanResume)) _manager.Start(i.Id);
+    }
+
+    [RelayCommand]
+    void QueueSelected()
+    {
+        foreach (var i in _selection.Where(i => i.CanQueue)) _manager.Enqueue(i.Id);
+    }
+
+    [RelayCommand]
+    void CopySelectedLinks()
+    {
+        if (_selection.Count > 0) CopyLinks(_selection[0]);
+    }
+
+    [RelayCommand]
+    void DeleteSelected() => RemoveWithUndo(_selection.ToList(), deleteFiles: true);
 
     /// <summary>The cards an action applies to: the whole selection if the clicked card is in it, else just that card.</summary>
     List<DownloadItemViewModel> Targets(DownloadItemViewModel clicked) =>
@@ -479,7 +635,8 @@ public sealed partial class DownloadsViewModel : ObservableObject
     public void RemoveSelectionOf(DownloadItemViewModel clicked, bool deleteFiles) =>
         RemoveWithUndo(Targets(clicked), deleteFiles);
 
-    /// <summary>Delete key.</summary>
+    /// <summary>Delete key, and Remove on the selection bar.</summary>
+    [RelayCommand]
     public void RemoveSelected() => RemoveWithUndo(_selection.ToList(), deleteFiles: false);
 
     [RelayCommand]

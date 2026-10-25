@@ -294,9 +294,21 @@
     return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${rest}` : `${m}:${rest}`;
   }
 
+  /** "YouTube", or the site's host name. */
+  function siteOf(url) {
+    try {
+      const host = new URL(url).hostname.replace(/^(www|m)\./, '');
+      return /(^|\.)youtube(-nocookie)?\.com$|^youtu\.be$/.test(host) ? 'YouTube' : host;
+    } catch {
+      return 'another site';
+    }
+  }
+
   function facts(item) {
     const parts = [];
-    if (item.kind === 'page') parts.push(item.guess ? 'not sure ShadeNet can read this site' : 'choose the quality in ShadeNet');
+    if (item.audioOnly) parts.push('sound only');
+    if (item.kind === 'page' && item.embedded) parts.push(`${siteOf(item.url)} player on this page`);   // (a trailer beside the film, say)
+    else if (item.kind === 'page') parts.push(item.guess ? 'not sure ShadeNet can read this site' : 'choose the quality in ShadeNet');
     else if (item.quality) parts.push(item.quality);
     else if (item.maxHeight) parts.push(item.kind === 'file' || item.audioUrl ? `${item.maxHeight}p` : `up to ${item.maxHeight}p`);
     if (item.audioUrl) parts.push('picture + sound');

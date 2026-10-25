@@ -5,6 +5,13 @@
 
 export const HOST_NAME = 'com.shadenet.downloader';
 
+/**
+ * After a connection to the app drops, how long to wait before each look for it again (never starting it). An update closes the
+ * app and opens the new one moments later: looking again soon is what lets the extension notice the new version (and reload
+ * its own files) without waiting for the next download. A closed app costs five quick looks over a few minutes, then none.
+ */
+export const RETURN_LOOKS_MS = [3000, 10000, 30000, 60000, 120000];
+
 export class NativeLink {
   /**
    * @param chromeApi  the `chrome` object (injected so tests can fake it)
@@ -142,6 +149,7 @@ export class NativeLink {
 
   onDisconnect(port) {
     if (port !== this.port) return;
+    const wasConnected = this.connected;
     const reason = this.chrome.runtime.lastError?.message;
     if (reason && !this.lastError && this.lastCode !== 'app-not-running') this.lastError = reason;
     this.port = null;
@@ -155,6 +163,19 @@ export class NativeLink {
 
     this.resolveWaiters(false);
     this.handlers.onStatus?.();
+    if (wasConnected) this.lookForReturn(0);
+  }
+
+  /** Looks for the app again on the {@link RETURN_LOOKS_MS} schedule until it answers (an update brings it back moments later). */
+  lookForReturn(attempt) {
+    this.timers.clearTimeout(this.returnTimer);
+    this.returnTimer = null;
+    if (attempt >= RETURN_LOOKS_MS.length) return;
+    this.returnTimer = this.timers.setTimeout(async () => {
+      this.returnTimer = null;
+      if (this.connected) return;
+      if (!(await this.probe())) this.lookForReturn(attempt + 1);
+    }, RETURN_LOOKS_MS[attempt]);
   }
 
   /** Sends a capture and resolves with the app's `capture-result`; rejects on timeout or disconnect. */

@@ -116,17 +116,31 @@ internal static class HlsClient
 
         if (playlist is HlsMasterPlaylist master)
         {
-            var variants = master.Variants.OrderByDescending(v => v.Height).ThenByDescending(v => v.Bandwidth).ToList();
-
-            // One look at the best quality's own playlist tells the length and whether it is live or protected.
-            var best = HlsChoice.Best(variants);
-            var (mediaText, mediaUrl) = await FetchTextAsync(http, spec with { Url = best.Url.AbsoluteUri }, defaultUserAgent, ct).ConfigureAwait(false);
-            var media = (HlsMediaPlaylist)HlsParser.Parse(mediaText, mediaUrl);
-            var separateAudio = HlsChoice.AudioFor(master, best) != null;
-            return Describe(url, variants, media, separateAudio, name) with
+            // One look at the best quality's own playlist tells the length and whether it is live or protected. That playlist
+            // may be a master of its own (some servers nest them, a CDN's master behind the site's): it is followed, and its
+            // qualities are the ones offered.
+            for (var depth = 0; ; depth++)
             {
-                Subtitles = HlsChoice.SubtitlesFor(master, best).Select(s => s.Name).ToList(),
-            };
+                var variants = master.Variants.OrderByDescending(v => v.Height).ThenByDescending(v => v.Bandwidth).ToList();
+                var best = HlsChoice.Best(variants);
+                var (mediaText, mediaUrl) = await FetchTextAsync(http, spec with { Url = best.Url.AbsoluteUri }, defaultUserAgent, ct).ConfigureAwait(false);
+                switch (HlsParser.Parse(mediaText, mediaUrl))
+                {
+                    case HlsMasterPlaylist inner when depth < HlsChoice.MaxNesting:
+                        master = inner;
+                        continue;
+                    case HlsMasterPlaylist inner:
+                        throw new HlsFormatException(HlsChoice.NoVideoMessage(best.Url, mediaUrl, inner));
+                    case HlsMediaPlaylist media:
+                        var separateAudio = HlsChoice.AudioFor(master, best) != null;
+                        return Describe(url, variants, media, separateAudio, name) with
+                        {
+                            Subtitles = HlsChoice.SubtitlesFor(master, best).Select(s => s.Name).ToList(),
+                        };
+                    default:
+                        throw new HlsFormatException("The stream's list of qualities leads to something that is not a playlist.");
+                }
+            }
         }
 
         return Describe(url, Array.Empty<HlsVariant>(), (HlsMediaPlaylist)playlist, false, name);

@@ -1,0 +1,51 @@
+<UserControl x:Class="ShadeNetDownloader.Controls.ColorPickerButton"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             x:Name="Root">
+
+    <!-- A swatch that opens a small picker: ready-made colours, hue / saturation / brightness (and opacity) and the colour as text. -->
+    <Grid>
+        <Button x:Name="Opener" Click="OnOpen" Width="46" Height="30" Padding="0" Cursor="Hand"
+                ToolTip="Choose a colour" AutomationProperties.Name="Choose a colour" FocusVisualStyle="{x:Null}">
+            <Button.Template>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Frame" CornerRadius="7" Padding="3" BorderThickness="1"
+                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource ControlStrongStrokeColorDefaultBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Frame" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Button.Template>
+            <Grid>
+                <!-- a checkerboard under the colour, so a see-through one reads as see-through -->
+                <Border CornerRadius="4">
+                    <Border.Background>
+                        <DrawingBrush TileMode="Tile" Viewport="0,0,8,8" ViewportUnits="Absolute">
+                            <DrawingBrush.Drawing>
+                                <DrawingGroup>
+                                    <GeometryDrawing Brush="#FFFFFF" Geometry="M0,0 H2 V2 H0Z" />
+                                    <GeometryDrawing Brush="#CCCCCC" Geometry="M0,0 H1 V1 H0Z M1,1 H2 V2 H1Z" />
+                                </DrawingGroup>
+                            </DrawingBrush.Drawing>
+                        </DrawingBrush>
+                    </Border.Background>
+                </Border>
+                <Border x:Name="Swatch" CornerRadius="4" />
+            </Grid>
+        </Button>
+
+        <Popup x:Name="Popup" PlacementTarget="{Binding ElementName=Opener}" Placement="Bottom" VerticalOffset="6"
+               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" Closed="OnClosed">
+            <!-- (its panel, ColorPickerPanel, is made the first time the picker opens: a page of pickers stays light) -->
+        </Popup>
+    </Grid>
+</UserControl>

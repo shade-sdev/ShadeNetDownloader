@@ -1,0 +1,66 @@
+[
+  {
+    "id": "midnight",
+    "name": "Midnight",
+    "small": true
+  },
+  {
+    "id": "sunset",
+    "name": "Sunset",
+    "small": true
+  },
+  {
+    "id": "mint",
+    "name": "Mint",
+    "small": true
+  },
+  {
+    "id": "crimson",
+    "name": "Crimson",
+    "small": true
+  },
+  {
+    "id": "gold",
+    "name": "Gold",
+    "small": true
+  },
+  {
+    "id": "ocean",
+    "name": "Ocean",
+    "small": true
+  },
+  {
+    "id": "onyx",
+    "name": "Onyx",
+    "small": true
+  },
+  {
+    "id": "pearl",
+    "name": "Pearl",
+    "small": true
+  },
+  {
+    "id": "aurora",
+    "name": "Aurora gem"
+  },
+  {
+    "id": "indigo",
+    "name": "Indigo gem"
+  },
+  {
+    "id": "glassv",
+    "name": "Glass V"
+  },
+  {
+    "id": "eclipse",
+    "name": "Eclipse"
+  },
+  {
+    "id": "ribbon",
+    "name": "Ribbon"
+  },
+  {
+    "id": "drop",
+    "name": "Drop"
+  }
+]
