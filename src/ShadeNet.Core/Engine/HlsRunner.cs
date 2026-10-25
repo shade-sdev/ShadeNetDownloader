@@ -260,15 +260,32 @@ internal sealed class HlsRunner : IJobRunner
         if (playlist is HlsMasterPlaylist master)
         {
             // The quality is remembered by height and bit rate, not by address: after a refreshed link the same
-            // qualities may live at other URLs.
-            var variant = Data.Height > 0 || Data.Bandwidth > 0
-                ? HlsChoice.Match(master.Variants, Data.Height, Data.Bandwidth)
-                : HlsChoice.Best(master.Variants);
-            Data.Height = variant.Height;
-            Data.Bandwidth = variant.Bandwidth;
+            // qualities may live at other URLs. A quality may lead to a master of its own (some servers nest them): the
+            // choice is made again there, and its sound and subtitles are the ones used.
+            HlsVariant variant;
+            for (var depth = 0; ; depth++)
+            {
+                variant = Data.Height > 0 || Data.Bandwidth > 0
+                    ? HlsChoice.Match(master.Variants, Data.Height, Data.Bandwidth)
+                    : HlsChoice.Best(master.Variants);
 
-            videoUrl = variant.Url;
-            video = await LoadMediaAsync(http, videoUrl, ct).ConfigureAwait(false);
+                var (text, finalUrl) = await FetchPlaylistAsync(http, variant.Url.AbsoluteUri, ct).ConfigureAwait(false);
+                var next = HlsParser.Parse(text, finalUrl);
+                if (next is HlsMasterPlaylist inner && depth < HlsChoice.MaxNesting)
+                {
+                    master = inner;
+                    continue;
+                }
+
+                video = next as HlsMediaPlaylist
+                        ?? throw new HlsFormatException("The stream's lists of qualities point to one another without ever reaching the video.");
+                break;
+            }
+
+            // (a quality nested in another may say no height of its own: the one chosen keeps what is known)
+            if (variant.Height > 0 || Data.Height == 0) Data.Height = variant.Height;
+            if (variant.Bandwidth > 0 || Data.Bandwidth == 0) Data.Bandwidth = variant.Bandwidth;
+            videoUrl = variant.Url;   // (as the master names it: a live stream's playlist is asked for again at this address)
 
             if (HlsChoice.AudioFor(master, variant, Data.AudioName) is { Url: { } found } rendition)
             {

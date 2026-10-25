@@ -356,6 +356,9 @@ public static class HlsParser
 /// <summary>Which quality to download when the user did not choose.</summary>
 public static class HlsChoice
 {
+    /// <summary>How many masters deep a quality may lead (some servers nest them); deeper is a loop, not a stream.</summary>
+    public const int MaxNesting = 4;
+
     /// <summary>The sharpest picture; the higher bit rate breaks a tie.</summary>
     public static HlsVariant Best(IEnumerable<HlsVariant> variants) =>
         variants.OrderByDescending(v => v.Height).ThenByDescending(v => v.Bandwidth).First();

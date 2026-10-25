@@ -742,6 +742,40 @@ public class HlsDownloadTests
         await Assert.ThrowsAsync<HlsFormatException>(() => m.DescribeStreamAsync(new RequestSpec(server.Url("/page.m3u8"))));
     }
 
+    [Fact]
+    public async Task A_quality_that_leads_to_another_list_of_qualities_is_followed()
+    {
+        // some servers nest masters: the site's master has one "quality", which is the CDN's own master
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        server.AddVod("low", 3);
+        var high = server.AddVod("high", 5);
+        server.Put("/cdn/master.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=500000,RESOLUTION=640x360\n/low/index.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1920x1080\n/high/index.m3u8\n");
+        server.Put("/site/master.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000\n/cdn/master.m3u8\n");
+        var m = Manager(h);
+
+        var info = await m.DescribeStreamAsync(new RequestSpec(server.Url("/site/master.m3u8")));
+        Assert.Equal(new[] { 1080, 360 }, info.Variants.Select(v => v.Height));   // the qualities the inner master offers
+        Assert.Equal(20, info.DurationSeconds);
+
+        var job = AddStream(m, server.Url("/site/master.m3u8"));
+        await Finished(job);
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.Equal(high, File.ReadAllBytes(job.TargetPath));                    // the best quality, through both masters
+    }
+
+    [Fact]
+    public async Task Lists_of_qualities_that_point_to_one_another_for_ever_are_refused()
+    {
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        server.Put("/loop.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000\n/loop.m3u8\n");
+        var m = Manager(h);
+
+        var ex = await Assert.ThrowsAsync<HlsFormatException>(() => m.DescribeStreamAsync(new RequestSpec(server.Url("/loop.m3u8"))));
+        Assert.Contains("without ever reaching the video", ex.Message);
+    }
+
     static byte[] Encrypt(byte[] plain, byte[] key, byte[] iv)
     {
         using var aes = Aes.Create();
