@@ -73,9 +73,9 @@
                         <!-- the app icon chosen in Settings > Appearance (AppIconService.Logo) -->
                         <Image x:Name="BrandLogo" Source="{Binding Logo}" Width="26" Height="26" Margin="14,0,0,0"
                                VerticalAlignment="Center" RenderOptions.BitmapScalingMode="HighQuality" />
-                        <!-- the wordmark: Lexend Bold in the icon's gradient -->
+                        <!-- the wordmark: Lexend Bold, coloured as chosen in Settings > Appearance (plain, accent or gradient) -->
                         <TextBlock Text="ShadeNet" Margin="10,0,0,1" FontSize="16" FontWeight="Bold"
-                                   FontFamily="{StaticResource BrandFont}" Foreground="{StaticResource BrandGradient}"
+                                   FontFamily="{StaticResource BrandFont}" Foreground="{DynamicResource WordmarkBrush}"
                                    VerticalAlignment="Center" TextOptions.TextFormattingMode="Ideal" />
                     </StackPanel>
 

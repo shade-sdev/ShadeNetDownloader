@@ -516,6 +516,17 @@ public enum Roundness
     Round,
 }
 
+/// <summary>How the name in the title bar is coloured.</summary>
+public enum WordmarkStyle
+{
+    /// <summary>The theme's text colour.</summary>
+    Plain,
+    /// <summary>The accent colour.</summary>
+    Accent,
+    /// <summary>The icon's gradient.</summary>
+    Gradient,
+}
+
 /// <summary>Whether things move: like Windows ("Animation effects"), always, or never.</summary>
 public enum MotionLevel
 {
@@ -539,6 +550,7 @@ public sealed class LayoutSettings
     public ListDensity Density { get; set; } = ListDensity.Comfortable;
     public Roundness Corners { get; set; } = Roundness.Default;
     public MotionLevel Motion { get; set; } = MotionLevel.System;
+    public WordmarkStyle Wordmark { get; set; } = WordmarkStyle.Plain;
 
     public const double MinZoom = 0.8;
     public const double MaxZoom = 1.5;
@@ -554,6 +566,7 @@ public sealed class LayoutSettings
         if (!Enum.IsDefined(Density)) Density = ListDensity.Comfortable;
         if (!Enum.IsDefined(Corners)) Corners = Roundness.Default;
         if (!Enum.IsDefined(Motion)) Motion = MotionLevel.System;
+        if (!Enum.IsDefined(Wordmark)) Wordmark = WordmarkStyle.Plain;
     }
 
     /// <summary>How much corners are scaled from the theme's own.</summary>

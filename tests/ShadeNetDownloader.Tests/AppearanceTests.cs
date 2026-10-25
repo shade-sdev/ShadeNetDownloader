@@ -518,6 +518,23 @@ public class AppearanceTests
     }
 
     [Fact]
+    public void The_name_in_the_title_bar_is_plain_unless_chosen_otherwise()
+    {
+        var (page, theme, settings, _, dir) = Page();
+        using var _d = dir;
+        Assert.True(page.IsWordmarkPlain);
+
+        page.IsWordmarkGradient = true;
+        Assert.Equal(WordmarkStyle.Gradient, theme.LayoutCalls.Last().Wordmark);
+        page.IsWordmarkAccent = true;
+        Assert.Equal(WordmarkStyle.Accent, settings.Current.Layout.Wordmark);
+
+        var odd = new LayoutSettings { Wordmark = (WordmarkStyle)7 };
+        odd.Normalize();
+        Assert.Equal(WordmarkStyle.Plain, odd.Wordmark);
+    }
+
+    [Fact]
     public void A_preset_never_changes_text_and_layout_and_layout_never_makes_a_look_custom()
     {
         var (page, _, settings, _, dir) = Page();

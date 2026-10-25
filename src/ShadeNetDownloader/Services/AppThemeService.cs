@@ -205,6 +205,7 @@ public sealed class AppThemeService : IThemeApplier
         }
 
         Layer.Update(_appearance);
+        UpdateWordmark();
 
         Applied?.Invoke();
     }
@@ -265,7 +266,28 @@ public sealed class AppThemeService : IThemeApplier
         resources["OverlayCornerRadius"] = new CornerRadius(8 * f);
 
         ApplyMotion(l.Motion);
+        _wordmark = l.Wordmark;
+        UpdateWordmark();
         Applied?.Invoke();
+    }
+
+    WordmarkStyle _wordmark = WordmarkStyle.Plain;
+
+    /// <summary>
+    /// The name in the title bar takes the theme's text colour, the accent or the icon's gradient. The first two are read
+    /// again whenever light and dark or the accent change (this runs after each of them).
+    /// </summary>
+    void UpdateWordmark()
+    {
+        var resources = Application.Current?.Resources;
+        if (resources == null) return;
+        var key = _wordmark switch
+        {
+            WordmarkStyle.Accent => "AccentTextFillColorPrimaryBrush",
+            WordmarkStyle.Gradient => "BrandGradient",
+            _ => "TextFillColorPrimaryBrush",
+        };
+        if (Application.Current!.TryFindResource(key) is Brush brush) resources["WordmarkBrush"] = brush;
     }
 
     /// <summary>

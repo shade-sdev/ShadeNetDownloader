@@ -742,6 +742,17 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         ApplyLayout();
     }
 
+    public bool IsWordmarkPlain { get => Layout.Wordmark == WordmarkStyle.Plain; set { if (value) SetWordmark(WordmarkStyle.Plain); } }
+    public bool IsWordmarkAccent { get => Layout.Wordmark == WordmarkStyle.Accent; set { if (value) SetWordmark(WordmarkStyle.Accent); } }
+    public bool IsWordmarkGradient { get => Layout.Wordmark == WordmarkStyle.Gradient; set { if (value) SetWordmark(WordmarkStyle.Gradient); } }
+
+    void SetWordmark(WordmarkStyle style)
+    {
+        if (Layout.Wordmark == style) return;
+        Layout.Wordmark = style;
+        ApplyLayout();
+    }
+
     [RelayCommand]
     void ResetLayout()
     {
@@ -836,6 +847,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                          nameof(SelectedFont), nameof(ZoomPercent), nameof(IsCompact), nameof(IsComfortable), nameof(IsSpacious),
                          nameof(IsSquare), nameof(IsSubtle), nameof(IsDefaultCorners), nameof(IsRound),
                          nameof(IsMotionSystem), nameof(IsMotionOn), nameof(IsMotionOff),
+                         nameof(IsWordmarkPlain), nameof(IsWordmarkAccent), nameof(IsWordmarkGradient),
                      })
                 OnPropertyChanged(name);
 

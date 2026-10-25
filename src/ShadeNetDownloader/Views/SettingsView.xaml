@@ -1189,6 +1189,25 @@
                             </Border>
                         </ui:CardControl>
 
+                        <ui:CardControl Icon="{ui:SymbolIcon TextT24}" Margin="0,0,0,8">
+                            <ui:CardControl.Header>
+                                <StackPanel>
+                                    <TextBlock Text="Name in the title bar" FontSize="14" />
+                                    <TextBlock Style="{StaticResource CardHint}" Text="The text colour, your accent colour, or the icon's gradient." />
+                                </StackPanel>
+                            </ui:CardControl.Header>
+                            <Border CornerRadius="9" Padding="3" Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton GroupName="wordmark" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Plain"
+                                                 IsChecked="{Binding IsWordmarkPlain, Mode=TwoWay}" />
+                                    <RadioButton GroupName="wordmark" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Accent"
+                                                 IsChecked="{Binding IsWordmarkAccent, Mode=TwoWay}" />
+                                    <RadioButton GroupName="wordmark" Style="{StaticResource SegmentRadio}" MinWidth="64" Content="Gradient"
+                                                 IsChecked="{Binding IsWordmarkGradient, Mode=TwoWay}" />
+                                </StackPanel>
+                            </Border>
+                        </ui:CardControl>
+
                         <ui:CardControl Icon="{ui:SymbolIcon Sparkle24}" Margin="0,0,0,8">
                             <ui:CardControl.Header>
                                 <StackPanel>
