@@ -278,7 +278,7 @@ internal sealed class HlsRunner : IJobRunner
                 }
 
                 video = next as HlsMediaPlaylist
-                        ?? throw new HlsFormatException("The stream's lists of qualities point to one another without ever reaching the video.");
+                        ?? throw new HlsFormatException(HlsChoice.NoVideoMessage(variant.Url, finalUrl, (HlsMasterPlaylist)next));
                 break;
             }
 

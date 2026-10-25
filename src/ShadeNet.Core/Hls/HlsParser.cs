@@ -359,6 +359,24 @@ public static class HlsChoice
     /// <summary>How many masters deep a quality may lead (some servers nest them); deeper is a loop, not a stream.</summary>
     public const int MaxNesting = 4;
 
+    /// <summary>
+    /// Why a quality never led to the video: the address asked for, where the answer came from (when the server sent ShadeNet
+    /// elsewhere) and where that answer leads, by file name, so the message says whether the server keeps answering with
+    /// the same list or sends ShadeNet back to the start.
+    /// </summary>
+    public static string NoVideoMessage(Uri asked, Uri answeredFrom, HlsMasterPlaylist answer)
+    {
+        var redirected = !string.Equals(Name(asked), Name(answeredFrom), StringComparison.Ordinal)
+            ? $" (the server sent ShadeNet to {Name(answeredFrom)} instead)"
+            : "";
+        var next = answer.Variants.Count > 0 ? Name(Best(answer.Variants).Url) : "?";
+        return "The stream's lists of qualities point to one another without ever reaching the video: asking for "
+               + $"{Name(asked)} gave another list of qualities{redirected}, which leads to {next}. Your browser may be getting "
+               + "a different answer from this server than ShadeNet does.";
+
+        static string Name(Uri u) => u.Segments.Length > 0 && u.Segments[^1].Length > 0 ? Uri.UnescapeDataString(u.Segments[^1]) : u.Host;
+    }
+
     /// <summary>The sharpest picture; the higher bit rate breaks a tie.</summary>
     public static HlsVariant Best(IEnumerable<HlsVariant> variants) =>
         variants.OrderByDescending(v => v.Height).ThenByDescending(v => v.Bandwidth).First();

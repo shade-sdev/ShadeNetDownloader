@@ -129,6 +129,8 @@ internal static class HlsClient
                     case HlsMasterPlaylist inner when depth < HlsChoice.MaxNesting:
                         master = inner;
                         continue;
+                    case HlsMasterPlaylist inner:
+                        throw new HlsFormatException(HlsChoice.NoVideoMessage(best.Url, mediaUrl, inner));
                     case HlsMediaPlaylist media:
                         var separateAudio = HlsChoice.AudioFor(master, best) != null;
                         return Describe(url, variants, media, separateAudio, name) with
@@ -136,7 +138,7 @@ internal static class HlsClient
                             Subtitles = HlsChoice.SubtitlesFor(master, best).Select(s => s.Name).ToList(),
                         };
                     default:
-                        throw new HlsFormatException("The stream's lists of qualities point to one another without ever reaching the video.");
+                        throw new HlsFormatException("The stream's list of qualities leads to something that is not a playlist.");
                 }
             }
         }

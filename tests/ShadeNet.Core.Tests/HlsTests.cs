@@ -774,6 +774,7 @@ public class HlsDownloadTests
 
         var ex = await Assert.ThrowsAsync<HlsFormatException>(() => m.DescribeStreamAsync(new RequestSpec(server.Url("/loop.m3u8"))));
         Assert.Contains("without ever reaching the video", ex.Message);
+        Assert.Contains("asking for loop.m3u8 gave another list of qualities, which leads to loop.m3u8", ex.Message);   // says where it went round
     }
 
     static byte[] Encrypt(byte[] plain, byte[] key, byte[] iv)
