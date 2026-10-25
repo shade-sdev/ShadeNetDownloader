@@ -132,6 +132,12 @@ public sealed record CaptureRequest
     public double? Duration { get; init; }
 
     /// <summary>
+    /// With <c>media</c>, a list of qualities: the exact addresses the player loaded the playlists it names from. A player may add
+    /// parameters of its own (a key) that the list does not carry, and the server may want them on every request.
+    /// </summary>
+    public string[]? Played { get; init; }
+
+    /// <summary>
     /// With <c>pieces</c>: what a player that keeps its list of pieces itself (no playlist or manifest) asked for, in that order, and the
     /// initialisation part they follow; <see cref="AudioPieces"/> and <see cref="AudioInit"/> when the sound is a run of its own.
     /// </summary>

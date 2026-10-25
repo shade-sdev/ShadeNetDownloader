@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyPlaylist, liveStreamKind, looksLikeLiveFlv, looksLikePlaylist, MediaTracker } from '../lib/media.js';
+import { classifyPlaylist, liveStreamKind, looksLikeLiveFlv, looksLikePlaylist, MediaTracker, sameAddress } from '../lib/media.js';
 import { Controller } from '../lib/controller.js';
 import { HeaderRecorder } from '../lib/headers.js';
 import { NativeLink } from '../lib/native.js';
@@ -72,7 +72,7 @@ test('requests that are not playlists, not in a tab, or unreadable are ignored',
   assert.equal(failing.count(7), 0);
 });
 
-function setup() {
+function setup(fetchText = async (u) => (u.includes('live') ? LIVE : VOD)) {
   const app = new FakeApp();
   const fake = fakeChrome(app);
   const timers = manualTimers();
@@ -80,7 +80,7 @@ function setup() {
   const link = new NativeLink(fake.chrome, { onSettings: (s) => controller.applyAppSettings(s) }, timers);
   controller = new Controller({
     chrome: fake.chrome, link, recorder: new HeaderRecorder(fake.chrome), userAgent: 'Test-UA/1', timers,
-    fetchText: async (u) => (u.includes('live') ? LIVE : VOD),
+    fetchText,
   });
   controller.registerListeners();
   return { app, controller, ...fake };
@@ -303,4 +303,52 @@ test('a worker request is not guessed onto a tab when two tabs show that origin,
 
   assert.equal(t.controller.media.list(7).length + t.controller.media.list(8).length, 0);
   assert.deepEqual([...t.controller.unattributed.keys()], ['https://player.example']);
+});
+
+// ---- a player that adds a key of its own to the playlists a master names (vidzy: "&gk=...") ----
+
+const KEYED_MASTER = '#EXTM3U\n#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a",NAME="fr",DEFAULT=YES,URI="index-a1.m3u8?t=T&s=1"\n'
+  + '#EXT-X-STREAM-INF:BANDWIDTH=649000,RESOLUTION=864x488,AUDIO="a"\nindex-v1-a1.m3u8?t=T&s=1\n';
+const BASE = 'https://cdn.example/hls/,x_n,.urlset/';
+
+test('a playlist with parameters the player added is still the one the master names', () => {
+  assert.ok(sameAddress(`${BASE}index-v1-a1.m3u8?t=T&s=1`, `${BASE}index-v1-a1.m3u8?t=T&s=1&gk=K`));
+  assert.ok(sameAddress(`${BASE}a.m3u8`, `${BASE}a.m3u8?gk=K`));
+  assert.ok(!sameAddress(`${BASE}index-v1-a1.m3u8?t=T&s=1`, `${BASE}index-v1-a1.m3u8?t=NEW&s=1&gk=K`), 'a refreshed link is another');
+  assert.ok(!sameAddress(`${BASE}index-v1-a1.m3u8?t=T`, `${BASE}index-a1.m3u8?t=T`));
+  assert.ok(!sameAddress(`${BASE}a.m3u8`, 'https://other.example/hls/,x_n,.urlset/a.m3u8'));
+});
+
+test('playlists the player loaded with a key of its own fold into their master, which keeps their addresses, in either order', async () => {
+  for (const masterFirst of [true, false]) {
+    const texts = { [`${BASE}master.m3u8?t=T&s=1`]: KEYED_MASTER };
+    const tracker = new MediaTracker({ fetchText: async (u) => texts[u] ?? VOD });
+    const master = seen(7, `${BASE}master.m3u8?t=T&s=1`);
+    const children = [seen(7, `${BASE}index-v1-a1.m3u8?t=T&s=1&gk=K`), seen(7, `${BASE}index-a1.m3u8?t=T&s=1&gk=K`)];
+    for (const request of masterFirst ? [master, ...children] : [...children, master]) await tracker.consider(request);
+
+    assert.deepEqual(tracker.list(7).map((i) => i.url), [`${BASE}master.m3u8?t=T&s=1`], 'one entry, not the sound and the picture apart');
+    assert.deepEqual([...tracker.get(7, `${BASE}master.m3u8?t=T&s=1`).played].sort(),
+      [`${BASE}index-a1.m3u8?t=T&s=1&gk=K`, `${BASE}index-v1-a1.m3u8?t=T&s=1&gk=K`]);
+  }
+});
+
+test('the app is told where the player loaded a master\'s playlists from', async () => {
+  const t = setup(async (u) => (u.includes('master') ? KEYED_MASTER : VOD));
+  await t.chrome.webRequest.onHeadersReceived.emit(seen(7, `${BASE}master.m3u8?t=T&s=1`));
+  await t.chrome.webRequest.onHeadersReceived.emit(seen(7, `${BASE}index-v1-a1.m3u8?t=T&s=1&gk=K`));
+
+  assert.equal((await t.controller.sendMedia(`${BASE}master.m3u8?t=T&s=1`)).accepted, true);
+  assert.deepEqual(t.app.captures[0].played, [`${BASE}index-v1-a1.m3u8?t=T&s=1&gk=K`]);
+});
+
+test('a YouTube player embedded beside the page\'s own stream comes after it, and says what it is', async () => {
+  const t = setup();
+  await t.chrome.webRequest.onHeadersReceived.emit(seen(7, 'https://cdn.example/movie/index.m3u8'));
+  await t.controller.onPageVideos({ tab: t.chrome.tabs.active, frameId: 4, url: 'https://www.youtube.com/embed/aqz-KE-bpKQ' },
+    [{ title: 'Trailer', src: 'blob:https://www.youtube.com/z', blob: true, drm: false, permalink: '' }]);
+
+  const { items } = await t.controller.listMedia();
+  assert.deepEqual(items.map((i) => i.kind), ['media', 'page']);   // the film first, the trailer after it
+  assert.equal(items[1].embedded, true);
 });

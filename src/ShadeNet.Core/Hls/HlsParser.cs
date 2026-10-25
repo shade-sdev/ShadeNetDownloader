@@ -360,6 +360,27 @@ public static class HlsChoice
     public const int MaxNesting = 4;
 
     /// <summary>
+    /// The address the browser's player loaded a playlist from, when it is the one the list of qualities names with parameters
+    /// of the player's own added (a key some players append, which the server then wants on every playlist and piece);
+    /// otherwise the address as the list names it. A refreshed link (other values for the list's own parameters) keeps its own.
+    /// </summary>
+    public static Uri AsPlayed(Uri listed, IEnumerable<string>? played)
+    {
+        if (played == null) return listed;
+        var mine = System.Web.HttpUtility.ParseQueryString(listed.Query);
+        foreach (var address in played)
+        {
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var seen)) continue;
+            if (seen.Scheme != listed.Scheme || !string.Equals(seen.Authority, listed.Authority, StringComparison.OrdinalIgnoreCase)
+                || seen.AbsolutePath != listed.AbsolutePath) continue;
+            var theirs = System.Web.HttpUtility.ParseQueryString(seen.Query);
+            if (mine.AllKeys.All(k => theirs.GetValues(k) is { } values && (mine.GetValues(k) ?? []).All(v => values.Contains(v)))) return seen;
+        }
+
+        return listed;
+    }
+
+    /// <summary>
     /// Why a quality never led to the video: the address asked for, where the answer came from (when the server sent ShadeNet
     /// elsewhere) and where that answer leads, by file name, so the message says whether the server keeps answering with
     /// the same list or sends ShadeNet back to the start.

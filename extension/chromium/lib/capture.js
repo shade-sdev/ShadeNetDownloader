@@ -89,7 +89,7 @@ export function evaluate(item, settings) {
 
 /** The `capture` message. Unset members are omitted so the frame stays small. */
 export function buildCapture({
-  id, url, originalUrl, referrer, cookies, userAgent, headers, fileName, mimeType, size, source, audioUrl, audioSize, duration,
+  id, url, originalUrl, referrer, cookies, userAgent, headers, fileName, mimeType, size, source, audioUrl, audioSize, duration, played,
 }) {
   const message = { type: 'capture', id, url, source: source || 'download' };
   if (originalUrl && originalUrl !== url) message.originalUrl = originalUrl;
@@ -103,5 +103,6 @@ export function buildCapture({
   if (audioUrl) message.audioUrl = audioUrl;
   if (Number.isFinite(audioSize) && audioSize > 0) message.audioSize = audioSize;
   if (Number.isFinite(duration) && duration > 0) message.duration = duration;
+  if (Array.isArray(played) && played.length > 0) message.played = played;
   return message;
 }

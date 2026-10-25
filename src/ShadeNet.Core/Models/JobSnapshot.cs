@@ -59,9 +59,11 @@ public sealed class AddDownloadRequest
 /// <param name="Record">The address is one endless live response (an FLV pull), recorded with ffmpeg until it ends or the user stops it.</param>
 /// <param name="Pieces">No playlist: the pieces a player asked for (it keeps their list itself), in that order, after <paramref name="Init"/>
 /// (their initialisation part, none for MPEG-TS); <paramref name="AudioPieces"/> and <paramref name="AudioInit"/> when the sound is apart.</param>
+/// <param name="Played">With a list of qualities: the addresses the browser's player loaded its playlists from (it may add a key of its own).</param>
 public sealed record StreamChoice(int Height = 0, long Bandwidth = 0, string? AudioName = null, bool Subtitles = true, bool EmbedSubtitles = false,
     bool Direct = false, string? AudioUrl = null, double Seconds = 0, bool Record = false,
-    IReadOnlyList<string>? Pieces = null, string? Init = null, IReadOnlyList<string>? AudioPieces = null, string? AudioInit = null);
+    IReadOnlyList<string>? Pieces = null, string? Init = null, IReadOnlyList<string>? AudioPieces = null, string? AudioInit = null,
+    IReadOnlyList<string>? Played = null);
 
 public enum AddMode
 {

@@ -526,7 +526,7 @@ export class Controller {
   // ---- shared -------------------------------------------------------------------------------------------------
 
   /** Everything the app needs to repeat the request: the cookies and headers the site saw, the page, the agent. */
-  async describe({ url, lookupUrl, originalUrl, referrer, referrerFallback, fileName, mimeType, size, source, audioUrl, audioSize, duration }) {
+  async describe({ url, lookupUrl, originalUrl, referrer, referrerFallback, fileName, mimeType, size, source, audioUrl, audioSize, duration, played }) {
     const recorded = this.recorder?.lookup(lookupUrl ?? url);
     let cookies = headerValue(recorded, 'cookie');
     if (!cookies) {
@@ -549,6 +549,7 @@ export class Controller {
       audioUrl,
       audioSize,
       duration,
+      played,
     });
   }
 
@@ -740,8 +741,13 @@ export class Controller {
 
     // pages ShadeNet asks yt-dlp about: a YouTube page (the player's own requests cannot be used any more), a YouTube player
     // embedded in another page, and videos whose picture comes through a buffer (Facebook, Instagram ...: no address at all)
-    const pages = this.pageItems(tab, name, items.length > 0 || this.media.list(tab.id).length > 0);
-    for (const page of pages.reverse()) items.unshift(page);
+    // The tab's own video page leads (a YouTube watch page). A player embedded in another page (a trailer beside the film, say)
+    // follows the streams and files that page's own player loaded: those are the video being watched.
+    const others = items.length > 0 || this.media.list(tab.id).length > 0;
+    const pages = this.pageItems(tab, name, others);
+    const leads = (page) => !others || page.url === tab.url;
+    for (const page of pages.filter(leads).reverse()) items.unshift(page);
+    items.push(...pages.filter((page) => !leads(page)).map((page) => ({ ...page, embedded: true })));
 
     // picture and sound the page's player is fetching as files (some other sites)
     const playing = this.tracks.current(tab.id);
@@ -817,7 +823,8 @@ export class Controller {
       const referrerFallback = this.playerPage(tab, this.media.get(tab.id, url)?.referrer) || tab.url;
       const audioUrl = (await this.itemsFor(tab)).find((i) => i.url === url)?.audioUrl;   // the sound's own playlist, when it has one
       const recording = this.media.get(tab.id, url)?.kind === 'record';   // a live FLV pull: the app records it with ffmpeg
-      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl });
+      const played = this.media.get(tab.id, url)?.played;   // a list of qualities: where the player loaded its playlists (with its own key, perhaps)
+      const message = await this.describe({ url, referrerFallback, fileName: this.pageTitle(tab), source: recording ? 'record' : 'media', audioUrl, played });
       const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
       this.trace(`stream ${url} sent: accepted=${result?.accepted} reason=${result?.reason}`);
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');

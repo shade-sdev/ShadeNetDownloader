@@ -87,6 +87,25 @@ export function looksLikePlaylist(url, contentType) {
 }
 
 /**
+ * Whether `seen` is the playlist `listed` names: the same address, perhaps with parameters the player added of its own (a key
+ * some players append to every playlist they load, which the master does not list). The listed parameters must all be there.
+ */
+export function sameAddress(listed, seen) {
+  if (listed === seen) return true;
+  try {
+    const a = new URL(listed);
+    const b = new URL(seen);
+    if (a.origin !== b.origin || a.pathname !== b.pathname) return false;
+    for (const [key, value] of a.searchParams) if (!b.searchParams.getAll(key).includes(value)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const MAX_PLAYED = 16;
+
+/**
  * What a playlist is: a master (lists qualities), a media playlist (lists segments) or nothing we know.
  * `children` are the absolute addresses a master points to, so those can be hidden as noise.
  */
@@ -249,9 +268,27 @@ export class MediaTracker {
     const items = this.byTab.get(tabId) ?? new Map();
     this.byTab.set(tabId, items);
 
-    // a quality list makes the qualities it names redundant, in whichever order they were seen
-    if (info.kind === 'media' && [...items.values()].some((i) => i.children?.includes(url))) return;
-    if (info.kind === 'master') for (const child of info.children) items.delete(child);
+    // A quality list makes the qualities it names redundant, in whichever order they were seen. The address the player loaded one
+    // from is kept with the list when it is not the listed one (the player added a key the server wants): the app uses it.
+    const played = (master, address) => {
+      if (master.children.includes(address)) return;
+      master.played = [...(master.played ?? []).filter((p) => p !== address), address].slice(-MAX_PLAYED);
+    };
+    if (info.kind === 'media') {
+      const master = [...items.values()].find((i) => i.kind === 'master' && i.children.some((c) => sameAddress(c, url)));
+      if (master) {
+        played(master, url);
+        return;
+      }
+    }
+    if (info.kind === 'master') {
+      for (const address of items.get(url)?.played ?? []) played(info, address);   // (the same list, read again)
+      for (const [address, item] of items) {
+        if (item.kind !== 'media' || !info.children.some((c) => sameAddress(c, address))) continue;
+        items.delete(address);
+        played(info, address);
+      }
+    }
 
     items.set(url, { url, ...info, seenAt: Date.now() });
     while (items.size > MAX_PER_TAB) items.delete(items.keys().next().value);

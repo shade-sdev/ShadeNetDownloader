@@ -22,7 +22,8 @@ public sealed record CaptureInfo(
     IReadOnlyList<string>? Pieces = null,
     string? Init = null,
     IReadOnlyList<string>? AudioPieces = null,
-    string? AudioInit = null);
+    string? AudioInit = null,
+    IReadOnlyList<string>? Played = null);
 
 /// <summary>What the processor needs from the UI; implemented by the app, faked in tests.</summary>
 public interface ICaptureUi
@@ -175,7 +176,7 @@ public sealed class CaptureProcessor
                 Stream = isTracks ? new StreamChoice(Direct: true, AudioUrl: capture.AudioUrl, Seconds: capture.Duration ?? 0)
                     : isRecord ? new StreamChoice(Subtitles: false, Record: true)
                     : isPieces ? PiecesChoice(capture)
-                    : isStream ? new StreamChoice(AudioUrl: capture.Source == "media" ? capture.AudioUrl : null) : null,
+                    : isStream ? new StreamChoice(AudioUrl: capture.Source == "media" ? capture.AudioUrl : null, Played: capture.Played) : null,
                 // a stream, and a video file the page's own button sent, are named after the video, not after the address
                 FileName = (isStream || capture.Source == "video") && !string.IsNullOrWhiteSpace(capture.FileName) ? capture.FileName : null,
                 Url = capture.Url,
@@ -276,8 +277,11 @@ public sealed class CaptureProcessor
             audioInit = audioPieces != null && IsWebUrl(request.AudioInit) ? request.AudioInit : null;
         }
 
+        // the addresses the player loaded a list of qualities' playlists from (with a key of its own, perhaps)
+        var played = source == "media" ? WebUrls(request.Played) : null;
+
         return new CaptureInfo(request.Url, referrer, cookies, userAgent, headers, fileName, size, source, audioUrl, audioSize, duration,
-            pieces, init, audioPieces, audioInit);
+            pieces, init, audioPieces, audioInit, played);
     }
 
     static IReadOnlyList<string>? WebUrls(string[]? urls) => urls is { Length: > 0 and <= MaxPieces } && urls.All(IsWebUrl) ? urls : null;

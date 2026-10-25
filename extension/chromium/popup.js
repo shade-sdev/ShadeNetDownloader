@@ -82,7 +82,7 @@ function renderMedia(result) {
     const meta = document.createElement('div');
     meta.className = 'meta';
     const site = item.kind === 'page' ? new URL(item.url).hostname.replace(/^(www|m)\./, '') : '';
-    const facts = [item.kind === 'tracks' ? 'Playing now' : item.kind === 'page' ? (/youtube/.test(site) ? 'YouTube video' : item.guess ? `Video on ${site} (a try)` : `Video on ${site}`) : item.kind === 'record' ? 'Live stream' : item.kind === 'pieces' ? 'Video (from its pieces)' : item.kind === 'file' ? 'Video file' : item.audioUrl ? 'Video + sound' : item.audioOnly ? 'Sound only' : 'Video stream'];
+    const facts = [item.kind === 'tracks' ? 'Playing now' : item.kind === 'page' ? (/youtube/.test(site) ? (item.embedded ? 'YouTube player on this page' : 'YouTube video') : item.guess ? `Video on ${site} (a try)` : `Video on ${site}`) : item.kind === 'record' ? 'Live stream' : item.kind === 'pieces' ? 'Video (from its pieces)' : item.kind === 'file' ? 'Video file' : item.audioUrl ? 'Video + sound' : item.audioOnly ? 'Sound only' : 'Video stream'];
     if ((item.kind === 'tracks' || item.kind === 'page' || item.kind === 'pieces') && item.quality) facts.push(item.quality);
     else if (item.kind === 'file' && item.maxHeight) facts.push(`${item.maxHeight}p`);
     else if (item.maxHeight) facts.push(item.audioUrl ? `${item.maxHeight}p` : `up to ${item.maxHeight}p`);

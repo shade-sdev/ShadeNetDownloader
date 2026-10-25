@@ -793,6 +793,40 @@ public class HlsDownloadTests
     }
 
     [Fact]
+    public void The_address_the_player_loaded_is_used_when_it_only_adds_parameters_of_its_own()
+    {
+        var listed = new Uri("https://cdn.example/hls/,x_n,.urlset/index-v1-a1.m3u8?t=T&s=1");
+        Assert.Equal("https://cdn.example/hls/,x_n,.urlset/index-v1-a1.m3u8?t=T&s=1&gk=K",
+            HlsChoice.AsPlayed(listed, ["https://cdn.example/hls/,x_n,.urlset/index-a1.m3u8?t=T&s=1&gk=K", "https://cdn.example/hls/,x_n,.urlset/index-v1-a1.m3u8?t=T&s=1&gk=K"]).AbsoluteUri);
+        Assert.Same(listed, HlsChoice.AsPlayed(listed, ["https://cdn.example/hls/,x_n,.urlset/index-v1-a1.m3u8?t=OLD&s=1&gk=K"]));   // a refreshed link keeps its own
+        Assert.Same(listed, HlsChoice.AsPlayed(listed, ["https://elsewhere.example/hls/,x_n,.urlset/index-v1-a1.m3u8?t=T&s=1&gk=K"]));
+        Assert.Same(listed, HlsChoice.AsPlayed(listed, null));
+    }
+
+    [Fact]
+    public async Task A_quality_is_asked_for_with_the_key_the_browsers_player_added()
+    {
+        // like a video host whose player adds "&gk=..." to every playlist the master names: without it, the server refuses
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        var expected = server.AddVod("movie", 4);
+        server.Put("/master.m3u8", "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=649000,RESOLUTION=864x488\n/movie/index.m3u8?t=T\n");
+        server.Intercept = ctx =>
+        {
+            if (ctx.Request.Url!.AbsolutePath != "/movie/index.m3u8" || ctx.Request.QueryString["gk"] == "K") return false;
+            ctx.Response.StatusCode = 403;
+            ctx.Response.Close();
+            return true;
+        };
+        var m = Manager(h);
+
+        var job = AddStream(m, server.Url("/master.m3u8"), choice: new StreamChoice(Played: [server.Url("/movie/index.m3u8?t=T&gk=K")]));
+        await Finished(job);
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.Equal(expected, File.ReadAllBytes(job.TargetPath));
+    }
+
+    [Fact]
     public async Task Lists_of_qualities_that_point_to_one_another_for_ever_are_refused()
     {
         await using var h = await Harness.CreateAsync();

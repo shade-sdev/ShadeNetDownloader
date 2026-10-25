@@ -269,7 +269,7 @@ internal sealed class HlsRunner : IJobRunner
                     ? HlsChoice.Match(master.Variants, Data.Height, Data.Bandwidth)
                     : HlsChoice.Best(master.Variants);
 
-                var (text, finalUrl) = await FetchPlaylistAsync(http, variant.Url.AbsoluteUri, ct).ConfigureAwait(false);
+                var (text, finalUrl) = await FetchPlaylistAsync(http, HlsChoice.AsPlayed(variant.Url, Data.Played).AbsoluteUri, ct).ConfigureAwait(false);
                 var next = HlsParser.Parse(text, finalUrl);
                 if (next is HlsMasterPlaylist inner && depth < HlsChoice.MaxNesting)
                 {
@@ -285,18 +285,18 @@ internal sealed class HlsRunner : IJobRunner
             // (a quality nested in another may say no height of its own: the one chosen keeps what is known)
             if (variant.Height > 0 || Data.Height == 0) Data.Height = variant.Height;
             if (variant.Bandwidth > 0 || Data.Bandwidth == 0) Data.Bandwidth = variant.Bandwidth;
-            videoUrl = variant.Url;   // (as the master names it: a live stream's playlist is asked for again at this address)
+            videoUrl = HlsChoice.AsPlayed(variant.Url, Data.Played);   // (as named, not where it redirected: a live stream's playlist is asked for again here)
 
             if (HlsChoice.AudioFor(master, variant, Data.AudioName) is { Url: { } found } rendition)
             {
                 Data.AudioName = rendition.Name;
-                audioUrl = found;
-                audio = await LoadMediaAsync(http, found, ct).ConfigureAwait(false);
+                audioUrl = HlsChoice.AsPlayed(found, Data.Played);
+                audio = await LoadMediaAsync(http, audioUrl, ct).ConfigureAwait(false);
             }
 
             if (Data.Subtitles)
                 foreach (var r in HlsChoice.SubtitlesFor(master, variant))
-                    subtitles.Add((r.Name, r.Language ?? r.Name, r.Url!));
+                    subtitles.Add((r.Name, r.Language ?? r.Name, HlsChoice.AsPlayed(r.Url!, Data.Played)));
         }
         else
         {
