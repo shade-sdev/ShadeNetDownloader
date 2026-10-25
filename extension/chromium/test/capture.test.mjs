@@ -56,6 +56,16 @@ test('only allow-listed, well-formed headers are replayed', () => {
   assert.deepEqual(picked, { Authorization: 'Bearer abc', 'accept-language': 'en-US,en;q=0.9', Origin: 'https://example.com' });
 });
 
+test("the browser's client hints are passed on (a Chrome User-Agent without them reads as a bot)", () => {
+  const picked = pickHeaders([
+    { name: 'sec-ch-ua', value: '"Google Chrome";v="155", "Chromium";v="155", "Not(A:Brand";v="24"' },
+    { name: 'sec-ch-ua-mobile', value: '?0' },
+    { name: 'sec-ch-ua-platform', value: '"Windows"' },
+    { name: 'sec-fetch-mode', value: 'cors' },
+  ]);
+  assert.deepEqual(Object.keys(picked), ['sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform']);
+});
+
 test('header injection and oversized values are dropped', () => {
   assert.deepEqual(pickHeaders([{ name: 'Authorization', value: 'a\r\nX-Evil: 1' }]), {});
   assert.deepEqual(pickHeaders([{ name: 'Authorization', value: 'a\nb' }]), {});

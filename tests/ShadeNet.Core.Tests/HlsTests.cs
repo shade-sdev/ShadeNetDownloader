@@ -765,6 +765,34 @@ public class HlsDownloadTests
     }
 
     [Fact]
+    public async Task A_server_that_gives_bots_a_decoy_list_gets_the_client_hints_a_browser_sends()
+    {
+        // like a real video host: a request that says Chrome but lacks Chrome's client hints gets a list of qualities that
+        // leads only to itself, never to the video
+        await using var h = await Harness.CreateAsync();
+        using var server = new HlsServer();
+        var expected = server.AddVod("movie", 4);
+        var hints = new ConcurrentQueue<string?>();
+        server.Intercept = ctx =>
+        {
+            hints.Enqueue(ctx.Request.Headers["Sec-CH-UA"]);
+            if (ctx.Request.Headers["Sec-CH-UA"] != null) return false;
+            var decoy = Encoding.UTF8.GetBytes("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=1280x720\nindex.m3u8\n");
+            ctx.Response.ContentType = "application/vnd.apple.mpegurl";
+            ctx.Response.OutputStream.Write(decoy);
+            ctx.Response.Close();
+            return true;
+        };
+        var m = Manager(h);
+
+        var job = AddStream(m, server.Url("/movie/index.m3u8"));
+        await Finished(job);
+        Assert.True(job.State == DownloadState.Completed, Describe(job));
+        Assert.Equal(expected, File.ReadAllBytes(job.TargetPath));
+        Assert.All(hints, v => Assert.Contains("\"Chromium\";v=\"124\"", v));   // every request, worked out from ShadeNet's own Chrome User-Agent
+    }
+
+    [Fact]
     public async Task Lists_of_qualities_that_point_to_one_another_for_ever_are_refused()
     {
         await using var h = await Harness.CreateAsync();

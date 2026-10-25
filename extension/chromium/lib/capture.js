@@ -2,7 +2,8 @@
 // unit-tested directly (test/capture.test.mjs).
 
 /** Request headers worth replaying. Cookie, Referer and User-Agent travel as their own fields. */
-export const HEADER_ALLOWLIST = new Set(['authorization', 'accept-language', 'origin']);
+// (the client hints too: some sites take a request whose User-Agent says Chrome but that lacks them for a bot)
+export const HEADER_ALLOWLIST = new Set(['authorization', 'accept-language', 'origin', 'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform']);
 
 const MAX_HEADER_VALUE = 8192;
 

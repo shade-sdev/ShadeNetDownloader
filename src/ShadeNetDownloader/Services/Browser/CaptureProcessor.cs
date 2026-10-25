@@ -48,6 +48,8 @@ public sealed class CaptureProcessor
     static readonly HashSet<string> AllowedHeaders = new(StringComparer.OrdinalIgnoreCase)
     {
         "Authorization", "Accept-Language", "Origin",
+        // the browser's client hints: some sites take a Chrome User-Agent without them for a bot
+        "Sec-CH-UA", "Sec-CH-UA-Mobile", "Sec-CH-UA-Platform",
     };
 
     const int MaxUrl = 8192;
