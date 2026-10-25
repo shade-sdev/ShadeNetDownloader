@@ -23,6 +23,7 @@ public sealed partial class ThemePresetItem : ObservableObject
         Preset = preset;
         var (background, card, accent, text) = preset.Swatch;
         Background = BackgroundOf(preset.Appearance, background);
+        Swatch = SwatchOf(preset.Appearance, background);
         Card = Frozen(card);
         Accent = Frozen(accent);
         Text = Frozen(text);
@@ -36,6 +37,9 @@ public sealed partial class ThemePresetItem : ObservableObject
     public Brush Accent { get; }
     public Brush Text { get; }
 
+    /// <summary>The theme's gradient itself, at full strength (the swatch in the grid); its window colour when it has none.</summary>
+    public Brush Swatch { get; }
+
     [ObservableProperty] bool _isSelected;
 
     static Brush Frozen(Color c)
@@ -43,6 +47,15 @@ public sealed partial class ThemePresetItem : ObservableObject
         var b = new SolidColorBrush(c);
         b.Freeze();
         return b;
+    }
+
+    static Brush SwatchOf(AppearanceSettings look, Color background)
+    {
+        if (!ThemeColor.TryParse(look.Tint, out var from)) return Frozen(background);
+        var to = ThemeColor.TryParse(look.Tint2, out var second) ? second : from;
+        var brush = new LinearGradientBrush(from, to, look.TintAngle);
+        brush.Freeze();
+        return brush;
     }
 
     /// <summary>The window of the look: its background, with its tint or gradient laid over it.</summary>
@@ -150,7 +163,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _baseTheme = baseTheme;
         _setBaseTheme = setBaseTheme;
 
-        Presets = ThemePresets.All.Select(p => new ThemePresetItem(p)).ToList();
+        Presets = ThemePresets.Looks.Select(p => new ThemePresetItem(p)).ToList();
+        GradientPresets = ThemePresets.Gradients.Select(p => new ThemePresetItem(p)).ToList();
 
         StatusItems = StatusColors.Entries.Select(e => new ColorSettingItem(e.Key, "", e.Name, "", false,
             () => Model.Status.TryGetValue(e.Key, out var v) ? v : null,
@@ -175,6 +189,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     Dictionary<string, string> Palette => Model.PaletteFor(_theme.IsDark);
 
     public IReadOnlyList<ThemePresetItem> Presets { get; }
+
+    /// <summary>The gradient themes, shown as swatches.</summary>
+    public IReadOnlyList<ThemePresetItem> GradientPresets { get; }
     public IReadOnlyList<ColorSettingItem> StatusItems { get; }
     public IReadOnlyList<ColorGroup> PaletteGroups { get; }
 
@@ -756,7 +773,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _refreshing = true;
         try
         {
-            foreach (var item in Presets) item.IsSelected = string.Equals(item.Preset.Id, Model.Preset, StringComparison.OrdinalIgnoreCase);
+            foreach (var item in Presets.Concat(GradientPresets)) item.IsSelected = string.Equals(item.Preset.Id, Model.Preset, StringComparison.OrdinalIgnoreCase);
             foreach (var item in StatusItems) item.Refresh();
             foreach (var item in PaletteGroups.SelectMany(g => g.Items)) item.Refresh();
             foreach (var name in new[]

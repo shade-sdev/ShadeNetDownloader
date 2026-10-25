@@ -147,6 +147,27 @@ public class AppearanceTests
     }
 
     [Fact]
+    public void The_gradient_themes_are_their_own_grid_and_each_can_be_chosen()
+    {
+        var (page, theme, settings, current, dir) = Page();
+        using var _d = dir;
+        Assert.True(page.GradientPresets.Count >= 20);
+        Assert.All(page.GradientPresets, p => Assert.True(p.Preset.IsGradient));
+        Assert.DoesNotContain(page.Presets, p => p.Preset.IsGradient);
+        Assert.Contains(page.GradientPresets, p => p.Preset.Theme == AppTheme.Light);
+        Assert.Contains(page.GradientPresets, p => p.Preset.Theme == AppTheme.Dark);
+        Assert.All(page.GradientPresets, p => Assert.IsType<LinearGradientBrush>(p.Swatch));
+
+        var mint = page.GradientPresets.Single(p => p.Preset.Id == "mint");
+        page.ApplyPresetCommand.Execute(mint);
+        Assert.True(mint.IsSelected);
+        Assert.Equal(AppTheme.Light, current());
+        Assert.Equal("#A8E6CF", theme.Calls.Last().Look.Tint);
+        Assert.Equal("#DCEDC1", theme.Calls.Last().Look.Tint2);
+        Assert.Equal("Mint Leaf", page.PresetName);
+    }
+
+    [Fact]
     public void A_look_is_saved_and_read_back()
     {
         using var dir = new TempDir();
@@ -364,8 +385,8 @@ public class AppearanceTests
     {
         var (page, _, settings, _, dir) = Page();
         using var _d = dir;
-        page.ApplyPresetCommand.Execute(page.Presets.Single(p => p.Preset.Id == "aurora"));
-        Assert.IsType<LinearGradientBrush>(page.Presets.Single(p => p.Preset.Id == "aurora").Background);
+        page.ApplyPresetCommand.Execute(page.GradientPresets.Single(p => p.Preset.Id == "aurora"));
+        Assert.IsType<LinearGradientBrush>(page.GradientPresets.Single(p => p.Preset.Id == "aurora").Background);
 
         page.TintStrength = 50;
         Assert.Equal(ThemePresets.CustomId, settings.Current.Appearance.Preset);

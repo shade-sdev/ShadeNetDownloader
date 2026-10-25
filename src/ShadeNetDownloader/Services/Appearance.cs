@@ -320,6 +320,9 @@ public static class StatusColors
 /// <summary>A ready-made look: a base theme and the appearance that goes with it.</summary>
 public sealed record ThemePreset(string Id, string Name, string Description, AppTheme Theme, AppearanceSettings Appearance)
 {
+    /// <summary>A gradient of two colours lies over the whole window (it shows in the swatch grid, not the gallery).</summary>
+    public bool IsGradient => Appearance.Tint != null && Appearance.Tint2 != null;
+
     /// <summary>The colours its card in the gallery shows: background, card, accent, text.</summary>
     public (Color Background, Color Card, Color Accent, Color Text) Swatch
     {
@@ -456,7 +459,42 @@ public static class ThemePresets
                 [StatusColors.Waiting] = "#F1FA8C",
                 [StatusColors.Active] = "#8BE9FD",
             })),
+
+        // ---- gradient themes: a gradient of two colours over the whole window, with an accent that goes with it ----
+
+        Gradient("mint", "Mint Leaf", AppTheme.Light, "#10B981", "#A8E6CF", "#DCEDC1"),
+        Gradient("sherbet", "Sherbet", AppTheme.Light, "#F97316", "#FFE29F", "#FFA99F"),
+        Gradient("lavender", "Lavender Haze", AppTheme.Light, "#8B5CF6", "#C3CFE2", "#E0C3FC"),
+        Gradient("cottoncandy", "Cotton Candy", AppTheme.Light, "#EC4899", "#FBC2EB", "#A6C1EE"),
+        Gradient("skyline", "Skyline", AppTheme.Light, "#3B82F6", "#A1C4FD", "#C2E9FB", angle: 90),
+        Gradient("sage", "Sage Garden", AppTheme.Light, "#16A34A", "#D4FC79", "#96E6A1"),
+        Gradient("vanilla", "Vanilla Cream", AppTheme.Light, "#D97706", "#FFF1D6", "#F5D6C6"),
+        Gradient("blossom", "Blossom", AppTheme.Light, "#DB2777", "#FDCBF1", "#E6DEE9"),
+        Gradient("chroma", "Chroma Glow", AppTheme.Dark, "#C084FC", "#7C3AED", "#0891B2"),
+        Gradient("crimson", "Crimson Night", AppTheme.Dark, "#EF4444", "#991B1B", "#0B0B0F", angle: 160),
+        Gradient("deepspace", "Deep Space", AppTheme.Dark, "#818CF8", "#312E81", "#0F0A1F", angle: 160),
+        Gradient("ember", "Ember", AppTheme.Dark, "#FB923C", "#9A3412", "#3F1D1D"),
+        Gradient("dusk", "Dusk", AppTheme.Dark, "#A5B4FC", "#475569", "#94A3B8", angle: 90),
+        Gradient("lagoon", "Lagoon", AppTheme.Dark, "#2DD4BF", "#115E59", "#164E63"),
+        Gradient("twilight", "Twilight", AppTheme.Dark, "#22D3EE", "#3730A3", "#0E7490"),
+        Gradient("neon", "Neon Nights", AppTheme.Dark, "#E879F9", "#0E7490", "#86198F"),
+        Gradient("desertsun", "Desert Sun", AppTheme.Dark, "#F59E0B", "#9D174D", "#D97706"),
+        Gradient("storm", "Retro Storm", AppTheme.Dark, "#38BDF8", "#0369A1", "#4C1D95"),
+        Gradient("khaki", "Khaki", AppTheme.Dark, "#D6B37A", "#6B5B3E", "#2A2418"),
+        Gradient("royal", "Royal Blue", AppTheme.Dark, "#60A5FA", "#1E3A8A", "#312E81"),
+        Gradient("evergreen", "Evergreen", AppTheme.Dark, "#4ADE80", "#14532D", "#3F6212"),
     };
+
+    /// <summary>A gradient theme: light or dark, an accent, and two colours laid strongly over the window, from corner to corner.</summary>
+    static ThemePreset Gradient(string id, string name, AppTheme theme, string accent, string from, string to, double angle = 135) =>
+        Preset(id, name, $"{(theme == AppTheme.Light ? "Light" : "Dark")}: a gradient from {from} to {to}.", theme,
+            Tinted(Look(accent, BackdropKind.Mica), from, to, theme == AppTheme.Light ? 0.6 : 0.55, angle));
+
+    /// <summary>The looks of the gallery's cards (no gradient over the window).</summary>
+    public static IEnumerable<ThemePreset> Looks => All.Where(p => !p.IsGradient);
+
+    /// <summary>The gradient themes (the swatch grid).</summary>
+    public static IEnumerable<ThemePreset> Gradients => All.Where(p => p.IsGradient);
 
     public static ThemePreset? Find(string? id) => All.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
 }
