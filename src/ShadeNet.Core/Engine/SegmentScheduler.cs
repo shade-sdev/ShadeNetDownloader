@@ -5,14 +5,25 @@ namespace ShadeNet.Core.Engine;
 /// <summary>
 /// Dynamic segmentation (IDM <c>ChunksList</c>): instead of pre-splitting the file into N equal parts, the largest
 /// amount of remaining work - weighted by each connection's live speed - is bisected whenever a connection is free.
+/// Any part with room for two halves of the minimum size is split; the speed only decides which one.
+/// Bytes a connection has received but not yet written are claimed (<see cref="Reserve"/>): a split starts after them.
 /// All state lives in <see cref="DownloadJob.Segments"/> and is guarded by <see cref="DownloadJob.Sync"/>.
 /// </summary>
 internal sealed class SegmentScheduler
 {
+    /// <summary>A connection under 1/this of the fastest one's speed is crawling (see <see cref="SlowOwnerMinSegment"/>).</summary>
+    const int SlowOwnerRatio = 4;
+
+    /// <summary>How small a crawling connection's part may be cut (others' parts keep the minimum the job was given).</summary>
+    const int SlowOwnerMinSegment = 64 * 1024;
+
     readonly DownloadJob _job;
     readonly int _minSegment;
     readonly double _lookahead;
     readonly int _takeoverThreshold;
+
+    /// <summary>The best speed one answer of this download reached (the runner keeps it up to date); 0 = not known yet.</summary>
+    public double BestConnectionSpeed { get; set; }
 
     public SegmentScheduler(DownloadJob job, int minSegment, double lookaheadSeconds, int takeoverThreshold)
     {
@@ -54,7 +65,7 @@ internal sealed class SegmentScheduler
                 {
                     var next = _job.Segments[i + 1];
                     if (next.State == SegmentState.Active && !ReferenceEquals(next.Owner, slot)
-                        && next.Downloaded <= _takeoverThreshold && last.IsBounded && last.End + 1 == next.Start)
+                        && next.Downloaded + next.InFlight <= _takeoverThreshold && last.IsBounded && last.End + 1 == next.Start)
                     {
                         _job.Stats.AddTakeover();
                         revokedFrom = next.Owner;
@@ -66,12 +77,8 @@ internal sealed class SegmentScheduler
             }
 
             // 3. Split the chunk with the most work left.
-            if (allowSplit)
-            {
-                var (victim, free) = FindMaxFreeChunk();
-                if (victim != null && free >= 2L * _minSegment + 3)
-                    return Split(victim, slot);
-            }
+            if (allowSplit && FindChunkToSplit() is { } victim)
+                return Split(victim, slot);
 
             return null;
         }
@@ -81,13 +88,17 @@ internal sealed class SegmentScheduler
     {
         s.Owner = slot;
         s.State = SegmentState.Active;
+        s.InFlight = 0;   // whatever a previous owner had on its way is not counted: the new owner fetches it again
     }
 
-    /// <summary>The new slot takes the upper half of the victim's remaining range.</summary>
+    /// <summary>Bytes of <paramref name="s"/> nobody has received yet (past what is written and what is on its way).</summary>
+    static long Unclaimed(Segment s) => s.IsBounded ? Math.Max(0, s.Remaining - s.InFlight) : long.MaxValue;
+
+    /// <summary>The new slot takes the upper half of the victim's unclaimed range.</summary>
     Segment Split(Segment victim, ConnectionSlot slot)
     {
-        var position = victim.Position;
-        var mid = position + victim.Remaining / 2;
+        var position = victim.Position + victim.InFlight;
+        var mid = position + Unclaimed(victim) / 2;
         var created = new Segment
         {
             Id = ++_job.NextSegmentId,
@@ -105,33 +116,63 @@ internal sealed class SegmentScheduler
     }
 
     /// <summary>
-    /// <c>free = (end − lookahead·speed − received − start) + 1</c>: the bytes a connection will NOT have fetched after
-    /// <see cref="_lookahead"/> more seconds. Slow connections therefore look "bigger" and are split first.
+    /// The part to split for a free connection: of those whose unclaimed bytes make two halves of at least the minimum
+    /// size, the one with the most left after <see cref="_lookahead"/> more seconds at its connection's speed
+    /// (<c>unclaimed − lookahead·speed</c>), so a slow connection's part is helped first. Null when none can be split.
+    /// <para>
+    /// The speed no longer decides WHETHER to split: with fast connections every part would "finish within the lookahead"
+    /// and no connection would be added, although more connections would still finish the file sooner.
+    /// </para>
     /// </summary>
-    (Segment? Segment, long Free) FindMaxFreeChunk()
+    Segment? FindChunkToSplit()
     {
+        // A connection that has not received anything yet has no speed to judge: it counts as an average one, not as the
+        // slowest (else, with every connection opened at once, the new ones would split each other's parts while the warm
+        // first connection kept the biggest part to itself).
+        double sum = 0;
+        var measured = 0;
+        foreach (var s in _job.Segments)
+            if (s.State == SegmentState.Active && s.Owner is { Speed: > 0 } o)
+            {
+                sum += o.Speed;
+                measured++;
+            }
+
+        var average = measured > 0 ? sum / measured : 0;
+        // The yardstick for "crawling": the fastest connection at work, or the best one answer of this download reached
+        // shared among the connections at work (fast parts may have finished long before anything sampled their speed).
+        var fastest = 0.0;
+        foreach (var s in _job.Segments)
+            if (s.State == SegmentState.Active && s.Owner is { } o)
+                fastest = Math.Max(fastest, o.Speed);
+        fastest = Math.Max(fastest, BestConnectionSpeed / Math.Max(1, measured));
+
         Segment? best = null;
-        long bestFree = -1;
+        var bestScore = long.MinValue;
         foreach (var s in _job.Segments)
         {
             if (s.State != SegmentState.Active || !s.IsBounded) continue;
 
-            var remaining = s.Remaining;
-            if (remaining <= 0) continue;
+            // The part of a connection far slower than the fastest one may be cut finer: a free fast connection then takes
+            // nearly all of it, instead of leaving the crawling one a whole minimum-size piece to finish at its pace.
+            var crawling = s.Owner is { Speed: > 0 } owner && owner.Speed * SlowOwnerRatio < fastest;
+            var min = crawling ? Math.Min(_minSegment, SlowOwnerMinSegment) : _minSegment;
+            var unclaimed = Unclaimed(s);
+            if (unclaimed < 2L * min + 3) continue;
 
-            var speed = s.Owner?.Speed ?? 0;
-            var free = remaining - (long)(speed * _lookahead);
-            if (free > bestFree)
+            var speed = s.Owner?.Speed is > 0 and var known ? known : average;
+            var score = unclaimed - (long)(speed * _lookahead);
+            if (score > bestScore)
             {
-                bestFree = free;
+                bestScore = score;
                 best = s;
             }
         }
 
-        return (best, bestFree);
+        return best;
     }
 
-    /// <summary>True when there is unowned work or the biggest chunk can be bisected into two halves ≥ <c>MinSegment</c>.</summary>
+    /// <summary>True when there is unowned work or a part that can be bisected into two halves ≥ <c>MinSegment</c>.</summary>
     public bool NeedNewConnection()
     {
         lock (_job.Sync)
@@ -139,32 +180,45 @@ internal sealed class SegmentScheduler
             foreach (var s in _job.Segments)
                 if (s.State == SegmentState.Pending) return true;
 
-            var (victim, free) = FindMaxFreeChunk();
-            return victim != null && free >= 2L * _minSegment + 3;
+            return FindChunkToSplit() != null;
         }
     }
 
-    /// <summary>Bytes the owner may still write into <paramref name="seg"/>; -1 when the segment was taken away.</summary>
+    /// <summary>Bytes the owner may still receive for <paramref name="seg"/> (past what it has on its way); -1 when the segment was taken away.</summary>
     public long Allowance(Segment seg, ConnectionSlot slot)
     {
         lock (_job.Sync)
         {
             if (!ReferenceEquals(seg.Owner, slot)) return -1;
-            // A split may have trimmed the range below what was already received; "nothing left" is 0, never negative
-            // (negative is reserved for "ownership lost").
-            return Math.Max(0, seg.Remaining);
+            // "nothing left" is 0, never negative (negative is reserved for "ownership lost")
+            return Unclaimed(seg);
         }
     }
 
-    /// <summary>Records <paramref name="n"/> written bytes. Returns false if ownership was lost meanwhile.</summary>
+    /// <summary>
+    /// Claims up to <paramref name="n"/> received bytes for the owner before they are written; returns how many are its to
+    /// write (fewer when the part ends there), -1 when the segment was taken away.
+    /// </summary>
+    public int Reserve(Segment seg, ConnectionSlot slot, int n)
+    {
+        lock (_job.Sync)
+        {
+            if (!ReferenceEquals(seg.Owner, slot)) return -1;
+            var granted = (int)Math.Min(n, Unclaimed(seg));
+            seg.InFlight += granted;
+            return granted;
+        }
+    }
+
+    /// <summary>Records <paramref name="n"/> reserved bytes as written. Returns false if ownership was lost meanwhile.</summary>
     public bool Commit(Segment seg, ConnectionSlot slot, int n)
     {
         lock (_job.Sync)
         {
             if (!ReferenceEquals(seg.Owner, slot)) return false;
 
-            // The range may have been trimmed by a split while this chunk was in flight: bytes past the new end now
-            // belong to (and are written by) the neighbour, so only count what is still ours.
+            seg.InFlight = Math.Max(0, seg.InFlight - n);
+            // (a split starts after the claimed bytes, so they are all still ours; the clamp is only a guard)
             var mine = seg.IsBounded ? (int)Math.Min(n, Math.Max(0, seg.Remaining)) : n;
             seg.Downloaded += mine;
             return true;
@@ -178,6 +232,7 @@ internal sealed class SegmentScheduler
             if (!ReferenceEquals(seg.Owner, slot)) return false;
             seg.State = SegmentState.Done;
             seg.Owner = null;
+            seg.InFlight = 0;
             return true;
         }
     }
@@ -190,6 +245,7 @@ internal sealed class SegmentScheduler
             if (!ReferenceEquals(seg.Owner, slot) || seg.State == SegmentState.Done) return;
             seg.Owner = null;
             seg.State = SegmentState.Pending;
+            seg.InFlight = 0;
         }
     }
 
@@ -202,6 +258,7 @@ internal sealed class SegmentScheduler
             seg.End = seg.Start + seg.Downloaded - 1;
             seg.State = SegmentState.Done;
             seg.Owner = null;
+            seg.InFlight = 0;
             _job.TotalSize = seg.Start + seg.Downloaded;
         }
     }
@@ -229,6 +286,7 @@ internal sealed class SegmentScheduler
             foreach (var s in _job.Segments)
             {
                 s.Owner = null;
+                s.InFlight = 0;
                 if (s.State == SegmentState.Active) s.State = SegmentState.Pending;
             }
         }

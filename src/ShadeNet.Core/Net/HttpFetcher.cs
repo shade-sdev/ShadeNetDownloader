@@ -45,6 +45,9 @@ internal static class HttpFetcher
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
             ConnectTimeout = settings.ConnectTimeout,
             AutomaticDecompression = DecompressionMethods.None, // ranges are byte-exact
+            // An answer dropped before its end (a part that was split, a connection replaced for being slow) closes its
+            // connection at once: reading out up to 1 MB to reuse it wastes that much, and a slow route would come back.
+            MaxResponseDrainSize = 0,
             UseCookies = false,                                  // cookies come from the capture, never leak across hosts
             AllowAutoRedirect = false,                           // redirects are followed by hand so credentials stay on-host
         };

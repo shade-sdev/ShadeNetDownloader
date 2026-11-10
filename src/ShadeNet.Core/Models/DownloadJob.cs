@@ -83,6 +83,10 @@ public sealed class DownloadJob
         }
     }
 
+    /// <summary>
+    /// Bytes received so far: written, plus those on their way to the disk (connections write in batches). What is saved
+    /// for a resume (<see cref="CaptureSegments"/>) counts written bytes only.
+    /// </summary>
     public long DownloadedBytes
     {
         get
@@ -90,7 +94,7 @@ public sealed class DownloadJob
             lock (Sync)
             {
                 long sum = 0;
-                foreach (var s in Segments) sum += s.Downloaded;
+                foreach (var s in Segments) sum += s.Received;
                 return sum;
             }
         }

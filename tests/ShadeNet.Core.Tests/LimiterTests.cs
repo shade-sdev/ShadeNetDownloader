@@ -45,7 +45,9 @@ public class LimiterTests
         await using var h = await Harness.CreateAsync();
         var m = h.NewManager();
         var capped = Start(h, m, "a.bin", 2, 512 * KiB);
-        var free = Start(h, m, "b.bin", 2);
+        // "free" = no limit of ours; the server's 8 MiB/s per connection only keeps the file from being done (GB/s on
+        // this machine) before it is measured
+        var free = Start(h, m, "b.bin", 2, kbps: 8192);
 
         var ra = RateOf(() => capped.DownloadedBytes);
         var rb = RateOf(() => free.DownloadedBytes);
@@ -75,7 +77,9 @@ public class LimiterTests
     {
         await using var h = await Harness.CreateAsync();
         var m = h.NewManager();
-        var job = Start(h, m, "live.bin", 4, size: 8 * Big);
+        // 16 MiB/s per connection from the server: far above every limit below, but not gigabytes a second, whose writing
+        // back to the disk would slow the measured phases after it
+        var job = Start(h, m, "live.bin", 4, size: 8 * Big, kbps: 16384);
         await Task.Delay(1000);
 
         m.SetGlobalSpeedLimit(300 * KiB, true);

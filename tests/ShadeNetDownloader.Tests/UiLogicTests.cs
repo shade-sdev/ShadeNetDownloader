@@ -60,7 +60,8 @@ public class SettingsServiceTests
         s.Engine.DefaultConnections = 12;
         s.Engine.MaxConcurrentJobs = 5;
         s.Engine.DownloadRoot = @"D:\Stuff";
-        s.Engine.RampUpInterval = TimeSpan.FromSeconds(3);
+        s.Engine.ConnectTimeout = TimeSpan.FromSeconds(33);
+        s.Engine.CheckpointInterval = TimeSpan.FromSeconds(3);   // the engine's own tuning: not the user's to keep
         s.Engine.HostConnectionLimits["strict.example"] = 2;
         a.Save();
 
@@ -71,7 +72,10 @@ public class SettingsServiceTests
         Assert.Equal(12, loaded.Engine.DefaultConnections);
         Assert.Equal(5, loaded.Engine.MaxConcurrentJobs);
         Assert.Equal(@"D:\Stuff", loaded.Engine.DownloadRoot);
-        Assert.Equal(TimeSpan.FromSeconds(3), loaded.Engine.RampUpInterval);
+        Assert.Equal(TimeSpan.FromSeconds(33), loaded.Engine.ConnectTimeout);
+        // Not saved, so a newer version's better value reaches everybody (an older settings file holds 2 s).
+        Assert.Equal(new ShadeNet.Core.Engine.EngineSettings().CheckpointInterval, loaded.Engine.CheckpointInterval);
+        Assert.DoesNotContain("CheckpointInterval", File.ReadAllText(Path.Combine(dir.Path, "settings.json")));
         Assert.Equal(2, loaded.Engine.HostConnectionLimits["STRICT.example"]); // lookup is case-insensitive again
     }
 

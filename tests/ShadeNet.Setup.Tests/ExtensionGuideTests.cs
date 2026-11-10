@@ -3,6 +3,7 @@ using System.IO.Compression;
 namespace ShadeNet.Setup.Tests;
 
 /// <summary>The last step of setup (adding the extension) points at real things: the folder the installer unpacks and browsers by their programs.</summary>
+[Collection(TestRegistry.Collection)]
 public sealed class ExtensionGuideTests : IDisposable
 {
     readonly string _root = Path.Combine(Path.GetTempPath(), "shadenet-guide-" + Guid.NewGuid().ToString("N")[..8]);

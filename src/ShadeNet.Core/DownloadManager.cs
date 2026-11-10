@@ -43,6 +43,9 @@ public sealed class DownloadManager : IDisposable
     public EngineSettings Settings { get; }
     public SpeedLimiter GlobalLimiter { get; } = new();
 
+    /// <summary>Connection limits sites were seen to enforce: later downloads from them start within the limit.</summary>
+    public HostConnectionMemory HostLimits { get; } = new();
+
     public event Action<DownloadJob>? JobAdded;
     public event Action<Guid>? JobRemoved;
     public event Action<JobSnapshot>? JobUpdated;
@@ -318,6 +321,7 @@ public sealed class DownloadManager : IDisposable
             Store = _store,
             Logger = _logger,
             Publish = s => JobUpdated?.Invoke(s),
+            HostLimits = HostLimits,
         };
 
         IJobRunner runner = job.Kind == DownloadKind.Hls

@@ -6,6 +6,7 @@ using Microsoft.Win32;
 namespace ShadeNet.Setup.Tests;
 
 /// <summary>Everything happens in a throw-away folder and a throw-away registry key: the real system is never touched.</summary>
+[Collection(TestRegistry.Collection)]
 public sealed class InstallEngineTests : IDisposable
 {
     readonly string _root = Path.Combine(Path.GetTempPath(), "shadenet-setup-" + Guid.NewGuid().ToString("N")[..8]);

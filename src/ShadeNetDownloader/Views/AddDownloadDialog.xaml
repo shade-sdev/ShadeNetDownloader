@@ -213,7 +213,7 @@
         <Slider Minimum="1" Maximum="32" TickFrequency="1" IsSnapToTickEnabled="True" Margin="0,4,0,0"
                 Value="{Binding Connections, Mode=TwoWay}" />
         <TextBlock Margin="2,2,0,0" FontSize="12" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                   Text="The engine starts with one and adds more only while they actually speed things up." />
+                   Text="All open at once (fewer for a small file, or a site that allows fewer), and a far slower one is replaced." />
 
         <!-- ================= advanced ================= -->
         <ui:Button Appearance="Transparent" Margin="-8,12,0,0" Padding="8,4" HorizontalAlignment="Left"

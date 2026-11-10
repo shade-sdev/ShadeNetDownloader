@@ -29,6 +29,8 @@ public sealed record RequestRecord(
 ///   dropafter=N&amp;drops=K   the first K requests are cut after N body bytes
 ///   stallafter=N&amp;stalls=K the first K requests go silent after N body bytes
 ///   fail=503&amp;failcount=K&amp;retryafter=S  the first K requests answer with that status
+///   maxconns=N          at most N requests at the same time; one more is turned away with 503 (a per-client connection limit)
+///   slowevery=N&amp;slowkbps=K  every Nth request crawls at K KiB/s (a slow route or a slow server slot)
 /// GET /chunked/{size}   no Content-Length (unknown size), always 200
 /// GET /status/{code}    answers with that status
 /// GET /redir?to=URL&amp;code=302   redirect
@@ -171,7 +173,7 @@ public sealed class TestServer : IAsyncDisposable
         int? kbps = null, int? connLatencyMs = null, bool corrupt = false, bool lie = false, string? token = null,
         long? dropAfter = null, int drops = 0, long? stallAfter = null, int stalls = 0,
         int? failStatus = null, int failCount = 0, int? retryAfter = null, bool badRange = false,
-        string? nameStar = null, string? unique = null)
+        string? nameStar = null, string? unique = null, int? maxConns = null, int? slowEvery = null, int? slowKbps = null)
     {
         var q = new List<string>();
 
@@ -198,6 +200,9 @@ public sealed class TestServer : IAsyncDisposable
         Add("fail", failStatus);
         if (failCount > 0) Add("failcount", failCount);
         Add("retryafter", retryAfter);
+        Add("maxconns", maxConns);
+        Add("slowevery", slowEvery);
+        Add("slowkbps", slowKbps);
         // Failure counters are per URL; a unique tag keeps tests that share a server independent.
         Add("u", unique ?? Guid.NewGuid().ToString("N")[..8]);
         return $"{BaseUrl}/file/{size}" + (q.Count > 0 ? "?" + string.Join("&", q) : "");
@@ -249,6 +254,21 @@ public sealed class TestServer : IAsyncDisposable
             if (Q("retryafter") != null) res.Headers.RetryAfter = Q("retryafter");
             return;
         }
+
+        if (Q("maxconns") != null)
+        {
+            var key = "inflight|" + req.Path + req.QueryString;
+            if (_counters.AddOrUpdate(key, 1, (_, n) => n + 1) > QInt("maxconns"))
+            {
+                _counters.AddOrUpdate(key, 0, (_, n) => n - 1);
+                res.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
+            res.RegisterForDispose(new OnDispose(() => _counters.AddOrUpdate(key, 0, (_, n) => n - 1)));
+        }
+
+        if (Q("slowevery") != null && Bump(ctx, "slow") % QInt("slowevery") == 0) kbps = QInt("slowkbps");
 
         if (name != null) res.Headers.ContentDisposition = $"attachment; filename=\"{name}\"";
         if (Q("namestar") != null)
@@ -386,6 +406,17 @@ public sealed class TestServer : IAsyncDisposable
 static class StringExt
 {
     public static string? NullIfEmpty(this string s) => s.Length == 0 ? null : s;
+}
+
+/// <summary>Runs an action when the request ends, however it ends (finished, refused, cut off).</summary>
+sealed class OnDispose(Action action) : IDisposable
+{
+    int _done;
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _done, 1) == 0) action();
+    }
 }
 
 /// <summary>Deterministic pseudo-random bytes addressable by file offset.</summary>

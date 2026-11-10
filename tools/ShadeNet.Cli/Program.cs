@@ -304,10 +304,11 @@ static async Task<int> SegTest()
     Console.WriteLine($"Test server {server.BaseUrl}, output {dir}{Environment.NewLine}");
     var failures = 0;
 
-    async Task<(DownloadJob Job, double Seconds, bool Sha)> Run(string url, long size, int conns, bool live = false)
+    // hold: probe as the Add dialog does, keeping the answer open as the download's first (warm) connection
+    async Task<(DownloadJob Job, double Seconds, bool Sha)> Run(string url, long size, int conns, bool live = false, bool hold = false)
     {
         var manager = NewManager(dir, conns);
-        var probe = await manager.ProbeAsync(new RequestSpec(url));
+        var probe = hold ? await manager.ProbeAndHoldAsync(new RequestSpec(url)) : await manager.ProbeAsync(new RequestSpec(url));
         var sw = Stopwatch.StartNew();
         var job = await Download(manager, url, probe, conns, live);
         if (live) Console.WriteLine();
@@ -339,7 +340,8 @@ static async Task<int> SegTest()
 
     // B: warm connection reuse.
     Console.WriteLine("-- B. chunk takeover: new connections cost 5 s (slow handshake), so a finished warm one should take over their range");
-    var b = await Run(server.FileUrl(16 * MiB, name: "b.bin", kbps: 2048, connLatencyMs: 5000), 16 * MiB, 8, live: true);
+    // (the warm connection is the Add dialog's kept answer; every other one opens at the same time and pays the 5 s)
+    var b = await Run(server.FileUrl(16 * MiB, name: "b.bin", kbps: 2048, connLatencyMs: 5000), 16 * MiB, 8, live: true, hold: true);
     Console.WriteLine($"   {Stats(b.Job, b.Seconds)}");
     Report("B", b.Sha && b.Job.Stats.Takeovers >= 1, $"byte-exact={b.Sha}, takeovers={b.Job.Stats.Takeovers}");
 
@@ -490,7 +492,8 @@ static async Task<int> ResumeTest()
         var size = 12 * MiB;
         var dir = Dir("r3");
         var db = Path.Combine(dir, "jobs.db");
-        var url = server.FileUrl(size, name: "r3.bin", etag: "r3", kbps: 1024);
+        // slow enough that the kill comes after a checkpoint (4 connections at once reach 45 % within 2 s at 1 MiB/s each)
+        var url = server.FileUrl(size, name: "r3.bin", etag: "r3", kbps: 256);
         var cli = System.Reflection.Assembly.GetEntryAssembly()!.Location;
         var baseline = server.BytesServed;
         var child = Process.Start(new ProcessStartInfo("dotnet", $"\"{cli}\" get \"{url}\" -o \"{dir}\" -c 4 --db \"{db}\"")
