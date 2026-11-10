@@ -25,6 +25,9 @@ internal sealed class ConnectionSlot
     public double Speed => Meter.BytesPerSecond;
     public bool IsReceiving => Alive && Meter.TotalBytes > 0 && _current != null;
 
+    /// <summary>Holds a part and has asked for it (receiving or waiting for the answer).</summary>
+    public bool IsWorking => Alive && _current != null;
+
     /// <summary>Starts working on <paramref name="seg"/>; the returned token is cancelled on revoke or when <paramref name="parent"/> is.</summary>
     public CancellationToken Begin(Segment seg, CancellationToken parent)
     {

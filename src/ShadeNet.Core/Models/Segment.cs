@@ -20,12 +20,21 @@ public sealed class Segment
     /// <summary>Connection currently responsible for this segment (runtime only, guarded by the job lock).</summary>
     internal ConnectionSlot? Owner { get; set; }
 
+    /// <summary>
+    /// Bytes after <see cref="Position"/> that the owner has received and is writing (runtime only, guarded by the job lock).
+    /// They are claimed: a split starts after them, so it never cuts into data already on its way to the disk.
+    /// </summary>
+    internal long InFlight { get; set; }
+
+    /// <summary>Received for this segment: written (<see cref="Downloaded"/>) and on its way to the disk. For showing progress.</summary>
+    public long Received => IsBounded ? Math.Min(Length, Downloaded + InFlight) : Downloaded + InFlight;
+
     public long Position => Start + Downloaded;
     public bool IsBounded => End != Unbounded;
     public long Length => IsBounded ? End - Start + 1 : Unbounded;
     public long Remaining => IsBounded ? End - Position + 1 : Unbounded;
 
-    public SegmentInfo ToInfo() => new(Start, End, Downloaded, State, Owner?.Id ?? -1, Owner?.Speed ?? 0);
+    public SegmentInfo ToInfo() => new(Start, End, Received, State, Owner?.Id ?? -1, Owner?.Speed ?? 0);
 }
 
 /// <summary>Immutable copy of a segment for UI consumption.</summary>

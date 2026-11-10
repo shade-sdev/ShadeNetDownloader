@@ -26,6 +26,9 @@ internal sealed class RunnerContext
     public JobStore? Store { get; init; }
     public required ILogger Logger { get; init; }
     public required Action<JobSnapshot> Publish { get; init; }
+
+    /// <summary>Connection limits sites were seen to enforce, shared by the downloads of one manager.</summary>
+    public HostConnectionMemory? HostLimits { get; init; }
 }
 
 /// <summary>
@@ -279,6 +282,36 @@ internal sealed class JobRunner : IJobRunner
         public int NextSlotId;
         public Exception? Fatal;
         public CancellationTokenSource Cts = null!;
+
+        /// <summary>The server turned a connection away (429/503) during this attempt: it has a connection limit.</summary>
+        public volatile bool Refused;
+
+        /// <summary>The most connections that were receiving at the same time.</summary>
+        public int PeakReceiving;
+
+        TaskCompletionSource _wake = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>Completes at the next <see cref="Wake"/>. Take it BEFORE looking at the state, so no change is missed.</summary>
+        public Task WakeTask
+        {
+            get
+            {
+                lock (Gate) return _wake.Task;
+            }
+        }
+
+        /// <summary>A connection ended or finished its part: the supervisor looks at once instead of at its next tick.</summary>
+        public void Wake()
+        {
+            TaskCompletionSource woken;
+            lock (Gate)
+            {
+                woken = _wake;
+                _wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            }
+
+            woken.TrySetResult();
+        }
     }
 
     async Task TransferAsync(HttpClient http, CancellationToken stop)
@@ -380,9 +413,15 @@ internal sealed class JobRunner : IJobRunner
     /// <returns>true when the engine must restart in single-connection mode.</returns>
     async Task<bool> RunAttemptAsync(HttpClient http, SafeFileHandle file, CancellationToken stop)
     {
-        var host = new Uri(_job.Url).Host;
+        var host = Host();
         var canSegment = _job.AcceptsRanges && _job.TotalSize is > 0;
         var allowed = canSegment ? S.EffectiveConnections(host, _job.MaxConnections) : 1;
+        // a site that turned extra connections away before gets only as many as it allowed then
+        if (canSegment && _ctx.HostLimits?.CapFor(host) is { } learned && learned < allowed)
+        {
+            _ctx.Logger.LogDebug("{Host} allows {Cap} connections (learned)", host, learned);
+            allowed = learned;
+        }
 
         var a = new Attempt { Allowed = allowed };
         a.Cts = CancellationTokenSource.CreateLinkedTokenSource(stop);
@@ -408,15 +447,30 @@ internal sealed class JobRunner : IJobRunner
         }
 
         _jobMeter.Reset();
-        Spawn();
+        Volatile.Write(ref _bestConnectionSpeed, 0);
+        _scheduler.BestConnectionSpeed = 0;
+        var initial = canSegment ? RampUpPolicy.Initial(a.Allowed, _job.TotalSize, EffectiveLimit(), S.InitialPieceBytes) : 1;
+        for (var i = 0; i < initial; i++) Spawn();
 
         using var timer = new PeriodicTimer(S.TickInterval);
         var lastCheckpoint = Stopwatch.GetTimestamp();
+        var checkpointGap = S.CheckpointInterval;
+        Task<bool>? tick = null;
 
         try
         {
-            while (await timer.WaitForNextTickAsync(a.Cts.Token).ConfigureAwait(false))
+            while (true)
             {
+                // Taken before looking: a connection that ends after the look below still wakes the wait.
+                var woken = a.WakeTask;
+                if (a.Fatal != null || _scheduler.AllDone()) break;
+
+                tick ??= timer.WaitForNextTickAsync(a.Cts.Token).AsTask();
+                await Task.WhenAny(tick, woken).ConfigureAwait(false);
+                if (!tick.IsCompleted) continue;   // a connection ended: only the completion check above, at once
+                if (!await tick.ConfigureAwait(false)) break;
+                tick = null;
+
                 var speed = _jobMeter.Sample();
                 int alive, receiving;
                 lock (a.Gate)
@@ -424,6 +478,7 @@ internal sealed class JobRunner : IJobRunner
                     foreach (var s in a.Slots) s.Meter.Sample();
                     alive = a.Slots.Count(s => s.Alive);
                     receiving = a.Slots.Count(s => s.IsReceiving);
+                    a.PeakReceiving = Math.Max(a.PeakReceiving, receiving);
                 }
 
                 _job.Stats.NotePeak(alive);
@@ -440,10 +495,12 @@ internal sealed class JobRunner : IJobRunner
                     for (var i = 0; i < add; i++) Spawn();
                 }
 
-                if ((Stopwatch.GetTimestamp() - lastCheckpoint) / (double)Stopwatch.Frequency >= S.CheckpointInterval.TotalSeconds)
+                if ((Stopwatch.GetTimestamp() - lastCheckpoint) / (double)Stopwatch.Frequency >= checkpointGap.TotalSeconds)
                 {
-                    await CheckpointAsync(file).ConfigureAwait(false);
+                    var took = await CheckpointAsync(file).ConfigureAwait(false);
                     lastCheckpoint = Stopwatch.GetTimestamp();
+                    // a disk that takes long to flush is flushed less often (each flush holds up every write to the file)
+                    checkpointGap = took * 10 > S.CheckpointInterval ? took * 10 : S.CheckpointInterval;
                 }
 
                 _ctx.Publish(MakeSnapshot(speed, alive));
@@ -452,6 +509,12 @@ internal sealed class JobRunner : IJobRunner
         catch (OperationCanceledException)
         {
             // stop requested or a slot reported a fatal error
+        }
+
+        if (a.Refused && a.PeakReceiving > 0)
+        {
+            // The server turned connections away while this many were at work: the next download starts with no more.
+            _ctx.HostLimits?.Learn(host, a.PeakReceiving);
         }
 
         a.Cts.Cancel();
@@ -501,10 +564,15 @@ internal sealed class JobRunner : IJobRunner
         return false;
     }
 
-    /// <summary>capture progress → flush file data → persist the capture (never record bytes that are not on disk).</summary>
-    async Task CheckpointAsync(SafeFileHandle file)
+    /// <summary>
+    /// capture progress → flush file data → persist the capture (never record bytes that are not on disk). Only written
+    /// bytes count as downloaded (a connection commits a batch once its write has landed), so the capture is safe.
+    /// </summary>
+    /// <returns>How long the flush and the save took.</returns>
+    async Task<TimeSpan> CheckpointAsync(SafeFileHandle file)
     {
         var captured = _job.CaptureSegments();
+        var clock = Stopwatch.StartNew();
         await Task.Run(() =>
         {
             try
@@ -517,7 +585,10 @@ internal sealed class JobRunner : IJobRunner
                 _ctx.Logger.LogError(ex, "Checkpoint failed for {Id}", _job.Id);
             }
         }).ConfigureAwait(false);
+        return clock.Elapsed;
     }
+
+    string Host() => new Uri(_job.Url).Host;
 
     long EffectiveLimit()
     {
@@ -558,6 +629,7 @@ internal sealed class JobRunner : IJobRunner
         finally
         {
             slot.Alive = false;
+            a.Wake();
         }
     }
 
@@ -581,8 +653,15 @@ internal sealed class JobRunner : IJobRunner
 
             try
             {
-                await TransferSegmentAsync(slot, seg, http, file, canSegment, ct).ConfigureAwait(false);
+                await TransferSegmentAsync(slot, seg, a, http, file, canSegment, ct).ConfigureAwait(false);
                 return _scheduler.IsDone(seg) ? SegResult.Completed : SegResult.Lost;
+            }
+            catch (SlowConnectionException)
+            {
+                // Not a failure: what arrived is written, and the rest is asked for at once on a new connection.
+                _job.Stats.AddReplacedConnection();
+                _ctx.Logger.LogDebug("Slot {Slot} segment {Seg}: far slower than the other connections, asking again", slot.Id, seg.Id);
+                continue;
             }
             catch (OperationCanceledException) when (a.Cts.Token.IsCancellationRequested)
             {
@@ -620,14 +699,28 @@ internal sealed class JobRunner : IJobRunner
                 lock (a.Gate)
                 {
                     var alive = a.Slots.Count(s => s.Alive);
-                    a.Allowed = Math.Max(1, Math.Min(a.Allowed, alive - 1));
+                    var receiving = a.Slots.Count(s => s != slot && s.IsReceiving);
+                    // The server's limit is what it serves at once: keep to that many, and never fewer than it was seen to
+                    // serve. A refusal right after a connection moved on to its next part (often all of them at the same
+                    // moment) is the server still counting the old request, not a lower limit; taking one connection off for
+                    // each such moment ended at one.
+                    a.Allowed = receiving > 0
+                        ? Math.Min(a.Allowed, Math.Max(receiving, a.PeakReceiving))
+                        : Math.Max(Math.Max(1, a.PeakReceiving), Math.Min(a.Allowed, alive - 1));
+                    // turned away while others work: the server limits connections (the next download keeps to it)
+                    if (hs.StatusCode is 429 or 503 && a.Slots.Any(s => s != slot && s.IsWorking)) a.Refused = true;
                 }
 
-                delay = hs.RetryAfter is { } ra ? TimeSpan.FromSeconds(Math.Min(ra.TotalSeconds, 300)) : Backoff(attempt);
+                // The server's Retry-After wins. Without one, the first try again is at once too: a refusal right after a
+                // connection of ours closed is usually the server still counting it; repeated refusals wait as usual.
+                delay = hs.RetryAfter is { } ra ? TimeSpan.FromSeconds(Math.Min(ra.TotalSeconds, 300))
+                    : attempt == 1 ? TimeSpan.Zero : Backoff(attempt - 1);
             }
             else
             {
-                delay = Backoff(attempt);
+                // A dropped or stalled connection is asked again at once (the server is not saying "slow down");
+                // waiting starts with the second try in a row.
+                delay = attempt == 1 ? TimeSpan.Zero : Backoff(attempt - 1);
             }
 
             if (attempt > S.MaxRetries)
@@ -640,11 +733,13 @@ internal sealed class JobRunner : IJobRunner
             _job.Stats.AddRetry();
             _ctx.Logger.LogDebug("Slot {Slot} segment {Seg} retry {N} in {Delay}: {Error}", slot.Id, seg.Id, attempt, delay, error.Message);
 
-            // Trim this slot if the server asked us to use fewer connections.
+            // Trim this slot if the server asked us to use fewer connections: its part goes back to the pool, for one the
+            // server serves. Whichever slot it is (with every connection opening at once, the first one may be the one
+            // turned away; kept, it would hold its part through ever longer waits while the others finish the rest).
             lock (a.Gate)
             {
                 var alive = a.Slots.Count(s => s.Alive);
-                if (error is HttpStatusException && alive > a.Allowed && slot.Id != 0)
+                if (error is HttpStatusException && alive > a.Allowed)
                 {
                     _scheduler.Release(seg, slot);
                     return SegResult.Trimmed;
@@ -670,7 +765,7 @@ internal sealed class JobRunner : IJobRunner
     }
 
     async Task TransferSegmentAsync(
-        ConnectionSlot slot, Segment seg, HttpClient http, SafeFileHandle file, bool canSegment, CancellationToken ct)
+        ConnectionSlot slot, Segment seg, Attempt a, HttpClient http, SafeFileHandle file, bool canSegment, CancellationToken ct)
     {
         long pos, reqEnd;
         lock (_job.Sync)
@@ -719,8 +814,11 @@ internal sealed class JobRunner : IJobRunner
         {
             ValidateResponse(response, ranged, pos, reqEnd);
 
-            var chunkMax = S.ReadBufferBytes;
-            var buffer = ArrayPool<byte>.Shared.Rent(chunkMax);
+            var readMax = S.ReadBufferBytes;
+            using var batch = new BatchWriter(file, _scheduler, seg, slot, pos, Math.Max(readMax, S.WriteBatchBytes));
+            var started = Stopwatch.GetTimestamp();
+            var lastLook = started;
+            long received = 0;
             try
             {
                 await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
@@ -733,10 +831,11 @@ internal sealed class JobRunner : IJobRunner
                     if (allowance < 0) return;   // taken over by another connection
                     if (allowance == 0) break;   // our (possibly trimmed) range is complete
 
-                    var want = (int)Math.Min(
-                        SpeedLimiter.PreferredReadSize(chunkMax, _ctx.GlobalLimiter, JobLimiter), allowance);
+                    var room = batch.Free;
+                    var want = (int)Math.Min(Math.Min(
+                        SpeedLimiter.PreferredReadSize(readMax, _ctx.GlobalLimiter, JobLimiter), room.Length), allowance);
 
-                    var n = await ReadAsync(stream, buffer, want, stall, S.StallTimeout, ct).ConfigureAwait(false);
+                    var n = await ReadAsync(stream, room[..want], stall, S.StallTimeout, ct).ConfigureAwait(false);
                     if (n == 0)
                     {
                         eof = true;
@@ -745,20 +844,34 @@ internal sealed class JobRunner : IJobRunner
 
                     await SpeedLimiter.AcquireAsync(n, ct, _ctx.GlobalLimiter, JobLimiter).ConfigureAwait(false);
 
-                    try
+                    // claimed before it is written: a split meanwhile starts after these bytes
+                    var mine = _scheduler.Reserve(seg, slot, n);
+                    if (mine < 0) return;   // taken over meanwhile
+                    batch.Add(mine);
+                    received += mine;
+                    slot.Meter.Add(mine);
+                    _jobMeter.Add(mine);
+
+                    var now = Stopwatch.GetTimestamp();
+                    if (Seconds(now - lastLook) >= 0.5)
                     {
-                        await RandomAccess.WriteAsync(file, buffer.AsMemory(0, n), pos, ct).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        throw new DiskException($"Could not write to disk: {ex.Message}", ex);
+                        lastLook = now;
+                        var onNet = Seconds(now - started - batch.DiskWaitTicks);
+                        NoteConnectionSpeed(received, onNet);
+                        if (IsFarTooSlow(a, slot, seg, received, onNet))
+                        {
+                            if (!await batch.FinishAsync().ConfigureAwait(false)) return;
+                            throw new SlowConnectionException();
+                        }
                     }
 
-                    if (!_scheduler.Commit(seg, slot, n)) return;
-                    pos += n;
-                    slot.Meter.Add(n);
-                    _jobMeter.Add(n);
+                    // a full batch, the end of the part, or a second gone by (progress shows; a pause keeps what came)
+                    if (batch.Free.Length == 0 || mine < n || mine == allowance || Seconds(now - batch.LastWriteTicks) >= 1)
+                        if (!await batch.WriteAsync().ConfigureAwait(false)) return;
                 }
+
+                if (!await batch.FinishAsync().ConfigureAwait(false)) return;
+                NoteConnectionSpeed(received, Seconds(Stopwatch.GetTimestamp() - started - batch.DiskWaitTicks));
 
                 if (eof)
                 {
@@ -774,23 +887,201 @@ internal sealed class JobRunner : IJobRunner
                 // Truncated by a split? The response still carries bytes of the neighbour - compare a few of them
                 // with what the other connection wrote (cheap data-integrity guard).
                 if (reqEnd != Segment.Unbounded && reqEnd > seg.End)
-                    await VerifySeamAsync(stream, seg, reqEnd, buffer, file, stall, ct).ConfigureAwait(false);
+                    await VerifySeamAsync(stream, seg, reqEnd, file, stall, ct).ConfigureAwait(false);
 
                 _scheduler.MarkDone(seg, slot);
             }
+            catch (Exception ex) when (ex is not (DiskException or SlowConnectionException) && batch.Busy)
+            {
+                // Paused, cut off or gone quiet: what arrived is still written and counted.
+                try
+                {
+                    await batch.FinishAsync().ConfigureAwait(false);
+                }
+                catch
+                {
+                    // the first error is the one to report
+                }
+
+                throw;
+            }
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                // never leave a write running past this connection (the file may be closed next)
+                await batch.DrainAsync().ConfigureAwait(false);
             }
         }
     }
 
-    async Task<int> ReadAsync(Stream stream, byte[] buffer, int want, CancellationTokenSource stall, TimeSpan timeout, CancellationToken ct)
+    static double Seconds(long ticks) => ticks / (double)Stopwatch.Frequency;
+
+    /// <summary>
+    /// A connection that should ask again on a new one: after <see cref="EngineSettings.SlowConnectionGrace"/> on its answer
+    /// it gets less than 1/<see cref="EngineSettings.SlowConnectionRatio"/> of the yardstick, with more than that grace's
+    /// worth of work left at its own pace. Never under a speed limit, which makes connections slow on purpose.
+    /// <para>
+    /// The yardstick is the larger of: the fastest OTHER connection right now, and the best one connection of this download
+    /// sustained divided by the connections receiving now. Both allow for sharing: on a line that one connection could fill,
+    /// N connections each get about 1/N of it, and none of them is "slow". The second catches what the first cannot: the
+    /// connections still at work all stuck on slow routes (the last parts of a file), where each one alone looks no slower
+    /// than the others.
+    /// </para>
+    /// </summary>
+    bool IsFarTooSlow(Attempt a, ConnectionSlot slot, Segment seg, long received, double seconds)
+    {
+        if (!S.ReplaceSlowConnections || seconds < S.SlowConnectionGrace.TotalSeconds || EffectiveLimit() > 0) return false;
+
+        var speed = received / seconds;
+        double fastest = 0;
+        var sharing = 1;
+        lock (a.Gate)
+            foreach (var s in a.Slots)
+                if (s != slot && s.IsReceiving)
+                {
+                    sharing++;
+                    fastest = Math.Max(fastest, s.Speed);
+                }
+
+        var yardstick = Math.Max(fastest, Volatile.Read(ref _bestConnectionSpeed) / sharing);
+        if (yardstick <= 0 || speed * S.SlowConnectionRatio >= yardstick) return false;
+
+        var left = _scheduler.Allowance(seg, slot);
+        return left > 0 && left / Math.Max(1, speed) > S.SlowConnectionGrace.TotalSeconds;
+    }
+
+    /// <summary>The best speed one connection of this download sustained (over at least 256 KiB of one answer).</summary>
+    double _bestConnectionSpeed;
+
+    void NoteConnectionSpeed(long received, double seconds)
+    {
+        if (received < 256 * 1024 || seconds <= 0) return;
+        var speed = received / seconds;
+        double seen;
+        while (speed > (seen = Volatile.Read(ref _bestConnectionSpeed)))
+            if (Interlocked.CompareExchange(ref _bestConnectionSpeed, speed, seen) == seen)
+            {
+                _scheduler.BestConnectionSpeed = speed;
+                break;
+            }
+    }
+
+    sealed class SlowConnectionException() : Exception("Far slower than this download's other connections: asking again on a new one.");
+
+    /// <summary>
+    /// One connection's writes. Received bytes are collected and written a batch at a time while the next batch is
+    /// received, so the network is not held up by the disk (and the disk gets fewer, larger writes). A batch counts as
+    /// downloaded (<see cref="SegmentScheduler.Commit"/>) only once its write has landed, so a checkpoint never records bytes
+    /// that are not in the file.
+    /// </summary>
+    sealed class BatchWriter : IDisposable
+    {
+        readonly SafeFileHandle _file;
+        readonly SegmentScheduler _scheduler;
+        readonly Segment _seg;
+        readonly ConnectionSlot _slot;
+        readonly int _size;
+        byte[] _fill, _spare;
+        long _fillAt;
+        Task? _writing;
+        int _writingLength;
+
+        public BatchWriter(SafeFileHandle file, SegmentScheduler scheduler, Segment seg, ConnectionSlot slot, long at, int size)
+        {
+            _file = file;
+            _scheduler = scheduler;
+            _seg = seg;
+            _slot = slot;
+            _fillAt = at;
+            _size = size;
+            _fill = ArrayPool<byte>.Shared.Rent(size);
+            _spare = ArrayPool<byte>.Shared.Rent(size);
+        }
+
+        public int Filled { get; private set; }
+
+        /// <summary>Where the next bytes are received.</summary>
+        public Memory<byte> Free => _fill.AsMemory(Filled, _size - Filled);
+
+        public long LastWriteTicks { get; private set; } = Stopwatch.GetTimestamp();
+
+        /// <summary>Time spent waiting for the disk: a connection is not slow for that.</summary>
+        public long DiskWaitTicks { get; private set; }
+
+        public bool Busy => Filled > 0 || _writing != null;
+
+        /// <summary><paramref name="n"/> bytes were received into <see cref="Free"/> (and claimed).</summary>
+        public void Add(int n) => Filled += n;
+
+        /// <summary>Starts writing what is collected, once the batch before it has landed. False: the part is no longer ours.</summary>
+        public async Task<bool> WriteAsync()
+        {
+            if (Filled == 0) return true;
+            if (!await LandAsync().ConfigureAwait(false)) return false;
+
+            _writing = RandomAccess.WriteAsync(_file, _fill.AsMemory(0, Filled), _fillAt, CancellationToken.None).AsTask();
+            _writingLength = Filled;
+            _fillAt += Filled;
+            (_fill, _spare) = (_spare, _fill);
+            Filled = 0;
+            LastWriteTicks = Stopwatch.GetTimestamp();
+            return true;
+        }
+
+        /// <summary>Waits for the batch on its way to the disk and counts it as downloaded.</summary>
+        public async Task<bool> LandAsync()
+        {
+            if (_writing == null) return true;
+            var from = Stopwatch.GetTimestamp();
+            try
+            {
+                await _writing.ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new DiskException($"Could not write to disk: {ex.Message}", ex);
+            }
+            finally
+            {
+                _writing = null;
+                DiskWaitTicks += Stopwatch.GetTimestamp() - from;
+            }
+
+            return _scheduler.Commit(_seg, _slot, _writingLength);
+        }
+
+        /// <summary>Everything collected written and counted (the end of an answer, a pause, a replaced connection).</summary>
+        public async Task<bool> FinishAsync() =>
+            await WriteAsync().ConfigureAwait(false) && await LandAsync().ConfigureAwait(false);
+
+        /// <summary>A write still running is waited for, whatever happened.</summary>
+        public async Task DrainAsync()
+        {
+            if (_writing == null) return;
+            try
+            {
+                await _writing.ConfigureAwait(false);
+            }
+            catch
+            {
+                // reported where it mattered, or the connection is ending anyway
+            }
+
+            _writing = null;
+        }
+
+        public void Dispose()
+        {
+            ArrayPool<byte>.Shared.Return(_fill);
+            ArrayPool<byte>.Shared.Return(_spare);
+        }
+    }
+
+    async Task<int> ReadAsync(Stream stream, Memory<byte> into, CancellationTokenSource stall, TimeSpan timeout, CancellationToken ct)
     {
         stall.CancelAfter(timeout);
         try
         {
-            var n = await stream.ReadAsync(buffer.AsMemory(0, want), stall.Token).ConfigureAwait(false);
+            var n = await stream.ReadAsync(into, stall.Token).ConfigureAwait(false);
             return n;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -804,7 +1095,7 @@ internal sealed class JobRunner : IJobRunner
     }
 
     async Task VerifySeamAsync(
-        Stream stream, Segment seg, long reqEnd, byte[] buffer, SafeFileHandle file, CancellationTokenSource stall, CancellationToken ct)
+        Stream stream, Segment seg, long reqEnd, SafeFileHandle file, CancellationTokenSource stall, CancellationToken ct)
     {
         const int Probe = 4096;
         var next = _scheduler.NextOf(seg);
@@ -964,7 +1255,7 @@ internal sealed class JobRunner : IJobRunner
             for (var i = 0; i < infos.Length; i++)
             {
                 var s = _job.Segments[i];
-                downloaded += s.Downloaded;
+                downloaded += s.Received;   // (what is on its way to the disk too: progress follows the network)
                 infos[i] = s.ToInfo();
             }
         }

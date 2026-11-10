@@ -213,36 +213,71 @@ public class RampUpPolicyTests
 {
     static RampUpPolicy Policy() => new(TimeSpan.Zero);
 
+    /// <summary>A limit far above the speeds below: the slow-start applies, and saturation never stops it.</summary>
+    const long Limit = 1_000_000_000;
+
     [Fact]
-    public void Doubles_while_connections_are_receiving()
+    public void Without_a_limit_every_connection_opens_at_once()
+    {
+        Assert.Equal(8, RampUpPolicy.Initial(max: 8, size: 100L << 20, limit: 0, pieceBytes: 512 * 1024));
+        Assert.Equal(32, RampUpPolicy.Initial(32, 1L << 30, 0, 512 * 1024));
+    }
+
+    [Fact]
+    public void A_small_file_gets_one_connection_per_piece()
+    {
+        Assert.Equal(1, RampUpPolicy.Initial(8, 256 * 1024, 0, 512 * 1024));      // smaller than one piece
+        Assert.Equal(2, RampUpPolicy.Initial(8, 1024 * 1024, 0, 512 * 1024));
+        Assert.Equal(3, RampUpPolicy.Initial(8, 1024 * 1024 + 1, 0, 512 * 1024));  // a started piece counts
+        Assert.Equal(1, RampUpPolicy.Initial(8, null, 0, 512 * 1024));             // size unknown: no ranges to split
+        Assert.Equal(1, RampUpPolicy.Initial(1, 1L << 30, 0, 512 * 1024));
+    }
+
+    [Fact]
+    public void Under_a_limit_it_starts_with_one()
+    {
+        Assert.Equal(1, RampUpPolicy.Initial(8, 1L << 30, limit: 500_000, pieceBytes: 512 * 1024));
+    }
+
+    [Fact]
+    public void Without_a_limit_a_missing_connection_comes_back_at_once()
+    {
+        Assert.Equal(3, Policy().Plan(active: 5, receiving: 0, speed: 0, limit: 0, max: 8));
+        Assert.Equal(0, Policy().Plan(8, 8, 1e6, 0, 8));
+        Assert.Equal(7, new RampUpPolicy(TimeSpan.FromSeconds(30)).Plan(1, 1, 1e6, 0, 8));   // no waiting for an interval
+    }
+
+    [Fact]
+    public void Under_a_limit_it_doubles_while_connections_are_receiving()
     {
         var p = Policy();
-        Assert.Equal(1, p.Plan(active: 1, receiving: 1, speed: 1e6, limit: 0, max: 8)); // 1 → 2
-        Assert.Equal(2, p.Plan(2, 2, 1e6, 0, 8));                                        // 2 → 4
-        Assert.Equal(4, p.Plan(4, 4, 1e6, 0, 8));                                        // 4 → 8
-        Assert.Equal(0, p.Plan(8, 8, 1e6, 0, 8));                                        // at the cap
+        Assert.Equal(1, p.Plan(active: 1, receiving: 1, speed: 1e6, limit: Limit, max: 8)); // 1 → 2
+        Assert.Equal(2, p.Plan(2, 2, 1e6, Limit, 8));                                        // 2 → 4
+        Assert.Equal(4, p.Plan(4, 4, 1e6, Limit, 8));                                        // 4 → 8
+        Assert.Equal(0, p.Plan(8, 8, 1e6, Limit, 8));                                        // at the cap
     }
 
     [Fact]
     public void Never_exceeds_the_cap()
     {
-        Assert.Equal(1, Policy().Plan(2, 2, 1e6, 0, 3));   // 2 → 3, not 4
-        Assert.Equal(0, Policy().Plan(3, 3, 1e6, 0, 3));
+        Assert.Equal(1, Policy().Plan(2, 2, 1e6, Limit, 3));   // 2 → 3, not 4
+        Assert.Equal(0, Policy().Plan(3, 3, 1e6, Limit, 3));
+        Assert.Equal(1, Policy().Plan(2, 2, 1e6, 0, 3));
     }
 
     [Fact]
-    public void Waits_until_most_connections_actually_receive_data()
+    public void Under_a_limit_it_waits_until_most_connections_actually_receive_data()
     {
-        Assert.Equal(0, Policy().Plan(4, 0, 0, 0, 8));
-        Assert.Equal(0, Policy().Plan(4, 2, 1e6, 0, 8)); // exactly half is not "more than half"
-        Assert.Equal(4, Policy().Plan(4, 3, 1e6, 0, 8));
+        Assert.Equal(0, Policy().Plan(4, 0, 0, Limit, 8));
+        Assert.Equal(0, Policy().Plan(4, 2, 1e6, Limit, 8)); // exactly half is not "more than half"
+        Assert.Equal(4, Policy().Plan(4, 3, 1e6, Limit, 8));
     }
 
     [Fact]
-    public void Respects_the_interval()
+    public void Under_a_limit_it_respects_the_interval()
     {
         var p = new RampUpPolicy(TimeSpan.FromSeconds(30));
-        Assert.Equal(0, p.Plan(1, 1, 1e6, 0, 8)); // the clock starts when the job starts
+        Assert.Equal(0, p.Plan(1, 1, 1e6, Limit, 8)); // the clock starts when the job starts
     }
 
     [Fact]
@@ -398,5 +433,53 @@ public class JobStoreTests : IDisposable
 
         using var final = new JobStore(path);
         Assert.Equal(3, final.LoadAll().Count);
+    }
+}
+
+public class HostConnectionMemoryTests
+{
+    [Fact]
+    public void A_site_that_limited_connections_gets_no_more_next_time()
+    {
+        var m = new HostConnectionMemory();
+        Assert.Null(m.CapFor("files.example"));
+
+        m.Learn("files.example", 2);
+
+        Assert.Equal(2, m.CapFor("files.example"));
+        Assert.Equal(2, m.CapFor("FILES.example"));     // host names are case-insensitive
+        Assert.Null(m.CapFor("other.example"));
+    }
+
+    [Fact]
+    public void A_tighter_limit_replaces_a_looser_one_but_not_the_other_way_round()
+    {
+        var m = new HostConnectionMemory();
+        m.Learn("h", 4);
+        m.Learn("h", 2);
+        Assert.Equal(2, m.CapFor("h"));
+        m.Learn("h", 6);                                 // a busy moment's refusal does not loosen what was learned
+        Assert.Equal(2, m.CapFor("h"));
+    }
+
+    [Fact]
+    public void A_learned_limit_is_forgotten_after_a_while()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var m = new HostConnectionMemory(() => now);
+        m.Learn("h", 2);
+        now += HostConnectionMemory.Lifetime + TimeSpan.FromMinutes(1);
+        Assert.Null(m.CapFor("h"));
+        m.Learn("h", 5);                                 // after it was forgotten, a new one is learned afresh
+        Assert.Equal(5, m.CapFor("h"));
+    }
+
+    [Fact]
+    public void Nothing_is_learned_from_no_working_connection()
+    {
+        var m = new HostConnectionMemory();
+        m.Learn("h", 0);
+        m.Learn("", 3);
+        Assert.Null(m.CapFor("h"));
     }
 }

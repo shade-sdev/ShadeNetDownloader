@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Headers;
 using System.Runtime.ExceptionServices;
@@ -38,6 +39,20 @@ internal sealed class HlsRunner : IJobRunner
         public required HlsSegment Segment { get; init; }
         public required string FinalPath { get; init; }
         public bool Done { get; set; }
+
+        // ---- while it downloads (guarded by the runner's lock) ----
+
+        /// <summary>When its current copy started (Stopwatch ticks); 0 = not downloading.</summary>
+        public long Started;
+
+        /// <summary>Bytes its current first copy has received (for judging its speed).</summary>
+        public long Received;
+
+        /// <summary>A second copy is being fetched (see <c>FindPieceToRace</c>): the first copy to arrive is kept.</summary>
+        public bool Raced;
+
+        /// <summary>Cancels the first copy when the second one wins, and the second when the first one does.</summary>
+        public CancellationTokenSource? First, Second;
     }
 
     /// <summary>One media track (picture, or sound kept apart). Its segments are known by media sequence number.</summary>
@@ -94,6 +109,12 @@ internal sealed class HlsRunner : IJobRunner
     int _partsTotal;
     long _carriedBytes;       // bytes of segments finished before this run began
     int _active;
+
+    /// <summary>Pieces whose first copy is downloading (guarded by <see cref="_lock"/>).</summary>
+    readonly HashSet<Part> _inFlight = new();
+
+    /// <summary>Serialises putting downloaded pieces in place.</summary>
+    readonly object _moves = new();
     string? _note;
 
     public HlsRunner(DownloadJob job, RunnerContext ctx)
@@ -589,6 +610,7 @@ internal sealed class HlsRunner : IJobRunner
         }
 
         _meter.Reset();
+        Volatile.Write(ref _bestPieceSpeed, 0);
     }
 
     async Task EnsureInitAsync(HttpClient http, Part part, CancellationToken ct)
@@ -598,7 +620,7 @@ internal sealed class HlsRunner : IJobRunner
         if (File.Exists(path) && new FileInfo(path).Length > 0) return;
 
         var lazy = _inits.GetOrAdd(path, _ => new Lazy<Task>(() =>
-            WithRetryAsync(() => DownloadToFileAsync(http, map.Url, map.Offset, map.Length, part.Segment.Key, part.Segment.Sequence, path, ct), ct)));
+            WithRetryAsync(mayRestart => DownloadToFileAsync(http, map.Url, map.Offset, map.Length, part.Segment.Key, part.Segment.Sequence, path, mayRestart, ct), ct)));
         try
         {
             await lazy.Value.ConfigureAwait(false);
@@ -665,7 +687,20 @@ internal sealed class HlsRunner : IJobRunner
             {
                 if (!_queue.TryDequeue(out var part))
                 {
-                    if (_pollingDone && _queue.IsEmpty) return;
+                    // The end game: nothing waits to be fetched, but a piece still downloading may be crawling. A second copy
+                    // of it is fetched on a new connection, and the first copy to arrive is kept (a piece is a file of its
+                    // own, so the two never touch the same bytes).
+                    if (_pollingDone && _queue.IsEmpty)
+                    {
+                        if (!plan.Live && FindPieceToRace() is { } slow)
+                        {
+                            await RaceAsync(http, slow, linked.Token).ConfigureAwait(false);
+                            continue;
+                        }
+
+                        if (!AnyPieceDownloading()) return;
+                    }
+
                     try
                     {
                         await Task.Delay(40, linked.Token).ConfigureAwait(false);
@@ -682,11 +717,37 @@ internal sealed class HlsRunner : IJobRunner
                 {
                     Interlocked.Increment(ref _active);
                     await EnsureInitAsync(http, part, linked.Token).ConfigureAwait(false);
-                    await WithRetryAsync(() => DownloadPartOnceAsync(http, part, linked.Token), linked.Token).ConfigureAwait(false);
+                    using var first = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+                    lock (_lock)
+                    {
+                        part.First = first;
+                        part.Received = 0;
+                        part.Started = Stopwatch.GetTimestamp();
+                        _inFlight.Add(part);
+                    }
+
+                    try
+                    {
+                        await WithRetryAsync(mayRestart => DownloadPartOnceAsync(http, part, mayRestart, first.Token, ".tmp", counts: true), first.Token)
+                            .ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        lock (_lock)
+                        {
+                            part.Started = 0;
+                            _inFlight.Remove(part);
+                            part.First = null;
+                        }
+                    }
                 }
                 catch (OperationCanceledException) when (linked.IsCancellationRequested)
                 {
                     return;
+                }
+                catch (Exception) when (part.Done)
+                {
+                    // its second copy arrived first
                 }
                 catch (Exception ex) when ((plan.Live || part.Track.IsSubtitle) && (ex is HttpStatusException or TimeoutException or HttpRequestException || ex is IOException and not DirectoryNotFoundException))
                 {
@@ -788,31 +849,127 @@ internal sealed class HlsRunner : IJobRunner
         }
     }
 
-    async Task DownloadPartOnceAsync(HttpClient http, Part part, CancellationToken ct)
+    /// <summary>Fetches one copy of a piece into <c>FinalPath + tempSuffix</c>, then puts it in place. The first copy to arrive counts.</summary>
+    /// <param name="counts">This is the piece's first copy: its progress is what <see cref="FindPieceToRace"/> judges.</param>
+    async Task DownloadPartOnceAsync(HttpClient http, Part part, bool mayRestart, CancellationToken ct, string tempSuffix, bool counts)
     {
         var s = part.Segment;
-        await DownloadToFileAsync(http, s.Url, s.ByteOffset, s.ByteLength, s.Key, s.Sequence, part.FinalPath, ct).ConfigureAwait(false);
+        if (counts) Interlocked.Exchange(ref part.Received, 0);   // a try again starts the piece over
+        await DownloadToFileAsync(http, s.Url, s.ByteOffset, s.ByteLength, s.Key, s.Sequence, part.FinalPath, mayRestart, ct, tempSuffix,
+            counts ? n => Interlocked.Add(ref part.Received, n) : null).ConfigureAwait(false);
 
         var size = new FileInfo(part.FinalPath).Length;
-        part.Done = true;
+        CancellationTokenSource? loser;
         lock (_lock)
         {
+            if (part.Done) return;   // the other copy arrived first (same bytes, already counted)
+            part.Done = true;
             _completedBytes += size;
             if (part.Track.CountsTime) _completedSeconds += s.Duration;
             _partsDone++;
+            loser = counts ? part.Second : part.First;
+        }
+
+        try
+        {
+            loser?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // it ended meanwhile
         }
     }
 
-    /// <summary>Segments are small, so a failed one is simply fetched again (a few times) before the download is given up.</summary>
-    async Task WithRetryAsync(Func<Task> action, CancellationToken ct)
+    /// <summary>
+    /// A piece whose first copy is crawling (see <see cref="IsFarTooSlow"/>) and that nobody is fetching a second copy of yet;
+    /// it is marked as raced. Null when there is none, or under a speed limit.
+    /// </summary>
+    Part? FindPieceToRace()
+    {
+        var now = Stopwatch.GetTimestamp();
+        lock (_lock)
+        {
+            Part? slowest = null;
+            var slowestSpeed = double.MaxValue;
+            foreach (var p in _inFlight)
+            {
+                if (p.Done || p.Raced || p.Started == 0) continue;
+                var seconds = (now - p.Started) / (double)Stopwatch.Frequency;
+                var received = Interlocked.Read(ref p.Received);
+                if (!IsFarTooSlow(received, p.Segment.ByteLength, seconds, needsSize: false)) continue;
+                var speed = received / Math.Max(0.001, seconds);
+                if (speed < slowestSpeed)
+                {
+                    slowestSpeed = speed;
+                    slowest = p;
+                }
+            }
+
+            if (slowest != null) slowest.Raced = true;
+            return slowest;
+        }
+    }
+
+    bool AnyPieceDownloading()
+    {
+        lock (_lock) return _inFlight.Count > 0;
+    }
+
+    /// <summary>Fetches a second copy of a crawling piece; whichever copy arrives first is kept and the other is cancelled.</summary>
+    async Task RaceAsync(HttpClient http, Part part, CancellationToken stop)
+    {
+        using var second = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        lock (_lock)
+        {
+            if (part.Done) return;
+            part.Second = second;
+        }
+
+        _job.Stats.AddReplacedConnection();
+        _ctx.Logger.LogDebug("A piece of {File} is crawling; fetching a second copy", _job.FileName);
+        Interlocked.Increment(ref _active);
+        try
+        {
+            await WithRetryAsync(mayRestart => DownloadPartOnceAsync(http, part, mayRestart, second.Token, ".race.tmp", counts: false), second.Token)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // Lost the race (cancelled), this copy failed, or the download stops (the worker sees that next): the first copy
+            // goes on as if nothing happened.
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+            lock (_lock) part.Second = null;
+        }
+    }
+
+    /// <summary>A piece is started over on a new connection at most this often for being far too slow (then it is left to finish).</summary>
+    const int MaxSlowPieceRestarts = 2;
+
+    /// <summary>
+    /// Segments are small, so a failed one is simply fetched again (a few times) before the download is given up. One that
+    /// was far too slow (<see cref="SlowPieceException"/>) is asked for again at once, and that is not a failure.
+    /// </summary>
+    /// <param name="action">Fetches the piece; its argument says whether it may still give up for being far too slow.</param>
+    async Task WithRetryAsync(Func<bool, Task> action, CancellationToken ct)
     {
         var limit = Math.Clamp(S.MaxRetries, 1, 6);
+        var restarts = 0;
         for (var attempt = 1; ; attempt++)
         {
             try
             {
-                await action().ConfigureAwait(false);
+                await action(restarts < MaxSlowPieceRestarts).ConfigureAwait(false);
                 return;
+            }
+            catch (SlowPieceException) when (!ct.IsCancellationRequested)
+            {
+                restarts++;
+                attempt--;   // not a failure: the piece starts over on a new connection, at once
+                _job.Stats.AddReplacedConnection();
+                _ctx.Logger.LogDebug("A piece of {File} was far slower than the others; asking again", _job.FileName);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && attempt <= limit && IsTransient(ex))
             {
@@ -822,14 +979,21 @@ internal sealed class HlsRunner : IJobRunner
         }
     }
 
+    sealed class SlowPieceException() : Exception("Far slower than this download's other pieces: asking again on a new connection.");
+
     static bool IsTransient(Exception ex) =>
         ex is HttpStatusException { IsTransient: true } or TimeoutException or HttpRequestException
         || ex is IOException and not DirectoryNotFoundException;
 
+    /// <summary>
+    /// The server's Retry-After wins. Otherwise the first try again is at once (a dropped connection, or a refusal right after
+    /// one of ours closed, is rarely there a moment later), and the waits grow from the second.
+    /// </summary>
     TimeSpan DelayFor(Exception ex, int attempt)
     {
         if (ex is HttpStatusException { RetryAfter: { } ra }) return TimeSpan.FromSeconds(Math.Min(ra.TotalSeconds, 60));
-        var seconds = Math.Min(S.RetryMaxDelay.TotalSeconds, S.RetryBaseDelay.TotalSeconds * Math.Pow(2, attempt - 1));
+        if (attempt <= 1) return TimeSpan.Zero;
+        var seconds = Math.Min(S.RetryMaxDelay.TotalSeconds, S.RetryBaseDelay.TotalSeconds * Math.Pow(2, attempt - 2));
         return TimeSpan.FromSeconds(seconds * (0.5 + _rng.NextDouble() * 0.5));
     }
 
@@ -837,10 +1001,12 @@ internal sealed class HlsRunner : IJobRunner
     // One segment
     // ------------------------------------------------------------------------------------------------------------
 
+    /// <param name="mayRestart">The piece may be given up (<see cref="SlowPieceException"/>) when it is far slower than the others.</param>
     async Task DownloadToFileAsync(
-        HttpClient http, Uri url, long? offset, long? length, HlsKey? key, long sequence, string finalPath, CancellationToken ct)
+        HttpClient http, Uri url, long? offset, long? length, HlsKey? key, long sequence, string finalPath, bool mayRestart, CancellationToken ct,
+        string tempSuffix = ".tmp", Action<int>? onBytes = null)
     {
-        var temp = finalPath + ".tmp";
+        var temp = finalPath + tempSuffix;
 
         // The key first: a worker that already holds a connection for its segment must not wait for one to fetch the key.
         byte[]? keyBytes = null;
@@ -877,6 +1043,7 @@ internal sealed class HlsRunner : IJobRunner
                 {
                     Aes? aes = null;
                     CryptoStream? crypto = null;
+                    var whole = false;
                     try
                     {
                         Stream sink = file;
@@ -890,8 +1057,13 @@ internal sealed class HlsRunner : IJobRunner
                             sink = crypto = new CryptoStream(file, aes.CreateDecryptor(), CryptoStreamMode.Write, leaveOpen: true);
                         }
 
-                        received = await CopyAsync(network, sink, ct).ConfigureAwait(false);
+                        var carries = length ?? response.Content.Headers.ContentLength;
+                        received = await CopyAsync(network, sink, carries, mayRestart, onBytes, ct).ConfigureAwait(false);
+                        // cut off: a network fault, fetched again (an encrypted piece would else end as "the key does not fit")
+                        if (carries is { } full && received < full)
+                            throw new IOException("The server closed the connection before the segment was complete.");
                         if (crypto != null) await crypto.FlushFinalBlockAsync(ct).ConfigureAwait(false);
+                        whole = true;
                     }
                     catch (CryptographicException ex)
                     {
@@ -900,7 +1072,19 @@ internal sealed class HlsRunner : IJobRunner
                     }
                     finally
                     {
-                        if (crypto != null) await crypto.DisposeAsync().ConfigureAwait(false);
+                        if (crypto != null)
+                        {
+                            try
+                            {
+                                await crypto.DisposeAsync().ConfigureAwait(false);
+                            }
+                            catch (CryptographicException) when (!whole)
+                            {
+                                // An encrypted piece given up half-way (cut off, too slow) has no final block: the reason it
+                                // was given up is the one to report, and the piece is fetched again.
+                            }
+                        }
+
                         aes?.Dispose();
                     }
                 }
@@ -920,7 +1104,7 @@ internal sealed class HlsRunner : IJobRunner
 
         try
         {
-            File.Move(temp, finalPath, overwrite: true);
+            lock (_moves) File.Move(temp, finalPath, overwrite: true);   // (two copies of a raced piece may arrive together)
         }
         catch (IOException ex)
         {
@@ -928,12 +1112,52 @@ internal sealed class HlsRunner : IJobRunner
         }
     }
 
+    /// <summary>The best speed one piece of this download reached (over at least 256 KiB of it).</summary>
+    double _bestPieceSpeed;
+
+    void NotePieceSpeed(long received, double seconds)
+    {
+        if (received < 256 * 1024 || seconds <= 0) return;
+        var speed = received / seconds;
+        double seen;
+        while (speed > (seen = Volatile.Read(ref _bestPieceSpeed)))
+            if (Interlocked.CompareExchange(ref _bestPieceSpeed, speed, seen) == seen) break;
+    }
+
+    /// <summary>
+    /// A piece to give up and ask for again on a new connection: after <see cref="EngineSettings.SlowConnectionGrace"/> it gets
+    /// under 1/<see cref="EngineSettings.SlowConnectionRatio"/> of the best speed a piece of this download reached, shared among
+    /// the pieces downloading now (on a line one connection could fill, N pieces each get about 1/N of it, and none is "slow"),
+    /// with more than that grace's worth left at its own pace. A slow route or a throttled request (YouTube slows one down now
+    /// and then) rarely lasts past a new request; kept, it would hold the last piece of the file for minutes. Never under a
+    /// speed limit, which makes pieces slow on purpose.
+    /// </summary>
+    bool IsFarTooSlow(long received, long? expected, double seconds, bool needsSize = true)
+    {
+        if (!S.ReplaceSlowConnections || seconds < S.SlowConnectionGrace.TotalSeconds || (needsSize && expected is not > 0)) return false;
+        if (JobLimiter.BytesPerSecond > 0 || _ctx.GlobalLimiter.BytesPerSecond > 0) return false;
+
+        var speed = received / seconds;
+        var yardstick = Volatile.Read(ref _bestPieceSpeed) / Math.Max(1, Volatile.Read(ref _active));
+        if (yardstick <= 0 || speed * S.SlowConnectionRatio >= yardstick) return false;
+
+        if (expected is not > 0) return true;   // size unknown (a playlist piece): crawling for that long is enough
+        var left = expected.Value - received;
+        return left > 0 && left / Math.Max(1, speed) > S.SlowConnectionGrace.TotalSeconds;
+    }
+
+    /// <param name="expected">The bytes the answer should carry, when known.</param>
+    /// <param name="mayRestart">Throw <see cref="SlowPieceException"/> when the piece is far too slow.</param>
     /// <returns>The number of bytes read from the network.</returns>
-    async Task<long> CopyAsync(Stream from, Stream to, CancellationToken ct)
+    async Task<long> CopyAsync(Stream from, Stream to, long? expected, bool mayRestart, Action<int>? onBytes, CancellationToken ct)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(Math.Max(16 * 1024, S.ReadBufferBytes));
         using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
         long total = 0;
+        var started = Stopwatch.GetTimestamp();
+        var lastLook = started;
+        long onDisk = 0;   // time spent writing: a piece is not slow for that
+        double OnNet(long now) => (now - started - onDisk) / (double)Stopwatch.Frequency;
         try
         {
             while (true)
@@ -959,6 +1183,7 @@ internal sealed class HlsRunner : IJobRunner
 
                 await SpeedLimiter.AcquireAsync(n, ct, _ctx.GlobalLimiter, JobLimiter).ConfigureAwait(false);
 
+                var writing = Stopwatch.GetTimestamp();
                 try
                 {
                     await to.WriteAsync(buffer.AsMemory(0, n), ct).ConfigureAwait(false);
@@ -968,8 +1193,18 @@ internal sealed class HlsRunner : IJobRunner
                     throw new DiskException($"Could not write to disk: {ex.Message}", ex);
                 }
 
+                var now = Stopwatch.GetTimestamp();
+                onDisk += now - writing;
                 total += n;
                 _meter.Add(n);
+                onBytes?.Invoke(n);
+
+                if ((now - lastLook) / (double)Stopwatch.Frequency >= 0.5)
+                {
+                    lastLook = now;
+                    NotePieceSpeed(total, OnNet(now));
+                    if (mayRestart && IsFarTooSlow(total, expected, OnNet(now))) throw new SlowPieceException();
+                }
             }
         }
         finally
@@ -977,6 +1212,7 @@ internal sealed class HlsRunner : IJobRunner
             ArrayPool<byte>.Shared.Return(buffer);
         }
 
+        NotePieceSpeed(total, OnNet(Stopwatch.GetTimestamp()));
         return total;
     }
 

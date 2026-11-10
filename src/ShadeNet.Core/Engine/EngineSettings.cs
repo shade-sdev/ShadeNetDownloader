@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using ShadeNet.Core.Net;
 using ShadeNet.Core.Util;
 
@@ -165,38 +166,98 @@ public sealed class EngineSettings
     /// some sites (YouTube among them) that list reaches back for hours, and recording it all would be gigabytes nobody asked for.
     /// Zero = everything the list names.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan LiveBacklog { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// After "Stop and save" (or the recording length limit) the pieces already being fetched, and those already waiting, get this long
     /// to arrive; what is not there by then is left out of the file, so stopping never waits on a slow or stuck server.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan StopGrace { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>A stream that is one big file (DASH on-demand) is fetched in pieces of this size, in parallel and resumable.</summary>
+    [JsonIgnore]
     public int StreamChunkBytes { get; set; } = 4 * 1024 * 1024;
 
     // --- scheduler tuning (IDM report §3.3–3.5) ---
+    [JsonIgnore]
     public int MinSegmentBytes { get; set; } = 256 * 1024;
+
+    /// <summary>
+    /// Which part to split when a connection is free: the one with the most left after this many seconds at its connection's
+    /// speed (a slow connection's part looks bigger, so it is helped first). It no longer decides WHETHER to split: any part
+    /// with room for two halves of <see cref="MinSegmentBytes"/> is split, however fast its connection is.
+    /// </summary>
+    [JsonIgnore]
     public double LookaheadSeconds { get; set; } = 3.0;
+
+    [JsonIgnore]
     public int TakeoverThresholdBytes { get; set; } = 64;
+    [JsonIgnore]
     public TimeSpan TickInterval { get; set; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>Only under a speed limit: how often the number of connections may double (without one they all open at once).</summary>
+    [JsonIgnore]
     public TimeSpan RampUpInterval { get; set; } = TimeSpan.FromSeconds(2);
-    public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// A download opens one connection per this many bytes at the start (at most its connection count): a small file is not
+    /// cut into slivers that cost more requests than they save.
+    /// </summary>
+    [JsonIgnore]
+    public int InitialPieceBytes { get; set; } = 512 * 1024;
+
+    /// <summary>
+    /// How often progress is made safe on the disk (the file flushed, then the parts saved); a crash costs about this much
+    /// downloading again. A flush makes every write to the file wait on NTFS, so a disk that takes long to flush is flushed
+    /// less often: at least ten times the last flush's duration apart (connections keep receiving meanwhile).
+    /// </summary>
+    [JsonIgnore]
+    public TimeSpan CheckpointInterval { get; set; } = TimeSpan.FromSeconds(3);
 
     // --- connection behaviour ---
+    [JsonIgnore]
     public int ReadBufferBytes { get; set; } = 128 * 1024;
+
+    /// <summary>
+    /// A connection collects this much before writing it, and goes on receiving while the write runs: the network is not
+    /// held up by the disk, and the disk gets fewer, larger writes.
+    /// </summary>
+    [JsonIgnore]
+    public int WriteBatchBytes { get; set; } = 256 * 1024;
+
     public int MaxRetries { get; set; } = 10;
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(15);
+    [JsonIgnore]
     public TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The wait before the second try of a failed connection, doubling after that. The first try is at once.</summary>
+    [JsonIgnore]
     public TimeSpan RetryBaseDelay { get; set; } = TimeSpan.FromSeconds(1);
+
+    [JsonIgnore]
     public TimeSpan RetryMaxDelay { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How long a kept first response (see <c>ProbeAndHoldAsync</c>) may wait for its download to start before the
-    /// address is requested again; servers close idle connections.
+    /// A connection far slower than the best one this download had (under 1/<see cref="SlowConnectionRatio"/> of it, after
+    /// <see cref="SlowConnectionGrace"/> on its answer, with more than that much work left at its pace) asks again on a new
+    /// connection: a slow route or a slow server slot rarely lasts past a new request. Never under a speed limit.
     /// </summary>
-    public TimeSpan HeldProbeLifetime { get; set; } = TimeSpan.FromSeconds(45);
+    [JsonIgnore]
+    public bool ReplaceSlowConnections { get; set; } = true;
+
+    [JsonIgnore]
+    public TimeSpan SlowConnectionGrace { get; set; } = TimeSpan.FromSeconds(2);
+    [JsonIgnore]
+    public int SlowConnectionRatio { get; set; } = 4;
+
+    /// <summary>
+    /// How long a kept first response (see <c>ProbeAndHoldAsync</c>) may wait for its download to start before the
+    /// address is requested again; servers close idle connections (a closed one is simply asked again at once).
+    /// </summary>
+    [JsonIgnore]
+    public TimeSpan HeldProbeLifetime { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>The folder a category would use if the user had not chosen one for it.</summary>
     public string ResolveCategoryFolderDefault(string category) =>

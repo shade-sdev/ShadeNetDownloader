@@ -119,15 +119,73 @@ public class SchedulerTests
     }
 
     [Fact]
-    public void A_connection_that_will_finish_within_the_lookahead_is_left_alone()
+    public void A_fast_connections_range_is_split_too()
     {
+        // 8 MiB at 3 MiB/s would be done within the 3 s lookahead; a second connection still halves the time (on a server
+        // that caps each connection) - the lookahead only chooses WHICH range to split.
         var (job, sched) = NewJob(8 * MiB);
         var slot = new ConnectionSlot(0);
         Acquire(sched, slot);
-        slot.Meter.SetSpeed(3 * MiB); // 8 MiB at 3 MiB/s: free = 8 − 9 < 0
+        slot.Meter.SetSpeed(3 * MiB);
 
-        Assert.False(sched.NeedNewConnection());
-        Assert.Null(Acquire(sched, new ConnectionSlot(1)));
+        Assert.True(sched.NeedNewConnection());
+        var second = Acquire(sched, new ConnectionSlot(1))!;
+        Assert.Equal(4 * MiB, second.Start);
+        AssertInvariants(job, 8 * MiB);
+    }
+
+    [Fact]
+    public void Bytes_on_their_way_to_the_disk_are_claimed_and_a_split_starts_after_them()
+    {
+        var (job, sched) = NewJob(8 * MiB);
+        var owner = new ConnectionSlot(0);
+        var seg = Acquire(sched, owner)!;
+
+        Assert.Equal(2 * (int)MiB, sched.Reserve(seg, owner, 2 * (int)MiB));   // received, not yet written
+        Assert.Equal(0, seg.Downloaded);
+        Assert.Equal(6 * MiB, sched.Allowance(seg, owner));
+
+        var second = Acquire(sched, new ConnectionSlot(1))!;
+        Assert.Equal(5 * MiB, second.Start);   // 2 MiB claimed + half of the 6 MiB left
+        Assert.Equal(3 * MiB, sched.Allowance(seg, owner));
+
+        Assert.True(sched.Commit(seg, owner, 2 * (int)MiB));   // the write landed
+        Assert.Equal(2 * MiB, seg.Downloaded);
+        Assert.Equal(0, seg.InFlight);
+        Assert.Equal(3 * MiB, sched.Allowance(seg, owner));
+        AssertInvariants(job, 8 * MiB);
+    }
+
+    [Fact]
+    public void A_claim_is_cut_at_the_end_of_the_range_and_refused_to_a_stale_owner()
+    {
+        var (_, sched) = NewJob(1 * MiB);
+        var owner = new ConnectionSlot(0);
+        var seg = Acquire(sched, owner)!;
+
+        Assert.Equal((int)MiB - 10, sched.Reserve(seg, owner, (int)MiB - 10));
+        Assert.Equal(10, sched.Reserve(seg, owner, 1000));   // only 10 bytes are left
+        Assert.Equal(0, sched.Reserve(seg, owner, 1000));
+        Assert.Equal(-1, sched.Reserve(seg, new ConnectionSlot(5), 1000));
+    }
+
+    [Fact]
+    public void A_neighbour_with_bytes_on_their_way_is_not_taken_over()
+    {
+        var (job, sched) = NewJob(8 * MiB);
+        var a = new ConnectionSlot(0);
+        var b = new ConnectionSlot(1);
+        var first = Acquire(sched, a)!;
+        var second = Acquire(sched, b)!;          // [4M, 8M)
+        sched.Reserve(second, b, 64 * 1024);      // b has received data, not yet written
+
+        first.Downloaded = first.Length;          // a finishes its range
+        sched.MarkDone(first, a);
+        a.Last = first;
+        var next = Acquire(sched, a);
+
+        Assert.NotSame(second, next);             // no takeover: b's bytes would be fetched twice
+        Assert.Equal(0, job.Stats.Takeovers);
     }
 
     [Fact]

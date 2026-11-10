@@ -39,8 +39,8 @@ with your sign-in. Everything is in the box: no .NET, no extra tools to install.
 
 | | |
 |---|---|
-| **Fast** | A file is fetched over several connections at once. ShadeNet starts with one and adds more only while they really speed things up, so you get the speed without hammering the server. Up to 32 connections per file; a per-site limit protects sites that ban for it. |
-| **Safe to interrupt** | Pause, resume, close the program, lose power: unfinished downloads continue where they stopped. Every download is kept in a small local database. |
+| **Fast** | A file is fetched over several connections at once, all opened right away (fewer for a small file). A connection that is cut off asks again at once, one that turns out far slower than the others is replaced, and free connections take over the work of slow ones. A site that allows only a few connections is noticed and remembered, so the next download from it starts within its limit. Up to 32 connections per file. |
+| **Safe to interrupt** | Pause, resume, close the program: unfinished downloads continue where they stopped. After a crash or a power cut they continue from the last saved point, a few seconds back. Every download is kept in a small local database. |
 | **Videos** | Paste the address of a YouTube (or Facebook, Instagram, X, TikTok, Vimeo, Reddit …) video page, choose a quality, and ShadeNet downloads it. HLS and DASH streams are fetched in parallel and joined without re-encoding. Subtitles can be saved or put inside the file. |
 | **Live recordings** | A live stream is recorded until you press **Stop and save** (or until a length limit you set). |
 | **Browser extension** | For Chrome, Edge, Brave and other Chromium browsers. It hands your downloads to ShadeNet **with the cookies and headers the site needs**, and puts a **Download video** button on videos, named after the video. |
@@ -123,8 +123,8 @@ Press **Add download** (or **Ctrl+N**), or just press **Ctrl+V** anywhere in the
    You can **paste several links** (one per line) to add them as a batch.
 2. **Name and folder.** The name can be changed; *Save to* follows the file's category (here *Video*), or choose another folder with
    **Browse…**.
-3. **Connections.** The slider sets the most connections ShadeNet may use for this file (default 8). *The engine starts with one and
-   adds more only while they actually speed things up.*
+3. **Connections.** The slider sets the most connections ShadeNet may use for this file (default 8). They all open at once (fewer for
+   a small file, or for a site that allows fewer), and one that turns out far slower than the others is replaced.
 4. **Advanced** holds a sign-in cookie and a referring page, for links that only answer a signed-in browser. (The
    [browser extension](#the-browser-extension) fills these in for you.)
 5. Choose **Download now** to start, or **Add to queue** to let it wait its turn.
@@ -344,10 +344,13 @@ See [Queue, schedule and "when finished"](#queue-schedule-and-when-finished).
 <img src="screenshots/settings-network.png" alt="Settings, Network page" width="760">
 
 * **How to reach the internet:** *Windows* (the proxy set in Windows), *None* (direct) or *Manual* (`host:port`).
-* **Connect time-out** (3 to 120 s) and **Retries** (0 to 50) before a broken download fails.
+* **Connect time-out** (3 to 120 s) and **Retries** (0 to 50) before a broken download fails. The first retry of a connection
+  is immediate; after that ShadeNet waits a little longer each time, and always as long as a busy server asks (`Retry-After`).
 * **Browser identity (User-Agent)** sent to sites unless the extension supplies the browser's own.
 * **Connections per site:** some sites ban you for opening many connections; a limit here caps the total open to that site (and
-  its sub-domains), however many downloads are running there.
+  its sub-domains), however many downloads are running there. You rarely need it: when a site turns extra connections away
+  (429 or 503), ShadeNet keeps to the number it serves, and the next downloads from that site (for an hour, while ShadeNet runs)
+  start with no more.
 </details>
 
 <details>

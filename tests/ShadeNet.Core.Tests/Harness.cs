@@ -106,7 +106,8 @@ public sealed class Harness : IAsyncDisposable
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"state {job.State}, error {job.ErrorKind} {job.Error}");
         sb.AppendLine($"downloaded {job.DownloadedBytes:N0} of {job.TotalSize:N0}; splits {job.Stats.Splits}, takeovers {job.Stats.Takeovers}, " +
-                      $"retries {job.Stats.Retries}, fallbacks {job.Stats.Fallbacks}, peak conns {job.Stats.PeakConnections}");
+                      $"retries {job.Stats.Retries}, fallbacks {job.Stats.Fallbacks}, peak conns {job.Stats.PeakConnections}, " +
+                      $"replaced {job.Stats.ReplacedConnections}");
         lock (job.Sync)
         {
             foreach (var s in job.Segments)

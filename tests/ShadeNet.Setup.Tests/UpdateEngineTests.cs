@@ -6,6 +6,7 @@ using Microsoft.Win32;
 namespace ShadeNet.Setup.Tests;
 
 /// <summary>An installed program is updated from a package: everything happens in a throw-away folder and registry key.</summary>
+[Collection(TestRegistry.Collection)]
 public sealed class UpdateEngineTests : IDisposable
 {
     readonly string _root = Path.Combine(Path.GetTempPath(), "shadenet-upd-" + Guid.NewGuid().ToString("N")[..8]);
