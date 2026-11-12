@@ -23,7 +23,15 @@ public sealed record CaptureInfo(
     string? Init = null,
     IReadOnlyList<string>? AudioPieces = null,
     string? AudioInit = null,
-    IReadOnlyList<string>? Played = null);
+    IReadOnlyList<string>? Played = null,
+    string? MimeType = null)
+{
+    /// <summary>A torrent: a magnet link the user clicked, or a .torrent file (by its type, its name or its address).</summary>
+    public bool IsTorrent =>
+        Source == "magnet"
+        || ShadeNet.Core.DownloadManager.IsTorrentAddress(Url, MimeType)
+        || FileName?.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) == true;
+}
 
 /// <summary>What the processor needs from the UI; implemented by the app, faked in tests.</summary>
 public interface ICaptureUi
@@ -32,6 +40,9 @@ public interface ICaptureUi
     void ShowCapture(CaptureInfo capture);
 
     void Notify(string message, ToastKind kind);
+
+    /// <summary>Show the Add dialog with these links (a magnet link or a .torrent file Windows opened with ShadeNet).</summary>
+    void OpenLinks(IReadOnlyList<string> links);
 
     void BringToFront();
 
@@ -119,10 +130,13 @@ public sealed class CaptureProcessor
         var settings = _settings();
         if (!settings.Enabled) return Result(request, false, CaptureReasons.Disabled);
 
+        // a magnet link the user clicked: only when they want ShadeNet to open those ("Download with ShadeNet" on one names ShadeNet)
+        if (request.Source == "magnet" && !settings.MagnetLinks) return Result(request, false, CaptureReasons.Disabled);
+
         var capture = Sanitize(request);
         if (capture == null) return Result(request, false, CaptureReasons.Invalid);
 
-        var host = new Uri(capture.Url).Host;
+        var host = capture.Source == "magnet" ? "" : new Uri(capture.Url).Host;
         if (settings.ExcludedHosts.Any(p => HostMatches(host, p))) return Result(request, false, CaptureReasons.Excluded);
         if (capture.Size is { } size && settings.MinSizeBytes > 0 && size < settings.MinSizeBytes)
             return Result(request, false, CaptureReasons.Excluded);
@@ -136,6 +150,15 @@ public sealed class CaptureProcessor
         }
 
         // 2. the same address is already known
+        if (_manager.FindDuplicate(capture.Url) is { Kind: DownloadKind.Torrent } knownTorrent)
+        {
+            // the same torrent (a magnet link names it, whatever trackers it lists): a failed one is tried again, any other is shown
+            if (knownTorrent.State == DownloadState.Failed) _manager.Start(knownTorrent.Id);
+            _ui.Notify(knownTorrent.State == DownloadState.Failed ? $"Trying {knownTorrent.FileName} again." : $"{knownTorrent.FileName} is already in your list.", ToastKind.Info);
+            _ui.BringToFront();
+            return Result(request, true, CaptureReasons.Duplicate, knownTorrent.Id);
+        }
+
         if (_manager.FindDuplicate(capture.Url) is { } existing)
         {
             if (existing.State == DownloadState.Failed)
@@ -162,6 +185,23 @@ public sealed class CaptureProcessor
             _ui.ShowCapture(capture);
             _ui.BringToFront();
             return Result(request, true, CaptureReasons.Added);
+        }
+
+        if (settings.Mode == CaptureMode.StartImmediately && capture.IsTorrent)
+        {
+            // a torrent: every file, from the people sharing it (a .torrent file on the web is fetched with the browser's sign-in)
+            var torrent = _manager.Add(new AddDownloadRequest
+            {
+                Url = capture.Url,
+                Referer = capture.Referrer,
+                Cookies = capture.Cookies,
+                UserAgent = capture.UserAgent,
+                Headers = capture.Headers.ToDictionary(h => h.Key, h => h.Value),
+                Torrent = new TorrentChoice(),
+                Mode = AddMode.Start,
+            });
+            _ui.Notify($"Downloading {torrent.FileName}", ToastKind.Success);
+            return Result(request, true, CaptureReasons.Added, torrent.Id);
         }
 
         if (settings.Mode == CaptureMode.StartImmediately)
@@ -231,6 +271,14 @@ public sealed class CaptureProcessor
     /// <summary>Everything from the pipe is untrusted: keep only well-formed values within sane limits.</summary>
     internal static CaptureInfo? Sanitize(CaptureRequest request)
     {
+        // a magnet link the user clicked: the link and the page it was on, nothing else
+        if (request.Source is "magnet" or "magnet-menu")
+        {
+            if (!IsMagnet(request.Url)) return null;
+            return new CaptureInfo(request.Url.Trim(), IsWebUrl(request.Referrer) ? request.Referrer : null, null, null,
+                new Dictionary<string, string>(), null, null, "magnet");
+        }
+
         if (!IsWebUrl(request.Url)) return null;
 
         string? referrer = IsWebUrl(request.Referrer) ? request.Referrer : null;
@@ -280,9 +328,19 @@ public sealed class CaptureProcessor
         // the addresses the player loaded a list of qualities' playlists from (with a key of its own, perhaps)
         var played = source == "media" ? WebUrls(request.Played) : null;
 
+        // the type the server gave the file ("application/x-bittorrent" tells a .torrent file whose address does not say so)
+        var mime = request.MimeType is { Length: > 0 and <= 200 } m && m.All(c => c > ' ' && c < 127 || c == ' ') ? m : null;
+
         return new CaptureInfo(request.Url, referrer, cookies, userAgent, headers, fileName, size, source, audioUrl, audioSize, duration,
-            pieces, init, audioPieces, audioInit, played);
+            pieces, init, audioPieces, audioInit, played, mime);
     }
+
+    /// <summary>A magnet link that names a torrent (by its info hash), within the length limit and without control characters.</summary>
+    static bool IsMagnet(string? url) =>
+        url is { Length: > 0 and <= MaxUrl }
+        && url.TrimStart().StartsWith("magnet:?", StringComparison.OrdinalIgnoreCase)
+        && url.Contains("xt=urn:bt", StringComparison.OrdinalIgnoreCase)
+        && url.All(c => c >= ' ' && c != 127);
 
     static IReadOnlyList<string>? WebUrls(string[]? urls) => urls is { Length: > 0 and <= MaxPieces } && urls.All(IsWebUrl) ? urls : null;
 

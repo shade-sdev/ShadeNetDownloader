@@ -23,6 +23,12 @@
                       InputGestureText="Alt+Enter" />
             <MenuItem Header="Stop and save" Icon="{ui:SymbolIcon Stop24}" Command="{Binding StopAndSaveCommand}"
                       Visibility="{Binding IsRecording, Converter={StaticResource B2V}}" />
+            <MenuItem Header="Stop sharing" Icon="{ui:SymbolIcon Stop24}" Command="{Binding StopSharingCommand}"
+                      Visibility="{Binding IsSeeding, Converter={StaticResource B2V}}" />
+            <MenuItem Header="Share again" Icon="{ui:SymbolIcon Share24}" Command="{Binding ShareAgainCommand}"
+                      Visibility="{Binding CanShareAgain, Converter={StaticResource B2V}}" />
+            <MenuItem Header="Check the files again" Icon="{ui:SymbolIcon DocumentSearch24}" Command="{Binding CheckFilesAgainCommand}"
+                      Visibility="{Binding CanRecheck, Converter={StaticResource B2V}}" />
             <MenuItem Header="Pause" Icon="{ui:SymbolIcon Pause24}" Command="{Binding PauseCommand}"
                       Visibility="{Binding CanPause, Converter={StaticResource B2V}}" />
             <MenuItem Header="Resume" Icon="{ui:SymbolIcon Play24}" Command="{Binding ResumeCommand}"

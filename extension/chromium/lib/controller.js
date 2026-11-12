@@ -6,7 +6,7 @@
 // the user's download.
 
 import {
-  basename, buildCapture, cookiesToHeader, evaluate, headerValue, isCapturableUrl, pickHeaders,
+  basename, buildCapture, cookiesToHeader, evaluate, headerValue, isCapturableUrl, isMagnetUrl, pickHeaders,
 } from './capture.js';
 import { MediaTracker, looksLikePlaylist, pairStreams } from './media.js';
 import { PieceTracker } from './pieces.js';
@@ -15,7 +15,7 @@ import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVi
 import { browserTimers } from './native.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
 
-export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0, pageSignIn: true };
+export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0, pageSignIn: true, magnetLinks: true };
 
 const CONNECT_TIMEOUT_MS = 10000;   // the app may have to be started
 const ANSWER_TIMEOUT_MS = 8000;
@@ -314,6 +314,7 @@ export class Controller {
       excludedHosts: Array.isArray(message.excludedHosts) ? message.excludedHosts : [],
       minSizeBytes: Number.isFinite(message.minSizeBytes) ? message.minSizeBytes : 0,
       pageSignIn: message.pageSignIn !== false,
+      magnetLinks: message.magnetLinks !== false,
     };
     // (one look at a time: the app's hello and its settings come moments apart, and the second must see what the first stored)
     if (message.appVersion) this.versionCheck = (this.versionCheck ?? Promise.resolve()).then(() => this.noticeAppVersion(String(message.appVersion)));
@@ -519,6 +520,10 @@ export class Controller {
     await this.ready;
     if (info.menuItemId !== MENU_LINK) return;
     const url = info.linkUrl || info.srcUrl;
+    if (isMagnetUrl(url)) {
+      await this.openMagnet(url, tab, true);   // asked for by name: the app's magnet setting does not stand in the way
+      return;
+    }
     if (!isCapturableUrl(url)) return;
 
     try {
@@ -532,6 +537,35 @@ export class Controller {
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
     } catch {
       this.flash('!', '#c4452d');
+    }
+  }
+
+  // ---- a magnet link the user clicked ---------------------------------------------------------------------------
+
+  /**
+   * Hands a magnet link to the app (it opens the Add dialog with the torrent's files). `{ accepted: false }` when the user does not
+   * want that (the app's setting, the popup's switch) or the app cannot be reached: the page then lets the browser handle the link.
+   * `asked` is the context menu ("Download with ShadeNet"): the user named ShadeNet, so only the master switches count.
+   */
+  async openMagnet(url, tab, asked = false) {
+    const wanted = () => {
+      const s = this.effectiveSettings();
+      return s.enabled && (asked || s.magnetLinks !== false);
+    };
+    if (!isMagnetUrl(url) || !wanted()) return { accepted: false };
+
+    try {
+      if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      if (!wanted()) return { accepted: false };   // the app's settings just arrived
+      const message = buildCapture({ id: this.link.newId(), url, referrer: isCapturableUrl(tab?.url) ? tab.url : undefined, source: asked ? 'magnet-menu' : 'magnet' });
+      this.trace(`magnet link sent ${message.id}`);
+      const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
+      this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
+      return { accepted: !!result?.accepted };
+    } catch (error) {
+      this.trace(`magnet hand-over failed: ${error?.message ?? error}`);
+      this.flash('!', '#c4452d');
+      return { accepted: false };
     }
   }
 
@@ -991,6 +1025,8 @@ export class Controller {
         return { ...(await this.onPageVideos(sender, message.videos)) };
       } else if (message?.type === 'download-media') {
         return { ...(await this.sendMedia(message.url, sender?.tab)) };
+      } else if (message?.type === 'open-magnet') {
+        return { ...(await this.openMagnet(message.url, sender?.tab)) };
       }
       return { ...this.link.status(), localEnabled: this.localEnabled, appEnabled: this.appSettings.enabled, overlayEnabled: this.overlayEnabled };
     };

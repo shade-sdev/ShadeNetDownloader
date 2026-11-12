@@ -33,6 +33,20 @@ public sealed class AppCaptureUi : ICaptureUi
 
     public void Notify(string message, ToastKind kind) => Ui?.BeginInvoke(() => _toasts.Show(message, kind));
 
+    /// <summary>Like a capture, the user already chose this (in Explorer, in a browser): it waits for a dialog that is open.</summary>
+    public void OpenLinks(IReadOnlyList<string> links) =>
+        Ui?.BeginInvoke(async () =>
+        {
+            try
+            {
+                await _dialogs.ShowLinksAsync(links);
+            }
+            catch (Exception ex)
+            {
+                _toasts.Show($"Could not open {links[0]}: {ex.Message}", ToastKind.Error);
+            }
+        });
+
     /// <summary>Also brings the window back from the tray when it was hidden there.</summary>
     public void BringToFront() => _shell.BringToFront();
 

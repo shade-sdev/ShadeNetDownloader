@@ -60,8 +60,11 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
         return _server.Start();
     }
 
-    /// <summary>Tells a running instance to come to the front. Used by the second instance before it exits.</summary>
-    public static async Task<bool> ActivateRunningInstanceAsync(string? pipeName = null)
+    /// <summary>
+    /// Tells a running instance to come to the front, with the links this launch was given (a magnet link or a .torrent file Windows
+    /// opened with ShadeNet): it shows them in its Add dialog. Used by the second instance before it exits.
+    /// </summary>
+    public static async Task<bool> ActivateRunningInstanceAsync(string? pipeName = null, IReadOnlyList<string>? links = null)
     {
         pipeName ??= BridgeProtocol.PipeName();
 
@@ -70,8 +73,21 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
 
         await using var connection = await BridgeClient.TryConnectAsync(pipeName, ConnectTimeout);
         if (connection == null) return false;
-        await connection.SendAsync(new { type = MessageTypes.Activate });
+        if (links is { Count: > 0 }) await connection.SendAsync(new { type = MessageTypes.Activate, links });
+        else await connection.SendAsync(new { type = MessageTypes.Activate });
         return true;
+    }
+
+    /// <summary>The links an activation carries: only what reads as a link (another program on this computer may write to the pipe too).</summary>
+    internal static IReadOnlyList<string> LinksOf(BridgeMessage message)
+    {
+        if (!message.Body.TryGetProperty("links", out var list) || list.ValueKind != System.Text.Json.JsonValueKind.Array) return Array.Empty<string>();
+        return list.EnumerateArray()
+            .Where(l => l.ValueKind == System.Text.Json.JsonValueKind.String && l.GetString() is { Length: > 0 and <= 8192 })
+            .Take(50)
+            .SelectMany(l => Util.UrlParser.Extract(l.GetString()))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     // The pipe is known to exist, so this is only the wait for the running instance to listen again after its last client
@@ -138,6 +154,7 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
             ExcludedHosts = browser.ExcludedHosts.ToArray(),
             MinSizeBytes = browser.MinSizeBytes,
             PageSignIn = browser.PageSignIn,
+            MagnetLinks = browser.MagnetLinks,
         };
     }
 
@@ -174,6 +191,7 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
 
                     case MessageTypes.Activate:
                         _ui.BringToFront();
+                        if (LinksOf(message) is { Count: > 0 } links) _ui.OpenLinks(links);
                         break;
 
                     case MessageTypes.Quit:

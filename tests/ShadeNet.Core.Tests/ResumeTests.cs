@@ -131,11 +131,12 @@ public class ResumeTests
         var dir = h.Dir();
         var db = Path.Combine(dir, "jobs.db");
         const long size = 12 * MiB;
-        var url = h.Server.FileUrl(size, name: "r3.bin", etag: "r3", kbps: 1024);
+        // 4 connections at 256 KB/s: 45 % takes about 5 s, so progress has been saved (every 3 s) before the kill
+        var url = h.Server.FileUrl(size, name: "r3.bin", etag: "r3", kbps: 256);
 
         var cli = FindCli();
         var baseline = h.Server.BytesServed;
-        var child = Process.Start(new ProcessStartInfo("dotnet", $"\"{cli}\" get \"{url}\" -o \"{dir}\" -c 4 --db \"{db}\"")
+        var child = Process.Start(new ProcessStartInfo(DotnetHost(), $"\"{cli}\" get \"{url}\" -o \"{dir}\" -c 4 --db \"{db}\"")
         {
             RedirectStandardOutput = true,
             UseShellExecute = false,
@@ -162,18 +163,28 @@ public class ResumeTests
         Assert.True(h.Server.BytesServed - served < size - onRecord + size * 0.25);
     }
 
+    /// <summary>The newest build of the command-line tool (an old Debug build left lying around must not stand in for today's engine).</summary>
     static string FindCli()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
         {
-            foreach (var cfg in new[] { "Debug", "Release" })
-            {
-                var candidate = Path.Combine(dir.FullName, "tools", "ShadeNet.Cli", "bin", cfg, "net10.0", "ShadeNet.Cli.dll");
-                if (File.Exists(candidate)) return candidate;
-            }
+            var newest = new[] { "Debug", "Release" }
+                .Select(cfg => new FileInfo(Path.Combine(dir.FullName, "tools", "ShadeNet.Cli", "bin", cfg, "net10.0", "ShadeNet.Cli.dll")))
+                .Where(f => f.Exists)
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .FirstOrDefault();
+            if (newest != null) return newest.FullName;
         }
 
         throw new FileNotFoundException("ShadeNet.Cli.dll not found - build the whole solution first.");
+    }
+
+    /// <summary>The dotnet the tests run on (DOTNET_ROOT's, when set: the one on the PATH may lack the .NET 10 frameworks the tool needs).</summary>
+    static string DotnetHost()
+    {
+        var root = Environment.GetEnvironmentVariable("DOTNET_ROOT");
+        var exe = string.IsNullOrEmpty(root) ? null : Path.Combine(root, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+        return exe != null && File.Exists(exe) ? exe : "dotnet";
     }
 
     [Fact]

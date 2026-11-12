@@ -22,6 +22,18 @@
             <Setter Property="Margin" Value="0,0,0,12" />
         </Style>
 
+        <!-- the drawer's tabs: five for a torrent (Overview, Peers, Files, Trackers, Properties) fit when they are a little smaller -->
+        <Style x:Key="DrawerTab" TargetType="RadioButton" BasedOn="{StaticResource SegmentRadio}">
+            <Setter Property="Padding" Value="6,6" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsTorrent}" Value="True">
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="Padding" Value="2,6" />
+                    <Setter Property="FontSize" Value="12" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+
         <Style x:Key="TileValue" TargetType="TextBlock">
             <Setter Property="FontSize" Value="20" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -51,6 +63,100 @@
                         <TextBlock Text="{Binding RangeText}" Style="{StaticResource Caption}" />
                         <TextBlock Grid.Column="1" Text="{Binding DoneText}" Style="{StaticResource Caption}" />
                     </Grid>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- one peer of a torrent -->
+        <DataTemplate DataType="{x:Type vm:TorrentPeerRow}">
+            <Border Style="{StaticResource Panel}" Margin="0,0,0,8" Padding="14,10">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="{Binding Address}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Client}" Style="{StaticResource Caption}" Margin="0,2,0,0"
+                                       TextTrimming="CharacterEllipsis" ToolTip="{Binding Client}" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding SpeedText}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <ui:Button Appearance="Transparent" Width="28" Height="28" Padding="0" Margin="6,-4,-6,0"
+                                       ToolTip="Ban this address: it is disconnected from every torrent and not connected to again"
+                                       AutomationProperties.Name="{Binding Address, StringFormat='Ban {0}'}"
+                                       Command="{Binding DataContext.BanPeerCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                       CommandParameter="{Binding}">
+                                <ui:SymbolIcon Symbol="Prohibited24" FontSize="14" />
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
+                    <ctl:ProgressTrack Height="4" Margin="0,8,0,6" Value="{Binding Progress}"
+                                       Track="{DynamicResource SubtleFillColorTertiaryBrush}" Fill="{DynamicResource AccentFillColorDefaultBrush}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding FlagsText}" Style="{StaticResource Caption}" />
+                        <TextBlock Grid.Column="1" Text="{Binding ProgressText}" Style="{StaticResource Caption}" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- one file of a torrent -->
+        <DataTemplate DataType="{x:Type vm:TorrentFileRow}">
+            <Border Style="{StaticResource Panel}" Margin="0,0,0,8" Padding="14,10">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Margin="0,0,10,0">
+                        <TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                        <ctl:ProgressTrack Height="4" Margin="0,8,0,6" Value="{Binding Progress}"
+                                           Track="{DynamicResource SubtleFillColorTertiaryBrush}" Fill="{DynamicResource AccentFillColorDefaultBrush}" />
+                        <TextBlock Style="{StaticResource Caption}">
+                            <Run Text="{Binding SizeText, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding ProgressText, Mode=OneWay}" />
+                        </TextBlock>
+                    </StackPanel>
+                    <ComboBox Grid.Column="1" MinWidth="104" VerticalAlignment="Center"
+                              ItemsSource="{x:Static vm:TorrentFileRow.Choices}" SelectedItem="{Binding Priority, Mode=TwoWay}"
+                              AutomationProperties.Name="{Binding Path}" ToolTip="High: fetched first. Skip: not downloaded." />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- one tracker of a torrent (or the DHT) -->
+        <DataTemplate DataType="{x:Type vm:TorrentTrackerRow}">
+            <Border Style="{StaticResource Panel}" Margin="0,0,0,8" Padding="14,10">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding Address}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Address}" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Top">
+                            <TextBlock Text="{Binding TierText}" Style="{StaticResource Caption}" Margin="10,0,0,0" VerticalAlignment="Center" />
+                            <ui:Button Appearance="Transparent" Width="28" Height="28" Padding="0" Margin="4,-6,-6,0"
+                                       ToolTip="Take this tracker off (it stays off when the torrent starts again)"
+                                       AutomationProperties.Name="{Binding Address, StringFormat='Remove {0}'}"
+                                       Command="{Binding DataContext.RemoveTrackerCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                       CommandParameter="{Binding}"
+                                       Visibility="{Binding CanRemove, Converter={StaticResource B2V}}">
+                                <ui:SymbolIcon Symbol="Dismiss24" FontSize="14" />
+                            </ui:Button>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding Status}" Style="{StaticResource Caption}" Margin="0,4,0,0" />
+                    <TextBlock Text="{Binding CountsText}" Style="{StaticResource Caption}" Margin="0,2,0,0"
+                               Visibility="{Binding CountsText, Converter={StaticResource NullToCollapsed}}" />
+                    <TextBlock Text="{Binding Message}" Style="{StaticResource Caption}" Margin="0,2,0,0" TextWrapping="Wrap"
+                               Foreground="{DynamicResource SystemFillColorCautionBrush}"
+                               Visibility="{Binding Message, Converter={StaticResource NullToCollapsed}}" />
                 </StackPanel>
             </Border>
         </DataTemplate>
@@ -120,11 +226,15 @@
             <Border Grid.Row="1" Margin="20,16,20,12" CornerRadius="9" Padding="3" HorizontalAlignment="Stretch"
                     Background="{DynamicResource ControlFillColorSecondaryBrush}">
                 <UniformGrid Rows="1">
-                    <RadioButton GroupName="detailsTab" Style="{StaticResource SegmentRadio}" Padding="6,6" Content="Overview"
+                    <RadioButton GroupName="detailsTab" Style="{StaticResource DrawerTab}" Content="Overview"
                                  IsChecked="{Binding IsOverview, Mode=TwoWay}" />
-                    <RadioButton GroupName="detailsTab" Style="{StaticResource SegmentRadio}" Padding="6,6" Content="Connections"
+                    <RadioButton GroupName="detailsTab" Style="{StaticResource DrawerTab}" Content="{Binding ConnectionsTabTitle}"
                                  IsChecked="{Binding IsConnections, Mode=TwoWay}" />
-                    <RadioButton GroupName="detailsTab" Style="{StaticResource SegmentRadio}" Padding="6,6" Content="Properties"
+                    <RadioButton GroupName="detailsTab" Style="{StaticResource DrawerTab}" Content="Files"
+                                 IsChecked="{Binding IsFiles, Mode=TwoWay}" Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}" />
+                    <RadioButton GroupName="detailsTab" Style="{StaticResource DrawerTab}" Content="Trackers"
+                                 IsChecked="{Binding IsTrackers, Mode=TwoWay}" Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}" />
+                    <RadioButton GroupName="detailsTab" Style="{StaticResource DrawerTab}" Content="Properties"
                                  IsChecked="{Binding IsProperties, Mode=TwoWay}" />
                 </UniformGrid>
             </Border>
@@ -199,12 +309,12 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="File map" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding MapTitle}" FontWeight="SemiBold" />
                                 <TextBlock Grid.Column="1" Text="{Binding BlocksText}" Style="{StaticResource Caption}" />
                             </Grid>
                             <ctl:SegmentMap Margin="0,12,0,0" HorizontalAlignment="Stretch"
-                                            Segments="{Binding Item.Segments}"
-                                            Total="{Binding Item.TotalBytes, TargetNullValue=0, FallbackValue=0}"
+                                            Segments="{Binding MapSegments}"
+                                            Total="{Binding MapTotal}"
                                             DoneBrush="{DynamicResource AccentFillColorDefaultBrush}"
                                             EmptyBrush="{DynamicResource ControlStrongStrokeColorDisabledBrush}"
                                             Visibility="{Binding HasBlocks, Converter={StaticResource B2V}}" />
@@ -217,8 +327,52 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- a torrent: peers, sharing, pieces -->
+                    <Border Style="{StaticResource Panel}" Margin="0" Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}">
+                        <StackPanel>
+                            <TextBlock Text="Peers and sharing" FontWeight="SemiBold" Margin="0,0,0,10" />
+                            <UniformGrid Columns="3">
+                                <StackPanel Margin="0,0,0,12" ToolTip="People the torrent is connected to right now.">
+                                    <TextBlock Text="{Binding Item.ConnectionCount}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="peers now" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,12" ToolTip="Connected peers that have the whole torrent.">
+                                    <TextBlock Text="{Binding SeedsText}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="have all of it" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <StackPanel Margin="0,0,0,12" ToolTip="The most peers at once.">
+                                    <TextBlock Text="{Binding Item.PeakConnections}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="peak" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <StackPanel ToolTip="Sent to others, over all runs.">
+                                    <TextBlock Text="{Binding SharedText}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="shared" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <StackPanel ToolTip="Shared ÷ the size of the chosen files.">
+                                    <TextBlock Text="{Binding RatioText}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="ratio" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                                <StackPanel ToolTip="Pieces on the disk, of the whole torrent.">
+                                    <TextBlock Text="{Binding PiecesText}" Style="{StaticResource TileValue}" />
+                                    <TextBlock Text="pieces" Style="{StaticResource Caption}" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <TextBlock Text="{Binding SwarmText}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,12,0,0"
+                                       Visibility="{Binding SwarmText, Converter={StaticResource NullToCollapsed}}" />
+                            <WrapPanel Margin="0,12,0,0">
+                                <ui:Button Content="Ask for peers now" Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,8,0"
+                                           Command="{Binding AskForPeersCommand}"
+                                           ToolTip="Asks every tracker, the DHT and the local network for peers at once (rather than at their next turn)."
+                                           Visibility="{Binding TorrentRunning, Converter={StaticResource B2V}}" />
+                                <ui:Button Content="Check the files again" Icon="{ui:SymbolIcon DocumentSearch24}"
+                                           Command="{Binding CheckFilesAgainCommand}"
+                                           ToolTip="Checks every piece on the disk against the torrent; whatever is missing or damaged is downloaded again." />
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- what the engine did -->
-                    <Border Style="{StaticResource Panel}" Margin="0">
+                    <Border Style="{StaticResource Panel}" Margin="0" Visibility="{Binding IsTorrent, Converter={StaticResource InverseB2V}}">
                         <StackPanel>
                             <TextBlock Text="Connections and engine" FontWeight="SemiBold" Margin="0,0,0,10" />
                             <UniformGrid Columns="3">
@@ -258,7 +412,76 @@
                 <StackPanel Margin="20,0,20,20">
                     <TextBlock Text="{Binding ConnectionsSummary}" Style="{StaticResource Caption}" TextWrapping="Wrap"
                                Margin="0,0,0,12" />
-                    <ItemsControl ItemsSource="{Binding Connections}" Focusable="False" />
+                    <ItemsControl ItemsSource="{Binding Connections}" Focusable="False"
+                                  Visibility="{Binding IsTorrent, Converter={StaticResource InverseB2V}}" />
+                    <!-- a torrent: someone known to share it, by hand -->
+                    <Border Style="{StaticResource Panel}" Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}">
+                        <StackPanel>
+                            <TextBlock Text="Add a peer" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,8"
+                                       Text="Someone you know shares this torrent: their address and port, e.g. 203.0.113.7:51413 or [2001:db8::7]:51413. Only while it runs." />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <ui:TextBox Text="{Binding NewPeer, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="address:port"
+                                            AutomationProperties.Name="Peer address" IsEnabled="{Binding TorrentRunning}" />
+                                <ui:Button Grid.Column="1" Content="Add" Margin="8,0,0,0" Height="34" Command="{Binding AddPeerCommand}"
+                                           IsEnabled="{Binding TorrentRunning}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding Peers}" Focusable="False" AutomationProperties.Name="Peers"
+                                  Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============ files (a torrent) ============ -->
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding IsFiles, Converter={StaticResource B2V}}">
+                <StackPanel Margin="20,0,20,20">
+                    <Border Style="{StaticResource Panel}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,10,0">
+                                <TextBlock Text="Download in order" FontWeight="SemiBold" />
+                                <TextBlock Text="Fetches the pieces from the start of the files, so a film can be watched while the rest arrives. Torrents come in faster the usual way."
+                                           Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <ui:ToggleSwitch Grid.Column="1" IsChecked="{Binding Sequential, Mode=TwoWay}" VerticalAlignment="Center"
+                                             AutomationProperties.Name="Download in order" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{Binding FilesSummary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,12" />
+                    <ItemsControl ItemsSource="{Binding TorrentFiles}" Focusable="False" AutomationProperties.Name="Files of the torrent" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ============ trackers (a torrent) ============ -->
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto"
+                          Visibility="{Binding IsTrackers, Converter={StaticResource B2V}}">
+                <StackPanel Margin="20,0,20,20">
+                    <TextBlock Text="{Binding TrackersSummary}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <TextBlock Text="{Binding SwarmText}" Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Visibility="{Binding SwarmText, Converter={StaticResource NullToCollapsed}}" />
+                    <ui:Button Content="Ask for peers now" Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,12" Command="{Binding AskForPeersCommand}"
+                               Visibility="{Binding TorrentRunning, Converter={StaticResource B2V}}" />
+                    <ItemsControl ItemsSource="{Binding Trackers}" Focusable="False" AutomationProperties.Name="Trackers" />
+                    <Border Style="{StaticResource Panel}" Margin="0,4,0,0" Visibility="{Binding IsPrivateTorrent, Converter={StaticResource InverseB2V}}">
+                        <StackPanel>
+                            <TextBlock Text="Add trackers" FontWeight="SemiBold" />
+                            <TextBlock Style="{StaticResource Caption}" TextWrapping="Wrap" Margin="0,2,0,8"
+                                       Text="One address per line (udp://, http:// or https://). Each is asked on its own, at once, and kept when the torrent starts again." />
+                            <ui:TextBox Text="{Binding NewTrackers, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="NoWrap"
+                                        MinHeight="64" MaxHeight="160" VerticalScrollBarVisibility="Auto"
+                                        PlaceholderText="udp://tracker.example.org:1337/announce" AutomationProperties.Name="Tracker addresses" />
+                            <ui:Button Content="Add" HorizontalAlignment="Right" Margin="0,8,0,0" Command="{Binding AddTrackersCommand}" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
 
@@ -288,6 +511,7 @@
                             <TextBlock Text="{Binding LimitStatus}" Style="{StaticResource Caption}" Margin="0,6,0,0"
                                        TextWrapping="Wrap" Visibility="{Binding LimitStatus, Converter={StaticResource NullToCollapsed}}" />
 
+                            <StackPanel Visibility="{Binding IsTorrent, Converter={StaticResource InverseB2V}}">
                             <Grid Margin="0,16,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
@@ -301,6 +525,7 @@
                                     AutomationProperties.Name="Connections at most" />
                             <TextBlock Text="{Binding ConnectionLimitHint}" Style="{StaticResource Caption}" Margin="0,2,0,0"
                                        Foreground="{DynamicResource TextFillColorTertiaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                 </StackPanel>

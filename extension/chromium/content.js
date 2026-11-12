@@ -2,8 +2,9 @@
 // video and says which video it is ("Download video - <name>"), so nobody has to open the toolbar popup to find out.
 //
 // What can be downloaded is decided by the extension's background page (it sees the network requests); this script only
-// reports the <video> elements it finds (name, address, length, size) and draws the answer. It reads nothing else from the
-// page and sends nothing anywhere but to the extension.
+// reports the <video> elements it finds (name, address, length, size) and draws the answer. It also hands the magnet links the
+// user clicks to the extension (only the link's address). It reads nothing else from the page and sends nothing anywhere but to
+// the extension.
 
 (() => {
   if (window.top !== window && window.innerWidth < 200) return;       // tiny frames (ads, trackers) have nothing to show
@@ -425,6 +426,31 @@
     host.style.left = `${Math.max(Math.min(rect.right, innerWidth) - width - 12, 4)}px`;
   }
 
+  // ---- magnet links ----------------------------------------------------------------------------------------------
+
+  // A plain click on a magnet link goes to ShadeNet (when the app's setting allows it). The extension says whether it took it; when it
+  // did not (the setting is off, the app cannot be reached), the link is clicked again and the browser does what it always did with it.
+  let magnetPassThrough = false;
+
+  function onMagnetClick(event) {
+    if (magnetPassThrough || event.defaultPrevented || event.button !== 0) return;
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;   // the browser's own ways (copy, new tab ...) stay
+    const link = event.target?.closest?.('a[href]');
+    const url = link?.href;
+    if (typeof url !== 'string' || !/^magnet:\?/i.test(url)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    ask({ type: 'open-magnet', url }).then((answer) => {
+      if (answer?.accepted) return;
+      magnetPassThrough = true;
+      try {
+        link.click();
+      } finally {
+        magnetPassThrough = false;
+      }
+    });
+  }
+
   // ---- upkeep ----------------------------------------------------------------------------------------------------
 
   function stop() {
@@ -433,6 +459,7 @@
   }
 
   function start() {
+    document.addEventListener('click', onMagnetClick, true);
     timer = setInterval(() => { if (document.visibilityState === 'visible') refresh(); }, POLL_MS);
     for (const type of ['loadedmetadata', 'loadeddata', 'play', 'emptied']) document.addEventListener(type, () => refresh(), true);
     addEventListener('scroll', () => render(), { passive: true, capture: true });

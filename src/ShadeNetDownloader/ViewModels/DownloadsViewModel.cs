@@ -495,10 +495,34 @@ public sealed partial class DownloadsViewModel : ObservableObject
         }
     }
 
+    /// <summary>A finished torrent: stop sharing it (its files stay).</summary>
+    public async Task StopSharingAsync(DownloadItemViewModel item)
+    {
+        await _manager.StopSeedingAsync(item.Id);
+        _toasts.Show($"Stopped sharing {item.FileName}", ToastKind.Info);
+    }
+
+    /// <summary>A torrent: check its files against it again (see <see cref="DownloadDetailsViewModel.CheckTorrentFilesAgainAsync"/>).</summary>
+    public Task CheckFilesAgainAsync(DownloadItemViewModel item) => DownloadDetailsViewModel.CheckTorrentFilesAgainAsync(_manager, _toasts, item);
+
+    /// <summary>A finished torrent: share it again, until the sharing limits in Settings.</summary>
+    public async Task ShareAgainAsync(DownloadItemViewModel item)
+    {
+        if (_manager.Settings.TorrentSeedRatio <= 0)
+        {
+            _toasts.Show("Sharing finished torrents is off. Turn it on in Settings > Torrents.", ToastKind.Info);
+            return;
+        }
+
+        if (!await _manager.StartSeedingAsync(item.Id))
+            _toasts.Show("It cannot be shared: its files are not all where they were saved.", ToastKind.Error);
+    }
+
     public void OpenFile(DownloadItemViewModel item)
     {
         if (item.State != DownloadState.Completed) return;
-        if (!File.Exists(item.Job.TargetPath))
+        // (a torrent of several files is a folder)
+        if (!File.Exists(item.Job.TargetPath) && !Directory.Exists(item.Job.TargetPath))
         {
             _toasts.Show("That file is no longer where it was saved.", ToastKind.Error);
             return;
@@ -516,6 +540,12 @@ public sealed partial class DownloadsViewModel : ObservableObject
     public void OpenWith(DownloadItemViewModel item)
     {
         if (item.State != DownloadState.Completed) return;
+        if (Directory.Exists(item.Job.TargetPath))
+        {
+            OpenFile(item);   // a folder (a torrent of several files) opens in Explorer
+            return;
+        }
+
         if (!File.Exists(item.Job.TargetPath))
         {
             _toasts.Show("That file is no longer where it was saved.", ToastKind.Error);
@@ -586,10 +616,11 @@ public sealed partial class DownloadsViewModel : ObservableObject
 
     public void ShowInFolder(DownloadItemViewModel item)
     {
-        var path = item.State == DownloadState.Completed ? item.Job.TargetPath : item.Job.PartPath;
+        // (a torrent writes its files in place as they come)
+        var path = item.State == DownloadState.Completed || item.IsTorrent ? item.Job.TargetPath : item.Job.PartPath;
         try
         {
-            if (File.Exists(path))
+            if (File.Exists(path) || Directory.Exists(path))
                 Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
             else if (Directory.Exists(item.Job.SaveDirectory))
                 Process.Start(new ProcessStartInfo(item.Job.SaveDirectory) { UseShellExecute = true });

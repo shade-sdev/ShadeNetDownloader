@@ -19,6 +19,9 @@ public enum DownloadKind
 
     /// <summary>An HLS stream: many small media segments, joined into one video file at the end.</summary>
     Hls,
+
+    /// <summary>A torrent (magnet link or .torrent file): pieces from the people sharing it, saved as a file or a folder of files.</summary>
+    Torrent,
 }
 
 public enum SegmentState

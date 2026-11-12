@@ -389,6 +389,8 @@ public sealed class InstallEngine
 
         EnsureNotRunning();
         if (_o.BrowserIntegration) RunApp("--uninstall-browser-integration");
+        // magnet links and .torrent files no longer open with it (only where they point at this installation's program)
+        RunApp("--uninstall-file-associations");
 
         DeleteRunValue();
         TryDelete(manifest?.StartMenuShortcut ?? StartMenuShortcutPath);

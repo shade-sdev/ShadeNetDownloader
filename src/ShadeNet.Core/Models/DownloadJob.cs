@@ -17,6 +17,9 @@ public sealed class DownloadJob
     /// <summary>For <see cref="DownloadKind.Hls"/>: the chosen quality and the progress so far. Persisted.</summary>
     public ShadeNet.Core.Hls.HlsJobData? Hls { get; set; }
 
+    /// <summary>For <see cref="DownloadKind.Torrent"/>: which torrent, which of its files, and what has been shared. Persisted.</summary>
+    public ShadeNet.Core.Torrents.TorrentJobData? Torrent { get; set; }
+
     // Target
     public string FileName { get; set; } = "download";
     public string SaveDirectory { get; set; } = "";

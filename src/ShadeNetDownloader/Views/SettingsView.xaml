@@ -238,6 +238,151 @@
                                     Text="{Binding MaxRecordingMinutes, UpdateSourceTrigger=LostFocus}" />
                     </ui:CardControl>
 
+                    <TextBlock Text="Torrents" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Open24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Open magnet links and .torrent files with ShadeNet" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="{Binding AssociationText}" TextWrapping="Wrap" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="{Binding AssociationError}" TextWrapping="Wrap"
+                                           Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                           Visibility="{Binding AssociationError, Converter={StaticResource NullToCollapsed}}" />
+                                <ui:Button Margin="0,8,0,0" Content="Windows' Default apps…" Icon="{ui:SymbolIcon Apps24}"
+                                           Command="{Binding OpenDefaultAppsCommand}"
+                                           Visibility="{Binding NeedsDefaultApps, Converter={StaticResource B2V}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding OpenTorrentsWithShadeNet, Mode=TwoWay}" AutomationProperties.Name="Open magnet links and torrent files with ShadeNet" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Share24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Share a finished torrent until it has sent (× its size)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Torrents work because people share what they downloaded. 1 gives back as much as you took; 0 stops sharing the moment it finishes." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center" AutomationProperties.Name="Sharing ratio"
+                                    Text="{Binding TorrentSeedRatioText, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Timer24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="…or stop sharing after (minutes)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="Whichever comes first. 0 means only the amount above stops it. Sharing also goes on after ShadeNet restarts, until a limit is reached." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="70" HorizontalContentAlignment="Center" AutomationProperties.Name="Sharing minutes"
+                                    Text="{Binding TorrentSeedMinutes, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ArrowUpload24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Upload speed limit for torrents (KB/s)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="All torrents together. 0 means no limit. The speed limit of all downloads (top bar) holds torrents back too." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="90" HorizontalContentAlignment="Center" AutomationProperties.Name="Torrent upload limit"
+                                    Text="{Binding TorrentUploadLimitKb, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon PlugConnected24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Port for incoming peers" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}"
+                                           Text="0 picks a free port each time ShadeNet starts. Windows may ask once whether ShadeNet may accept connections." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:TextBox Width="90" HorizontalContentAlignment="Center" AutomationProperties.Name="Torrent port"
+                                    Text="{Binding TorrentPort, UpdateSourceTrigger=LostFocus}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Globe24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Find peers without a tracker (DHT)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="Most magnet links need it. Turn it off for private trackers only." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding TorrentUseDht, Mode=TwoWay}" AutomationProperties.Name="DHT" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Router24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Ask the router to forward the port (UPnP)" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="Lets other peers connect to you, which makes torrents faster." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding TorrentPortForwarding, Mode=TwoWay}" AutomationProperties.Name="Port forwarding" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Wifi124}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Find peers on the local network" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" Text="Computers near you that share the same torrent send it faster." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding TorrentLocalPeers, Mode=TwoWay}" AutomationProperties.Name="Local peers" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon LockClosed24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Encrypt connections to peers" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="Some networks slow torrents down when they can see them. Encrypted only finds fewer peers; off is rarely useful." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox MinWidth="220" ItemsSource="{Binding EncryptionChoices}" SelectedItem="{Binding SelectedEncryption, Mode=TwoWay}"
+                                  DisplayMemberPath="Label" AutomationProperties.Name="Encryption" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon VirtualNetwork24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Use only this network adapter" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="For example your VPN's. Torrents then use nothing else: while it is not connected they wait, and never fall back to your usual network. Port forwarding and local peers are not used then." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox MinWidth="220" MaxWidth="320" ItemsSource="{Binding AdapterChoices}" SelectedItem="{Binding SelectedAdapter, Mode=TwoWay}"
+                                  DisplayMemberPath="Label" AutomationProperties.Name="Network adapter for torrents" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon ShieldLock24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Send torrents through the proxy" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="When a proxy is set under Network > Proxy (Manual). Trackers and peers are then reached only through it; UDP trackers, the DHT, local peers and port forwarding are not used, as they cannot go through a proxy." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding TorrentUseProxy, Mode=TwoWay}" AutomationProperties.Name="Send torrents through the proxy" />
+                    </ui:CardControl>
+
+                    <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap" Margin="4,0,4,8" Text="{Binding TorrentNetworkText}"
+                               AutomationProperties.Name="How torrents reach the network" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Prohibited24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Banned peers" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap" Text="{Binding BannedText}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:Button Content="Unban all" Command="{Binding UnbanPeersCommand}"
+                                   Visibility="{Binding HasBanned, Converter={StaticResource B2V}}" />
+                    </ui:CardControl>
+
                     <TextBlock Text="Helper programs" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
 
                     <ItemsControl ItemsSource="{Binding DataContext.Tools.Rows, RelativeSource={RelativeSource AncestorType=UserControl}}" Focusable="False">
@@ -488,11 +633,13 @@
                         <ui:CardControl.Header>
                             <StackPanel>
                                 <TextBlock Text="Proxy address" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="host:port for an HTTP proxy, or socks5://host:port. Add user:password@ before the host if it needs a sign-in. Torrents use it too (Downloads > Torrents)." />
                                 <TextBlock Style="{StaticResource CardError}" Text="{Binding ProxyError}"
                                            Visibility="{Binding ProxyError, Converter={StaticResource NullToCollapsed}}" />
                             </StackPanel>
                         </ui:CardControl.Header>
-                        <ui:TextBox Width="260" PlaceholderText="host:port"
+                        <ui:TextBox Width="260" PlaceholderText="host:port or socks5://host:port"
                                  Text="{Binding ProxyAddress, UpdateSourceTrigger=LostFocus}" />
                     </ui:CardControl>
 
@@ -668,6 +815,17 @@
                             </StackPanel>
                         </ui:CardControl.Header>
                         <ui:ToggleSwitch IsChecked="{Binding PageSignIn, Mode=TwoWay}" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Share24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Open magnet links I click with ShadeNet" FontSize="14" />
+                                <TextBlock Text="A magnet link on a page opens ShadeNet's Add dialog (with its list of files) instead of asking the browser. Torrent (.torrent) files the browser downloads are always opened as torrents."
+                                           Style="{StaticResource CardHint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding MagnetLinks, Mode=TwoWay}" AutomationProperties.Name="Open magnet links with ShadeNet" />
                     </ui:CardControl>
 
                     <ui:CardControl Icon="{ui:SymbolIcon WindowApps24}" Margin="0,0,0,8">

@@ -23,15 +23,16 @@ with your sign-in. Everything is in the box: no .NET, no extra tools to install.
 3. [A first look](#a-first-look)
 4. [Downloading files](#downloading-files)
 5. [Videos, streams and live recordings](#videos-streams-and-live-recordings)
-6. [The browser extension](#the-browser-extension)
-7. [Queue, schedule and "when finished"](#queue-schedule-and-when-finished)
-8. [Settings, page by page](#settings-page-by-page)
-9. [Keyboard shortcuts](#keyboard-shortcuts)
-10. [Updates](#updates)
-11. [Troubleshooting](#troubleshooting)
-12. [Privacy and limits](#privacy-and-limits)
-13. [Building from source](#building-from-source)
-14. [Credits](#credits)
+6. [Torrents](#torrents)
+7. [The browser extension](#the-browser-extension)
+8. [Queue, schedule and "when finished"](#queue-schedule-and-when-finished)
+9. [Settings, page by page](#settings-page-by-page)
+10. [Keyboard shortcuts](#keyboard-shortcuts)
+11. [Updates](#updates)
+12. [Troubleshooting](#troubleshooting)
+13. [Privacy and limits](#privacy-and-limits)
+14. [Building from source](#building-from-source)
+15. [Credits](#credits)
 
 ---
 
@@ -43,6 +44,7 @@ with your sign-in. Everything is in the box: no .NET, no extra tools to install.
 | **Safe to interrupt** | Pause, resume, close the program: unfinished downloads continue where they stopped. After a crash or a power cut they continue from the last saved point, a few seconds back. Every download is kept in a small local database. |
 | **Videos** | Paste the address of a YouTube (or Facebook, Instagram, X, TikTok, Vimeo, Reddit …) video page, choose a quality, and ShadeNet downloads it. HLS and DASH streams are fetched in parallel and joined without re-encoding. Subtitles can be saved or put inside the file. |
 | **Live recordings** | A live stream is recorded until you press **Stop and save** (or until a length limit you set). |
+| **Torrents** | Magnet links and `.torrent` files (from the Add dialog, the browser, or Windows): pick the files and their priority, download in order to watch while it arrives, see the peers, files and trackers, pause and resume across restarts, and share back what you downloaded until a limit you set. |
 | **Browser extension** | For Chrome, Edge, Brave and other Chromium browsers. It hands your downloads to ShadeNet **with the cookies and headers the site needs**, and puts a **Download video** button on videos, named after the video. |
 | **Tidy** | Downloads are sorted into category folders (Video, Music, Documents, Programs …). A queue with a schedule, a speed limit, search, sorting, and a details view with a live speed graph and a map of the file. |
 | **Yours to style** | Light, dark or Windows' own; ready-made themes, gradient themes, and a choice of app icons. |
@@ -217,6 +219,73 @@ once a day ShadeNet also looks for newer versions and **asks** before installing
 
 ---
 
+## Torrents
+
+**Paste a magnet link**, press **Open .torrent file…** in the Add dialog, or drop a `.torrent` file on the window. A link to a
+`.torrent` file on the web works too. With the browser extension, a **magnet link you click** on a page opens in ShadeNet, and a
+`.torrent` file the browser downloads becomes a torrent (fetched with your sign-in on that site). And Windows can open magnet links
+and `.torrent` files with ShadeNet (see below).
+
+<div align="center">
+<img src="screenshots/add-torrent.png" alt="Add dialog for a torrent, with its files listed and one left out" width="760">
+</div>
+
+* **Pick the files.** The dialog lists what the torrent holds; untick what you don't want. A torrent of several files is saved
+  as a folder named after it, one of a single file as that file. The category follows the largest file (a film's folder goes to
+  Video).
+* **Magnet links** carry no file list: it comes from the people sharing the torrent, which can take a moment. You can press
+  **Download now** before it arrives; every file is then downloaded.
+* **Download in order** (in the Add dialog, or in the drawer's *Files* tab) fetches the pieces from the start of the files, so a
+  film can be watched while the rest arrives. The usual way (rarest pieces first) is faster for everyone, so it is off by default.
+* **Pause and resume** work as for any download, also across restarts: what is on the disk is kept and checked, not fetched again.
+  The speed limits (one download's, and the total in the bottom bar) hold torrents back too.
+* **Sharing back.** Torrents work because people share what they downloaded. When a torrent finishes, its card says **Sharing**
+  and ShadeNet sends pieces to others until it has sent as much as the torrent's size, or for 2 hours, whichever comes first.
+  Sharing doesn't take a place in the queue, and it carries on after ShadeNet restarts until a limit is reached. Change the limits
+  (or turn sharing off) in Settings → Downloads → *Torrents*; right-click a finished torrent for **Stop sharing** or **Share again**.
+* **Safety.** A torrent that names a file outside its own folder is refused. The same torrent can't be added twice.
+
+<div align="center">
+<img src="screenshots/torrent-sharing.png" alt="A finished torrent being shared" width="760">
+</div>
+
+### A torrent's details
+
+Open a torrent's details (the **ⓘ** button on its card, or **Alt+Enter**). Next to *Overview* and *Properties* it has three tabs of
+its own:
+
+* **Peers:** everyone the torrent is connected to: their address and program, how much of the torrent they have, and the speed in
+  each direction. The **⊘** button on a peer **bans** its address: it is disconnected from every torrent and never connected to
+  again (Settings → Downloads → *Torrents* lists the banned addresses and unbans them). **Add a peer** connects to someone you
+  know shares the torrent (`203.0.113.7:51413`, or `[2001:db8::7]:51413` for IPv6).
+* **Files:** every file with its progress and a priority: **High** (fetched first), **Normal** or **Skip** (not downloaded).
+  Change them while it runs. Asking for a file of a finished torrent downloads it (what is there stays). The *Download in order*
+  switch is here too.
+* **Trackers:** each tracker, whether it answers and how many it says share the torrent, and the DHT. **Add trackers** (one
+  address per line) and **✕** take trackers on and off; the changes stay when the torrent starts again. A private torrent takes no
+  other tracker.
+
+The *Overview* shows the torrent's pieces as a map (every piece of the whole torrent, the skipped files too), the peers, how much
+it has shared, and the **whole swarm as the trackers count it** (the card shows it too). Two buttons: **Ask for peers now** asks
+every tracker, the DHT and the local network at once rather than at their next turn, and **Check the files again** checks every
+piece on the disk against the torrent and downloads whatever is missing or damaged (also on the card's right-click menu; a paused
+torrent is checked when it next starts). The Add dialog already says how many share a torrent before you add it.
+
+<div align="center">
+<img src="screenshots/torrent-files.png" alt="The Files tab of a torrent's details: priorities per file, one skipped" width="760">
+<img src="screenshots/torrent-peers.png" alt="The Peers tab of a torrent's details" width="760">
+</div>
+
+### Opening magnet links and .torrent files from Windows
+
+Turn on **Open magnet links and .torrent files with ShadeNet** in Settings → Downloads → *Torrents*. ShadeNet is then offered for
+them by Windows ("Open with", Default apps). It becomes the program that opens them only if no other program does yet. If one does
+(another torrent program), it stays in charge until you choose ShadeNet in Windows' **Default apps**: the setting shows a button
+that opens that page. A magnet link opened while ShadeNet runs goes to its Add dialog. Turning the setting off, or uninstalling
+ShadeNet, removes everything it registered.
+
+---
+
 ## The browser extension
 
 The extension lets ShadeNet take over your browser's downloads and add a **Download video** button to videos. It works in
@@ -246,7 +315,10 @@ ID is fixed and ShadeNet accepts nothing else), and it **updates with the progra
   it, the browser's own copy is cancelled. If ShadeNet can't be reached the browser's download just continues: **a failure never
   loses a download.** Sign-in cookies, the referring page and the browser's identity travel with it, so links that only answer a
   signed-in browser work.
-* **Right-click → Download with ShadeNet** on a link, video or audio.
+* **Right-click → Download with ShadeNet** on a link, video or audio (a magnet link too).
+* **Magnet links you click** open in ShadeNet's Add dialog, with the torrent's files (*Open magnet links I click with ShadeNet*
+  in Settings → Browser; off, the browser handles them as before). A **`.torrent` file** the browser downloads becomes a torrent
+  in ShadeNet, fetched with your sign-in on that site (in the Add dialog you can keep just the `.torrent` file instead).
 * **A Download video button on videos.** When a page plays something ShadeNet can download, a small button appears on the video
   with its **name, length and quality**. One click sends it; the file is saved under the video's name. It also works for videos
   inside embedded players and for sites that hide the video's address.
@@ -312,7 +384,7 @@ Open **Settings** (bottom left, or **Ctrl+,**).
 </details>
 
 <details>
-<summary><b>Downloads</b>: folder, connections, resume on start, recording limit, helper programs</summary>
+<summary><b>Downloads</b>: folder, connections, resume on start, recording limit, torrents, helper programs</summary>
 
 <img src="screenshots/settings-downloads.png" alt="Settings, Downloads page" width="760">
 
@@ -320,6 +392,20 @@ Open **Settings** (bottom left, or **Ctrl+,**).
 * **Connections per download:** the starting point for new downloads (1 to 32). A site's own limit, or the Add dialog, can lower it.
 * **Resume unfinished downloads when ShadeNet starts:** off means they wait, paused, until you resume them.
 * **Stop live recordings after (minutes).**
+* **Torrents:** *Open magnet links and .torrent files with ShadeNet* (see [above](#opening-magnet-links-and-torrent-files-from-windows)),
+  how long a finished torrent is shared (until it has sent *N* × its size, or for so many minutes; 0 turns
+  sharing off), an upload speed limit for all torrents, the port other peers connect to (0 = a free one each start, over IPv4
+  and IPv6), and three switches: finding peers without a tracker (DHT, which most magnet links need), asking the router to forward
+  the port (UPnP), and finding peers on the local network. Then:
+  * **Encrypt connections to peers:** *Prefer encrypted* (the most peers), *Encrypted only* (some networks slow down torrent
+    traffic they can recognise) or *Off*.
+  * **Use only this network adapter:** e.g. your VPN's. Torrents then use only its addresses; while it is not connected they wait
+    and never fall back to your usual network.
+  * **Send torrents through the proxy:** with a proxy set in Settings → Network (an HTTP proxy, or `socks5://host:port`, with
+    `user:password@` if it needs a sign-in), trackers and peers are reached only through it. What a proxy cannot carry (UDP
+    trackers, the DHT, local peers, port forwarding) is then not used. A line under these settings says how torrents reach the
+    network right now.
+  * **Banned peers**, with **Unban all**.
 * **Helper programs:** yt-dlp and ffmpeg (see above).
 </details>
 
@@ -429,6 +515,9 @@ Turn the automatic look off in *Settings → About*; **Check for updates** still
 | **The extension says *Not connected*** | Its second line gives the reason. Open *Settings → Browser* and press **Set up** again, which rewrites the registration. |
 | **"Specified native messaging host not found"** | Press **Set up** in *Settings → Browser*, then restart the browser. |
 | **Downloads are slow** | Check the speed limit in the bottom bar, the *Connections per site* list in Settings → Network, and your proxy setting. |
+| **A magnet link stays at *Getting the file list from peers…*** | Nobody sharing it was found yet. Leave it: it starts as soon as a peer answers. Check that *Find peers without a tracker (DHT)* is on in Settings → Downloads; an old or rare torrent may have nobody left. |
+| **A torrent downloads slowly or says *Looking for peers…*** | Few people share it (the swarm count on its card tells). Turning on *Ask the router to forward the port* helps others connect to you; allow ShadeNet if Windows asks about the firewall. Through a proxy, only HTTP trackers can be asked: add some in Details → Trackers. |
+| **A torrent says *Waiting for … to connect*** | Torrents are bound to that network adapter (Settings → Downloads → *Torrents*) and it is not connected: connect your VPN, or choose *Any network*. |
 | **I can't find the window** | ShadeNet is probably in the notification area (closing the window keeps it running): click its icon. |
 | **The taskbar or desktop icon looks old after an update** | Windows keeps the picture of an icon it has seen. From version 1.0.5 an update refreshes the shortcuts' pictures, and from 1.0.6 the taskbar button follows the icon you choose in Settings → Appearance. On older versions, update ShadeNet first. |
 
@@ -440,6 +529,10 @@ Log files: the browser connection writes `%LOCALAPPDATA%\ShadeNet\host.log`; a c
 
 * ShadeNet runs entirely on your computer. It has **no account and no telemetry**. The only things it contacts are the sites you
   download from, GitHub (the daily look for updates), and the publishers of yt-dlp and ffmpeg (their own daily look).
+* **Torrents are shared in public.** While a torrent downloads or is shared, everyone in its swarm (and its trackers) can see your
+  IP address, and your internet provider can see that you use BitTorrent. ShadeNet opens no port for torrents until you add one.
+  A proxy or a VPN adapter (Settings → Downloads → *Torrents*) hides your address from them; encryption only hides what you share
+  from your provider, not that you use BitTorrent.
 * The extension sends a download's sign-in cookies, referring page and browser identity **to ShadeNet on your computer**, only for
   that download. Your browser sign-in for a video page goes to yt-dlp in a temporary file that is deleted right after.
 * **DRM-protected video is not supported** and never will be.
@@ -468,7 +561,7 @@ Set `SHADENET_DATA_DIR` to run against a throw-away data folder.
 
 | Folder | What is in it |
 |---|---|
-| `src/ShadeNet.Core` | The download engine: probing, segmenting, resume, speed limiter, HLS/DASH, recording, updates |
+| `src/ShadeNet.Core` | The download engine: probing, segmenting, resume, speed limiter, HLS/DASH, recording, torrents, updates |
 | `src/ShadeNetDownloader` | The WPF app ([WPF-UI](https://github.com/lepoco/wpfui), .NET 10) |
 | `src/ShadeNet.Bridge`, `src/ShadeNet.NativeHost` | The pipe and native-messaging host between the browser and the app |
 | `src/ShadeNet.Setup` | The installer, the uninstaller and the updater (one project) |
@@ -488,4 +581,5 @@ Installed programs read `releases/latest/download/update.json` to learn about th
 * [yt-dlp](https://github.com/yt-dlp/yt-dlp) (Unlicense) finds the videos behind web pages.
 * [ffmpeg](https://ffmpeg.org/) (LGPL build) joins pictures, sound and subtitles.
 * [WPF-UI](https://github.com/lepoco/wpfui) for the Windows 11 look.
+* [MonoTorrent](https://github.com/alanmcgovern/monotorrent) (MIT) for BitTorrent.
 * Licences of the bundled programs are in `licenses\THIRD-PARTY-NOTICES.txt` inside the installation.

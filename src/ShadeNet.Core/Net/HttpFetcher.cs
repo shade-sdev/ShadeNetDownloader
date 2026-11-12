@@ -59,7 +59,7 @@ internal static class HttpFetcher
                 break;
             case ProxyMode.Manual when TryParseProxy(settings.ProxyAddress) is { } proxy:
                 handler.UseProxy = true;
-                handler.Proxy = new WebProxy(proxy);
+                handler.Proxy = WebProxyOf(proxy);
                 break;
             // System (and a manual proxy with an unusable address): the proxy Windows is configured with
         }
@@ -67,15 +67,37 @@ internal static class HttpFetcher
         return handler;
     }
 
-    /// <summary>"host:port" or a full address; null when it cannot be a proxy.</summary>
+    /// <summary>
+    /// "host:port" (an HTTP proxy) or a full address (http, https, socks4, socks4a, socks5, socks5h; "user:password@" for a sign-in);
+    /// null when it cannot be a proxy.
+    /// </summary>
     public static Uri? TryParseProxy(string? address)
     {
         if (string.IsNullOrWhiteSpace(address)) return null;
         var text = address.Trim();
         if (!text.Contains("://", StringComparison.Ordinal)) text = "http://" + text;
-        return Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" && !string.IsNullOrEmpty(uri.Host)
+        return Uri.TryCreate(text, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https" or "socks4" or "socks4a" or "socks5" or "socks5h"
+                                                                  && !string.IsNullOrEmpty(uri.Host) && (uri.Scheme is "http" or "https" || !uri.IsDefaultPort)
             ? uri
             : null;
+    }
+
+    /// <summary>The proxy for .NET's HTTP stack: its sign-in (if any) as credentials, socks5h as socks5 (which already leaves names to the proxy).</summary>
+    public static WebProxy WebProxyOf(Uri proxy)
+    {
+        var address = new UriBuilder(proxy) { UserName = "", Password = "" };
+        if (address.Scheme == "socks5h") address.Scheme = "socks5";
+        var web = new WebProxy(address.Uri);
+        if (CredentialsOf(proxy) is { } credentials) web.Credentials = credentials;
+        return web;
+    }
+
+    /// <summary>The "user:password@" of a proxy address, if it has one.</summary>
+    public static NetworkCredential? CredentialsOf(Uri proxy)
+    {
+        if (string.IsNullOrEmpty(proxy.UserInfo)) return null;
+        var parts = proxy.UserInfo.Split(':', 2);
+        return new NetworkCredential(Uri.UnescapeDataString(parts[0]), parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : "");
     }
 
     /// <summary>

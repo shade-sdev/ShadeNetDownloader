@@ -5,6 +5,7 @@ using ShadeNet.Core.Engine;
 using ShadeNet.Core.Models;
 using ShadeNet.Core.Net;
 using ShadeNet.Core.Storage;
+using ShadeNet.Core.Torrents;
 using ShadeNet.Core.Util;
 
 namespace ShadeNet.Core;
@@ -46,6 +47,24 @@ public sealed class DownloadManager : IDisposable
     /// <summary>Connection limits sites were seen to enforce: later downloads from them start within the limit.</summary>
     public HostConnectionMemory HostLimits { get; } = new();
 
+    TorrentSession? _torrents;
+
+    /// <summary>The torrent engine, made the first time a torrent is used (it opens a port: none is opened without a torrent).</summary>
+    TorrentSession Torrents
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _torrents ??= new TorrentSession(Settings, () => GlobalLimiter.BytesPerSecond, _logger)
+                {
+                    Store = _store,
+                    Changed = j => JobUpdated?.Invoke(Snapshot(j)),
+                };
+            }
+        }
+    }
+
     public event Action<DownloadJob>? JobAdded;
     public event Action<Guid>? JobRemoved;
     public event Action<JobSnapshot>? JobUpdated;
@@ -79,6 +98,17 @@ public sealed class DownloadManager : IDisposable
 
         foreach (var job in loaded) JobAdded?.Invoke(job);
         Pump();
+
+        // finished torrents that were still being shared when ShadeNet closed go on being shared (until their limits)
+        foreach (var job in loaded.Where(j => j is { Kind: DownloadKind.Torrent, State: DownloadState.Completed, Torrent.Seeding: true }))
+        {
+            if (Torrents.ShouldSeed(job)) _ = Torrents.ResumeSeedingAsync(job);
+            else
+            {
+                job.Torrent!.Seeding = false;
+                _store?.SaveJob(job);
+            }
+        }
     }
 
     public IReadOnlyList<DownloadJob> Jobs
@@ -97,6 +127,19 @@ public sealed class DownloadManager : IDisposable
     /// <summary>Same URL (original or final) already in the list and not finished with errors → ask before adding twice.</summary>
     public DownloadJob? FindDuplicate(string url)
     {
+        // a magnet link is the same torrent when it names the same torrent, whatever trackers it lists
+        if (TorrentSession.IsMagnet(url))
+        {
+            try
+            {
+                return FindTorrent(TorrentSession.HashOf(TorrentSession.ParseMagnet(url)));
+            }
+            catch (DownloadException)
+            {
+                return null;
+            }
+        }
+
         lock (_gate)
         {
             return _jobs.FirstOrDefault(j =>
@@ -105,6 +148,7 @@ public sealed class DownloadManager : IDisposable
         }
     }
 
+    /// <summary>Stops every running download (and the sharing of finished torrents, which goes on at the next start).</summary>
     public async Task StopAllAsync()
     {
         List<RunningJob> running;
@@ -122,6 +166,15 @@ public sealed class DownloadManager : IDisposable
         {
             // runners never throw
         }
+
+        TorrentSession? torrents;
+        lock (_gate)
+        {
+            torrents = _torrents;
+            _torrents = null;
+        }
+
+        if (torrents != null) await torrents.DisposeAsync().ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -177,6 +230,15 @@ public sealed class DownloadManager : IDisposable
 
     public DownloadJob Add(AddDownloadRequest request, ProbeResult? probe = null)
     {
+        // a torrent: asked for as one, a magnet link, or a .torrent file on this computer (one on the web is a file to save unless the
+        // request says it is a torrent: the browser's downloads of .torrent files stay files)
+        var web = Uri.TryCreate(request.Url, UriKind.Absolute, out var asWeb) && asWeb.Scheme is "http" or "https";
+        if (request.Torrent != null || TorrentSession.IsMagnet(request.Url) || (!web && IsTorrentAddress(request.Url)))
+        {
+            probe?.Discard();
+            return AddTorrent(request);
+        }
+
         if (!Uri.TryCreate(request.Url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
             throw new ArgumentException("Only http:// and https:// addresses are supported.", nameof(request));
 
@@ -256,6 +318,346 @@ public sealed class DownloadManager : IDisposable
         return job;
     }
 
+    // ------------------------------------------------------------------------------------------------------------
+    // Torrents
+    // ------------------------------------------------------------------------------------------------------------
+
+    /// <summary>True for a magnet link, a .torrent file (on the disk or the web), or an answer of the BitTorrent file type.</summary>
+    public static bool IsTorrentAddress(string? url, string? contentType = null)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        if (TorrentSession.IsMagnet(url)) return true;
+        if (contentType != null && contentType.StartsWith("application/x-bittorrent", StringComparison.OrdinalIgnoreCase)) return true;
+        var path = Uri.TryCreate(url.Trim().Trim('"'), UriKind.Absolute, out var u) ? (u.IsFile ? u.LocalPath : u.AbsolutePath) : url.Trim().Trim('"');
+        return path.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// What a torrent holds: its name, size and files. A magnet link's file list comes from the peers sharing it, which can take a while
+    /// (cancel to stop waiting); a .torrent file is read from the disk or the web.
+    /// </summary>
+    public Task<TorrentInfo> DescribeTorrentAsync(string source, CancellationToken ct = default) => DescribeTorrentAsync(source, null, ct);
+
+    /// <param name="web">For a .torrent file on the web: the sign-in, referring page and identity to ask for it with (what the browser
+    /// handed over).</param>
+    public async Task<TorrentInfo> DescribeTorrentAsync(string source, RequestSpec? web, CancellationToken ct = default)
+    {
+        // (the peers are not asked for a torrent that is in the list already)
+        if (TorrentSession.IsMagnet(source) && FindTorrent(TorrentSession.HashOf(TorrentSession.ParseMagnet(source))) is { } listed)
+            throw new DownloadException(JobErrorKind.Other, $"This torrent is already in your list as “{listed.FileName}”.");
+
+        var (torrent, bytes) = await Torrents.FetchAsync(source, null, ct, web).ConfigureAwait(false);
+        if (FindTorrent(TorrentSession.HashOf(torrent)) is { } already)
+            throw new DownloadException(JobErrorKind.Other, $"This torrent is already in your list as “{already.FileName}”.");
+        return TorrentSession.InfoOf(torrent, bytes);
+    }
+
+    /// <summary>The download of the torrent with this identity (info hash), if it is in the list.</summary>
+    public DownloadJob? FindTorrent(string infoHash)
+    {
+        lock (_gate) return _jobs.FirstOrDefault(j => j.Kind == DownloadKind.Torrent && string.Equals(j.Torrent?.InfoHash, infoHash, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// What the details drawer shows about a torrent: its peers, files, trackers and pieces. Live while it is in the engine, from what was
+    /// saved otherwise; <see cref="TorrentDetails.Empty"/> for a download that is not a torrent.
+    /// </summary>
+    public async Task<TorrentDetails> GetTorrentDetailsAsync(Guid id)
+    {
+        if (Find(id) is not { Kind: DownloadKind.Torrent } job) return TorrentDetails.Empty;
+        return await Torrents.DetailsAsync(job).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Chooses the files of a torrent again, one priority per file (in the torrent's order). A running torrent follows at once; a finished
+    /// one that is given a file it does not have yet starts downloading again (what it has is kept).
+    /// </summary>
+    public async Task SetTorrentFilesAsync(Guid id, IReadOnlyList<TorrentFilePriority> priorities)
+    {
+        if (Find(id) is not { Kind: DownloadKind.Torrent, Torrent.Files: { } files } job)
+            throw new InvalidOperationException("The files of this torrent are not known yet.");
+        if (priorities.Count != files.Count) throw new ArgumentException("One priority per file of the torrent.", nameof(priorities));
+        if (priorities.All(p => p == TorrentFilePriority.Skip)) throw new ArgumentException("Choose at least one file of the torrent.", nameof(priorities));
+
+        var added = false;
+        for (var i = 0; i < files.Count; i++)
+        {
+            var want = priorities[i] != TorrentFilePriority.Skip;
+            added |= want && !files[i].Selected;
+            files[i].Selected = want;
+            files[i].High = priorities[i] == TorrentFilePriority.High;
+        }
+
+        job.TotalSize = job.Torrent!.WantedBytes;
+        if (Torrents.ManagerOf(id) != null) await Torrents.ApplyFilesAsync(job).ConfigureAwait(false);
+
+        if (added && job.State == DownloadState.Completed)
+        {
+            // a finished torrent with a file it does not have: download that (stop sharing it first; the engine takes it back as a download)
+            await Torrents.StopSeedingAsync(id).ConfigureAwait(false);
+            job.State = DownloadState.Paused;
+            job.CompletedAt = null;
+            _store?.SaveJob(job);
+            JobUpdated?.Invoke(Snapshot(job));
+            StartNow(job);
+            return;
+        }
+
+        _store?.SaveJob(job);
+        JobUpdated?.Invoke(Snapshot(job));
+    }
+
+    /// <summary>Fetch a torrent's pieces in order (from the start of its files) or in the usual swarm-friendly way. A running torrent follows at once.</summary>
+    public async Task SetTorrentSequentialAsync(Guid id, bool sequential)
+    {
+        if (Find(id) is not { Kind: DownloadKind.Torrent, Torrent: { } data } job) return;
+        data.Sequential = sequential;
+        _store?.SaveJob(job);
+        await Torrents.ApplySequentialAsync(job).ConfigureAwait(false);
+    }
+
+    /// <summary>Whether a finished torrent is being shared with others right now.</summary>
+    public bool IsSeeding(Guid id) => _torrents?.IsSeeding(id) == true;
+
+    /// <summary>Stops sharing a finished torrent (its files stay).</summary>
+    public async Task StopSeedingAsync(Guid id)
+    {
+        if (_torrents is { } t) await t.StopSeedingAsync(id).ConfigureAwait(false);
+    }
+
+    /// <summary>Shares a finished torrent again, until the sharing limits; false when its files are not all there any more.</summary>
+    public async Task<bool> StartSeedingAsync(Guid id)
+    {
+        var job = Find(id);
+        if (job is not { Kind: DownloadKind.Torrent, State: DownloadState.Completed }) return false;
+        // asked for by hand: the limits count again from now
+        job.Torrent!.SeedSeconds = 0;
+        if (Settings.TorrentSeedRatio > 0 && TorrentSession.Ratio(job.Torrent) >= Settings.TorrentSeedRatio) job.Torrent.Uploaded = 0;
+        return Settings.TorrentSeedRatio > 0 && await Torrents.ResumeSeedingAsync(job).ConfigureAwait(false);
+    }
+
+    DownloadJob TorrentJob(Guid id) =>
+        Find(id) is { Kind: DownloadKind.Torrent, Torrent: not null } job ? job : throw new InvalidOperationException("That download is not a torrent.");
+
+    /// <summary>
+    /// Adds trackers to a torrent (one address per line, or several separated by spaces): each is asked on its own, at once if it runs,
+    /// and they stay when it starts again. Returns how many were new; addresses that are not trackers are listed in the exception.
+    /// </summary>
+    public async Task<int> AddTorrentTrackersAsync(Guid id, string text)
+    {
+        var job = TorrentJob(id);
+        var words = (text ?? "").Split(new[] { ' ', '\t', '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        var bad = words.Where(w => TorrentSession.ParseTracker(w) == null).ToList();
+        if (words.Length == 0) throw new ArgumentException("Enter a tracker's address, e.g. udp://tracker.example.org:1337/announce.", nameof(text));
+        if (bad.Count > 0) throw new ArgumentException($"Not a tracker address: {string.Join(", ", bad.Take(3))}. Trackers start with udp://, http:// or https://.", nameof(text));
+        var added = await Torrents.AddTrackersAsync(job, words.Select(w => TorrentSession.ParseTracker(w)!).ToList()).ConfigureAwait(false);
+        JobUpdated?.Invoke(Snapshot(job));
+        return added;
+    }
+
+    /// <summary>Takes a tracker off a torrent (it stays off when the torrent starts again).</summary>
+    public async Task RemoveTorrentTrackerAsync(Guid id, string address)
+    {
+        var job = TorrentJob(id);
+        await Torrents.RemoveTrackerAsync(job, address).ConfigureAwait(false);
+        JobUpdated?.Invoke(Snapshot(job));
+    }
+
+    /// <summary>"Ask for peers now": every tracker, the DHT and the local network are asked at once. False when the torrent is not running.</summary>
+    public bool ReannounceTorrent(Guid id) => Torrents.Reannounce(TorrentJob(id));
+
+    /// <summary>
+    /// "Check the files again": every piece on the disk is checked against the torrent, and what is missing or damaged is downloaded again.
+    /// A running torrent does it at once; a finished one starts for it; a paused one does it when it next starts.
+    /// </summary>
+    public async Task<TorrentRecheck> RecheckTorrentAsync(Guid id)
+    {
+        var job = TorrentJob(id);
+        var data = job.Torrent!;
+        if (string.IsNullOrEmpty(data.InfoHash) || data.Files == null)
+            throw new InvalidOperationException("The torrent's file list is not known yet, so there is nothing to check.");
+
+        if (Torrents.IsSeeding(id)) await Torrents.StopSeedingAsync(id).ConfigureAwait(false);
+        else if (await Torrents.RecheckAsync(job).ConfigureAwait(false)) return TorrentRecheck.Checking;
+
+        Torrents.ForgetResumeData(data.InfoHash);
+        if (job.State != DownloadState.Completed) return TorrentRecheck.OnNextStart;
+
+        // finished: it starts, checks everything, and downloads what is not right (then shares again, within the limits)
+        job.State = DownloadState.Paused;
+        job.CompletedAt = null;
+        _store?.SaveJob(job);
+        JobUpdated?.Invoke(Snapshot(job));
+        StartNow(job);
+        return TorrentRecheck.Restarted;
+    }
+
+    /// <summary>"Add a peer": connects a running torrent to someone known to share it ("address:port", "[IPv6 address]:port").</summary>
+    public async Task AddTorrentPeerAsync(Guid id, string address)
+    {
+        var job = TorrentJob(id);
+        var peer = TorrentSession.ParsePeer(address)
+                   ?? throw new ArgumentException("Enter the peer as address:port, for example 203.0.113.7:51413 or [2001:db8::7]:51413.", nameof(address));
+        if (!await Torrents.AddPeerAsync(job, peer).ConfigureAwait(false))
+            throw new InvalidOperationException("Start the torrent first: peers are connected to only while it runs.");
+    }
+
+    /// <summary>Bans a peer's address from every torrent: it is disconnected now and never connected to again (until unbanned in Settings).</summary>
+    public async Task BanTorrentPeerAsync(string address)
+    {
+        var peer = TorrentSession.ParsePeer(address, portRequired: false) ?? throw new ArgumentException("That is not a peer's address.", nameof(address));
+        await Torrents.BanAsync(peer.Address).ConfigureAwait(false);
+    }
+
+    /// <summary>The banned peer addresses.</summary>
+    public IReadOnlyList<string> BannedTorrentPeers => Torrents.BannedPeers;
+
+    public void UnbanTorrentPeers() => Torrents.UnbanAll();
+
+    /// <summary>
+    /// How big a torrent's swarm is, before it is added: its trackers are asked how many have all of it and how many are downloading
+    /// (for at most a few seconds).
+    /// </summary>
+    public Task<TorrentSwarmCount> CountTorrentSwarmAsync(TorrentInfo info, CancellationToken ct = default) =>
+        Torrents.CountSwarmAsync(TorrentSession.Parse(info.Metadata), TimeSpan.FromSeconds(8), ct);
+
+    /// <summary>How torrents reach the network now, in words: directly, through the proxy, bound to an adapter (and what is not used).</summary>
+    public string DescribeTorrentNetwork() =>
+        TorrentSession.DescribeRoute(_torrents?.Route ?? TorrentNetwork.RouteFor(Settings, NetworkAdapters.Find), Settings);
+
+    /// <summary>The port the torrent engine listens on (0 before any torrent ran).</summary>
+    public int TorrentListenPort => _torrents?.ListenPort ?? 0;
+
+    DownloadJob AddTorrent(AddDownloadRequest request)
+    {
+        var choice = request.Torrent ?? new TorrentChoice();
+        var url = request.Url.Trim();
+
+        MonoTorrent.Torrent? torrent = null;
+        byte[]? metadata = choice.Metadata;
+        if (metadata == null && !TorrentSession.IsMagnet(url) && !(Uri.TryCreate(url, UriKind.Absolute, out var web) && web.Scheme is "http" or "https"))
+        {
+            var path = Uri.TryCreate(url, UriKind.Absolute, out var file) && file.IsFile ? file.LocalPath : url.Trim('"');
+            if (!File.Exists(path)) throw new ArgumentException($"The .torrent file \"{path}\" was not found.", nameof(request));
+            metadata = File.ReadAllBytes(path);
+        }
+
+        if (metadata != null) torrent = TorrentSession.Parse(metadata);
+
+        var data = new TorrentJobData { Sequential = choice.Sequential };
+        string suggested;
+        if (torrent != null)
+        {
+            data.InfoHash = TorrentSession.HashOf(torrent);
+            data.Magnet = TorrentSession.IsMagnet(url) ? url : TorrentSession.MagnetOf(torrent);
+            data.Name = torrent.Name;
+            data.IsFolder = torrent.Files.Count > 1;
+            data.Files = TorrentSession.FilesOf(torrent, choice.Files);
+            if (data.Files.All(f => !f.Selected)) throw new ArgumentException("Choose at least one file of the torrent.", nameof(request));
+            suggested = TorrentNaming.NameOf(torrent);
+        }
+        else if (TorrentSession.IsMagnet(url))
+        {
+            var magnet = TorrentSession.ParseMagnet(url);
+            data.InfoHash = TorrentSession.HashOf(magnet);
+            data.Magnet = url;
+            data.Name = magnet.Name;
+            suggested = FileNameHelper.Sanitize(magnet.Name, "torrent " + data.InfoHash[..8].ToLowerInvariant());
+        }
+        else
+        {
+            // a .torrent file on the web, not fetched yet: the download fetches it first
+            suggested = FileNameHelper.Sanitize(Path.GetFileNameWithoutExtension(GuessName(new Uri(url))), "torrent");
+        }
+
+        if (data.InfoHash.Length > 0 && FindTorrent(data.InfoHash) is { } already)
+            throw new ArgumentException($"This torrent is already in your list as “{already.FileName}”.", nameof(request));
+
+        var known = data.Files != null;
+        var category = request.Category ?? (known ? TorrentNaming.CategoryOf(data, Settings) : CategoryResolver.General);
+        var dir = request.SaveDirectory ?? Settings.ResolveCategoryFolder(category);
+        Directory.CreateDirectory(dir);
+
+        DownloadJob job;
+        lock (_gate)
+        {
+            var name = TorrentNaming.Unique(dir, FileNameHelper.Sanitize(request.FileName ?? suggested, "torrent"),
+                p => _jobs.Any(j => string.Equals(j.TargetPath, p, StringComparison.OrdinalIgnoreCase)));
+            job = new DownloadJob
+            {
+                Url = url,
+                // (a .torrent file on the web is fetched with what the browser handed it over with)
+                Referer = request.Referer,
+                Cookies = request.Cookies,
+                UserAgent = request.UserAgent,
+                Headers = request.Headers ?? new(),
+                Kind = DownloadKind.Torrent,
+                Torrent = data,
+                FileName = name,
+                SaveDirectory = dir,
+                Category = category,
+                MaxConnections = request.MaxConnections ?? Settings.DefaultConnections,
+                SpeedLimit = request.SpeedLimit,
+                State = request.Mode == AddMode.Hold ? DownloadState.Paused : DownloadState.Queued,
+                Probed = known,
+                AcceptsRanges = true,
+                TotalSize = known ? data.WantedBytes : null,
+                NameProvisional = request.FileName == null && !known,
+                FolderProvisional = request.SaveDirectory == null && request.Category == null && !known,
+            };
+            _jobs.Add(job);
+        }
+
+        if (torrent != null && metadata != null) Torrents.SaveMetadataAsync(torrent, metadata).GetAwaiter().GetResult();
+
+        _store?.SaveJob(job);
+        JobAdded?.Invoke(job);
+        JobUpdated?.Invoke(Snapshot(job));
+
+        if (request.Mode == AddMode.Start) StartNow(job);
+        else if (request.Mode == AddMode.Queue) Pump();
+
+        return job;
+    }
+
+    /// <summary>A torrent's files, for removing them: each file of the torrent (not anything else that is in its folder).</summary>
+    static IEnumerable<string> TorrentFiles(DownloadJob job)
+    {
+        var data = job.Torrent;
+        if (data == null) yield break;
+        if (!data.IsFolder)
+        {
+            yield return job.TargetPath;
+            yield break;
+        }
+
+        var root = Path.GetFullPath(job.TargetPath) + Path.DirectorySeparatorChar;
+        foreach (var f in data.Files ?? new List<TorrentFileEntry>())
+        {
+            var path = Path.GetFullPath(Path.Combine(root, f.Path));
+            if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase)) yield return path;
+        }
+    }
+
+    static void DeleteTorrentFiles(DownloadJob job)
+    {
+        foreach (var path in TorrentFiles(job)) TryDelete(path);
+        if (job.Torrent?.IsFolder != true || !Directory.Exists(job.TargetPath)) return;
+
+        // the folders the torrent made, now empty (deepest first); a folder with anything else in it stays
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(job.TargetPath, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length).Append(job.TargetPath))
+            {
+                if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // in use: it stays
+        }
+    }
+
     /// <summary>A stream is saved as a video: keep a video extension the user chose, anything else (or ".m3u8") becomes ".mp4".</summary>
     static string StreamFileName(string name)
     {
@@ -322,11 +724,19 @@ public sealed class DownloadManager : IDisposable
             Logger = _logger,
             Publish = s => JobUpdated?.Invoke(s),
             HostLimits = HostLimits,
+            Torrents = job.Kind == DownloadKind.Torrent ? Torrents : null,
+            IsPathTaken = (path, self) =>
+            {
+                lock (_gate) return _jobs.Any(j => j.Id != self && string.Equals(j.TargetPath, path, StringComparison.OrdinalIgnoreCase));
+            },
         };
 
-        IJobRunner runner = job.Kind == DownloadKind.Hls
-            ? job.Hls?.Record == true ? new RecordRunner(job, ctx) : new HlsRunner(job, ctx)
-            : new JobRunner(job, ctx);
+        IJobRunner runner = job.Kind switch
+        {
+            DownloadKind.Hls => job.Hls?.Record == true ? new RecordRunner(job, ctx) : new HlsRunner(job, ctx),
+            DownloadKind.Torrent => new TorrentRunner(job, ctx),
+            _ => new JobRunner(job, ctx),
+        };
         var cts = new CancellationTokenSource();
         var rj = new RunningJob { Runner = runner, Cts = cts, FromQueue = fromQueue };
         _running[job.Id] = rj;
@@ -395,6 +805,7 @@ public sealed class DownloadManager : IDisposable
     {
         Settings.Normalize();
         Pump();
+        if (_torrents is { } torrents) _ = torrents.ApplySettingsAsync();   // limits, port, DHT (sharing limits are read as it goes)
     }
 
     /// <summary>The queued downloads in the order they will start.</summary>
@@ -542,6 +953,24 @@ public sealed class DownloadManager : IDisposable
 
         _store?.Delete(id);
 
+        if (job.Kind == DownloadKind.Torrent)
+        {
+            if (_torrents is { } torrents)
+            {
+                await torrents.StopSeedingAsync(id).ConfigureAwait(false);
+                torrents.Forget(job.Torrent?.InfoHash);
+            }
+            else if (job.Torrent?.InfoHash is { Length: > 0 } hash)
+            {
+                Torrents.Forget(hash);
+            }
+
+            // unfinished pieces are useless without the download; the finished files go only if asked
+            if (job.State != DownloadState.Completed || deleteFiles) DeleteTorrentFiles(job);
+            JobRemoved?.Invoke(id);
+            return;
+        }
+
         // A partial file is useless without its job, so it always goes; the finished file only if asked.
         if (job.State != DownloadState.Completed)
         {
@@ -587,6 +1016,7 @@ public sealed class DownloadManager : IDisposable
         var limit = enabled ? Math.Max(0, bytesPerSecond) : 0;
         GlobalLimiter.BytesPerSecond = limit;
         Settings.GlobalSpeedLimit = limit;   // remembered for the next start (the app saves its settings)
+        if (_torrents is { } torrents) _ = torrents.ApplySettingsAsync();
     }
 
     public void SetJobSpeedLimit(Guid id, long? bytesPerSecond)
@@ -653,6 +1083,8 @@ public sealed class DownloadManager : IDisposable
 
     public JobSnapshot Snapshot(DownloadJob job)
     {
+        if (job.Kind == DownloadKind.Torrent) return TorrentRunner.Snapshot(job, 0, _torrents?.StatusOf(job));
+
         if (job.Kind == DownloadKind.Hls && job.Hls is { } hls)
         {
             var finished = job.State == DownloadState.Completed && job.TotalSize is not null;

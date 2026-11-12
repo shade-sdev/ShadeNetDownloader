@@ -46,6 +46,23 @@ public partial class App : Application
             return;
         }
 
+        // the uninstaller: Windows no longer opens magnet links and .torrent files with this program
+        if (e.Args.Contains("--uninstall-file-associations"))
+        {
+            var exitCode = 0;
+            try
+            {
+                new TorrentAssociation().Unregister();
+            }
+            catch (Exception)
+            {
+                exitCode = 1;
+            }
+
+            Shutdown(exitCode);
+            return;
+        }
+
         // "ShadeNetDownloader.exe --quit": ends a running instance for real (what the installer uses before it replaces files)
         if (e.Args.Contains("--quit"))
         {
@@ -54,10 +71,14 @@ public partial class App : Application
             return;
         }
 
+        // A magnet link or a .torrent file Windows opens with ShadeNet (or a web address given on the command line) comes as an argument:
+        // it goes to the Add dialog, of this instance or of the one already running.
+        var links = LinksFromArguments(e.Args);
+
         // One instance per user (and per data folder): a second launch, such as the browser host starting the app
         // while it is already running, just brings the first one forward.
         // (on a pool thread: waiting here for work that wants to resume on this UI thread would never finish)
-        if (Task.Run(() => BrowserBridgeService.ActivateRunningInstanceAsync()).GetAwaiter().GetResult())
+        if (Task.Run(() => BrowserBridgeService.ActivateRunningInstanceAsync(links: links)).GetAwaiter().GetResult())
         {
             Shutdown();
             return;
@@ -82,6 +103,11 @@ public partial class App : Application
         // The engine: one manager for the whole app, persisted in SQLite next to the settings file.
         services.AddSingleton(sp =>
         {
+            // the torrent engine keeps its .torrent files and resume data in the data folder too
+            settings.Current.Engine.TorrentFolder = Path.Combine(settings.DataDir, "torrents");
+            // tests and screenshots keep torrents on this machine (127.0.0.1: no firewall question, nothing reaches the network)
+            if (System.Net.IPAddress.TryParse(Environment.GetEnvironmentVariable("SHADENET_TORRENT_ADDRESS"), out var torrentAddress))
+                settings.Current.Engine.TorrentListenAddress = torrentAddress;
             var manager = new DownloadManager(
                 settings.Current.Engine,
                 new JobStore(settings.DatabasePath),
@@ -141,7 +167,7 @@ public partial class App : Application
         if (!_host.Services.GetRequiredService<BrowserBridgeService>().Start())
         {
             // Lost a race with another instance that started a moment earlier: hand over to it.
-            BrowserBridgeService.ActivateRunningInstanceAsync().GetAwaiter().GetResult();
+            BrowserBridgeService.ActivateRunningInstanceAsync(links: links).GetAwaiter().GetResult();
             Shutdown();
             return;
         }
@@ -184,6 +210,15 @@ public partial class App : Application
         _timers.Add(firstAppLook);
         _timers.Add(new DispatcherTimer(TimeSpan.FromHours(3), DispatcherPriority.Background, async (_, _) => await appUpdates.CheckDueAsync(), Dispatcher));
 
+        // Started to open a magnet link or a .torrent file: shown, with the Add dialog for it.
+        if (links.Count > 0)
+        {
+            window.Show();
+            var dialogs = sp.GetRequiredService<IDialogService>();
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, async () => await dialogs.ShowLinksAsync(links));
+            return;
+        }
+
         // Started by Windows or by the browser extension: go straight to the tray (or the taskbar without one).
         if (e.Args.Contains("--minimized"))
         {
@@ -193,6 +228,14 @@ public partial class App : Application
 
         window.Show();
     }
+
+    /// <summary>The links among the program's arguments (magnet links, .torrent files, web addresses); switches ("--...") are not links.</summary>
+    internal static IReadOnlyList<string> LinksFromArguments(IEnumerable<string> args) =>
+        args.Where(a => !a.StartsWith("--", StringComparison.Ordinal))
+            .SelectMany(a => Util.UrlParser.Extract(a))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToList();
 
     readonly List<DispatcherTimer> _timers = new();
 

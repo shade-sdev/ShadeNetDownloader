@@ -29,6 +29,12 @@ internal sealed class RunnerContext
 
     /// <summary>Connection limits sites were seen to enforce, shared by the downloads of one manager.</summary>
     public HostConnectionMemory? HostLimits { get; init; }
+
+    /// <summary>The torrent engine (for torrent downloads).</summary>
+    public ShadeNet.Core.Torrents.TorrentSession? Torrents { get; init; }
+
+    /// <summary>Whether another download (not the given one) already saves to this path.</summary>
+    public Func<string, Guid, bool>? IsPathTaken { get; init; }
 }
 
 /// <summary>

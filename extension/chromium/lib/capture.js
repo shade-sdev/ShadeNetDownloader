@@ -18,6 +18,12 @@ export function isCapturableUrl(url) {
   }
 }
 
+/** A magnet link that names a torrent (its info hash): what a click on one hands to the app. */
+export function isMagnetUrl(url) {
+  return typeof url === 'string' && url.length > 0 && url.length <= 8192 && /^magnet:\?/i.test(url) && /[?&]xt=urn:bt/i.test(url)
+    && !/[\u0000-\u001f\u007f]/.test(url);
+}
+
 /** True when `host` is one of the patterns or a sub-domain of one ("*.example.com" and ".example.com" also work). */
 export function hostMatches(host, patterns) {
   if (!host || !Array.isArray(patterns)) return false;

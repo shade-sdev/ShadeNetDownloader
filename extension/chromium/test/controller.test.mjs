@@ -271,3 +271,43 @@ test('created and file-name events for one download are handled once', async () 
   assert.equal(t.app.captures.length, 1);
   assert.deepEqual(t.calls.cancel, [5]);
 });
+
+// ---- magnet links ----------------------------------------------------------------------------------------------
+
+const MAGNET = 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Debian&tr=udp%3A%2F%2Ftracker.example%3A80';
+
+test('a magnet link clicked on a page is handed to the app with the page it was on', async () => {
+  const t = setup();
+  const ask = (message, sender) => new Promise((resolve) => t.chrome.runtime.onMessage.listeners[0](message, sender, resolve));
+
+  const answer = await ask({ type: 'open-magnet', url: MAGNET }, { tab: { id: 3, url: 'https://tracker.example/details/7' } });
+
+  assert.equal(answer.accepted, true);
+  const capture = t.app.captures.at(-1);
+  assert.equal(capture.url, MAGNET);
+  assert.equal(capture.source, 'magnet');
+  assert.equal(capture.referrer, 'https://tracker.example/details/7');
+  assert.equal(capture.cookies, undefined, 'a magnet link needs no sign-in');
+});
+
+test('with the app\'s magnet setting off a clicked magnet link stays with the browser, but the menu still sends it', async () => {
+  const t = setup({ configureApp: (app) => { app.settings.magnetLinks = false; } });
+  const ask = (message, sender) => new Promise((resolve) => t.chrome.runtime.onMessage.listeners[0](message, sender, resolve));
+
+  const answer = await ask({ type: 'open-magnet', url: MAGNET }, { tab: { id: 3, url: 'https://tracker.example/' } });
+  assert.equal(answer.accepted, false);
+  assert.equal(t.app.captures.filter((c) => c.url === MAGNET).length, 0);
+
+  await t.chrome.contextMenus.onClicked.emit({ menuItemId: 'shadenet-link', linkUrl: MAGNET, pageUrl: 'https://tracker.example/' }, { url: 'https://tracker.example/' });
+  const sent = t.app.captures.at(-1);
+  assert.equal(sent.url, MAGNET);
+  assert.equal(sent.source, 'magnet-menu');
+});
+
+test('what is not a magnet link is not handed over as one', async () => {
+  const t = setup();
+  const ask = (message) => new Promise((resolve) => t.chrome.runtime.onMessage.listeners[0](message, { tab: { id: 1, url: 'https://x.example/' } }, resolve));
+  assert.equal((await ask({ type: 'open-magnet', url: 'magnet:?dn=no-identity' })).accepted, false);
+  assert.equal((await ask({ type: 'open-magnet', url: 'https://x.example/file.torrent' })).accepted, false);
+  assert.equal(t.app.captures.length, 0);
+});

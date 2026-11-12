@@ -16,6 +16,19 @@ public enum ProxyMode
     Manual,
 }
 
+/// <summary>How torrents encrypt their connections to peers.</summary>
+public enum TorrentEncryption
+{
+    /// <summary>Encrypted when the other side can; plain otherwise (the most peers).</summary>
+    Prefer,
+
+    /// <summary>Encrypted only: peers that cannot are not used (fewer peers; some networks slow plain torrent traffic down).</summary>
+    Require,
+
+    /// <summary>Plain only.</summary>
+    Off,
+}
+
 /// <summary>A category the user added: a name and the file types that belong to it.</summary>
 public sealed class CustomCategory
 {
@@ -119,6 +132,12 @@ public sealed class EngineSettings
         CustomCategories = (CustomCategories ?? new()).Where(c => !string.IsNullOrWhiteSpace(c.Name)).ToList();
         MaxConcurrentJobs = Math.Clamp(MaxConcurrentJobs, 1, 32);
         DefaultConnections = Math.Clamp(DefaultConnections, 1, 32);
+        TorrentSeedRatio = double.IsFinite(TorrentSeedRatio) ? Math.Clamp(TorrentSeedRatio, 0, 100) : 1.0;
+        TorrentSeedMinutes = Math.Clamp(TorrentSeedMinutes, 0, 525_600);
+        TorrentUploadLimit = Math.Max(0, TorrentUploadLimit);
+        TorrentPort = TorrentPort is >= 0 and <= 65535 ? TorrentPort : 0;
+        if (!Enum.IsDefined(TorrentEncryption)) TorrentEncryption = TorrentEncryption.Prefer;
+        TorrentNetworkAdapter = string.IsNullOrWhiteSpace(TorrentNetworkAdapter) ? null : TorrentNetworkAdapter.Trim();
         InvalidateCategories();
     }
 
@@ -134,7 +153,10 @@ public sealed class EngineSettings
     // --- network ---
     public ProxyMode Proxy { get; set; } = ProxyMode.System;
 
-    /// <summary><c>host:port</c> (or a full <c>http://host:port</c> address) for <see cref="ProxyMode.Manual"/>.</summary>
+    /// <summary>
+    /// <c>host:port</c> (an HTTP proxy), or a full address: <c>http://host:port</c>, <c>socks5://host:port</c> (also socks5h, socks4,
+    /// socks4a), with <c>user:password@</c> before the host when the proxy wants a sign-in. For <see cref="ProxyMode.Manual"/>.
+    /// </summary>
     public string ProxyAddress { get; set; } = "";
 
     /// <summary>Total speed of all downloads in bytes per second; 0 = no limit.</summary>
@@ -258,6 +280,63 @@ public sealed class EngineSettings
     /// </summary>
     [JsonIgnore]
     public TimeSpan HeldProbeLifetime { get; set; } = TimeSpan.FromMinutes(2);
+
+    // --- torrents ---
+
+    /// <summary>
+    /// After a torrent finishes it is shared with others until it has sent this many times its size (0 = do not share at all after
+    /// finishing) or <see cref="TorrentSeedMinutes"/> have passed, whichever comes first.
+    /// </summary>
+    public double TorrentSeedRatio { get; set; } = 1.0;
+
+    /// <summary>A finished torrent stops being shared after this many minutes (0 = only the ratio stops it).</summary>
+    public int TorrentSeedMinutes { get; set; } = 120;
+
+    /// <summary>Total upload speed of all torrents in bytes per second; 0 = no limit.</summary>
+    public long TorrentUploadLimit { get; set; }
+
+    /// <summary>The port other peers connect to; 0 = a free one is chosen each time ShadeNet starts.</summary>
+    public int TorrentPort { get; set; }
+
+    /// <summary>Find peers without a tracker (the DHT network); needed by most magnet links.</summary>
+    public bool TorrentUseDht { get; set; } = true;
+
+    /// <summary>Ask the router to forward <see cref="TorrentPort"/> (UPnP / NAT-PMP), so peers can connect in.</summary>
+    public bool TorrentPortForwarding { get; set; } = true;
+
+    /// <summary>Find peers on the local network.</summary>
+    public bool TorrentLocalPeers { get; set; } = true;
+
+    /// <summary>
+    /// With a proxy of ShadeNet's own (<see cref="ProxyMode.Manual"/>), torrents go through it too: trackers and the peers ShadeNet
+    /// connects to. What cannot pass a proxy is then not used at all (UDP trackers, the DHT, local peers, port forwarding), so nothing
+    /// of a torrent leaves this computer except through the proxy.
+    /// </summary>
+    public bool TorrentUseProxy { get; set; } = true;
+
+    /// <summary>
+    /// The network adapter torrents are bound to (its Windows id), e.g. a VPN's: torrents use only its addresses, and stop (they do not
+    /// fall back to another network) while it is not connected. Null: any.
+    /// </summary>
+    public string? TorrentNetworkAdapter { get; set; }
+
+    /// <summary>The name of <see cref="TorrentNetworkAdapter"/> when it was chosen, shown while it is not there.</summary>
+    public string? TorrentNetworkAdapterName { get; set; }
+
+    /// <summary>Whether connections to peers are encrypted.</summary>
+    public TorrentEncryption TorrentEncryption { get; set; } = TorrentEncryption.Prefer;
+
+    /// <summary>Where the torrent engine keeps the .torrent files and the resume data (the app sets it in its data folder); not saved.</summary>
+    [JsonIgnore]
+    public string? TorrentFolder { get; set; }
+
+    /// <summary>The address the torrent engine listens on (tests use the loopback address); not saved.</summary>
+    [JsonIgnore]
+    public System.Net.IPAddress TorrentListenAddress { get; set; } = System.Net.IPAddress.Any;
+
+    /// <summary>The most peers one torrent is connected to at once.</summary>
+    [JsonIgnore]
+    public int TorrentMaxPeers { get; set; } = 60;
 
     /// <summary>The folder a category would use if the user had not chosen one for it.</summary>
     public string ResolveCategoryFolderDefault(string category) =>
