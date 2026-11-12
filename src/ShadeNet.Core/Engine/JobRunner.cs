@@ -49,6 +49,33 @@ internal sealed class JobRunner : IJobRunner
     readonly SpeedMeter _jobMeter = new();
     readonly Random _rng = new();
     readonly object _firstLock = new();
+
+    /// <summary>What it waits for instead of downloading ("Waiting for Proton VPN to connect…"); null while it is not waiting.</summary>
+    volatile string? _waiting;
+
+    /// <summary>
+    /// The chosen network adapter is gone (Settings > Network): no connection may be made until it is back. The download waits, its
+    /// retries untouched, and says so on its card; a pause ends the wait.
+    /// </summary>
+    async Task WaitForAdapterAsync(CancellationToken ct)
+    {
+        try
+        {
+            await NetworkLock.WaitUntilOnlineAsync(S, b =>
+            {
+                _waiting = b.WaitingText;
+                _ctx.Publish(MakeSnapshot(0, 0));
+            }, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_waiting != null)
+            {
+                _waiting = null;
+                _ctx.Publish(MakeSnapshot(0, 0));
+            }
+        }
+    }
     SessionCookies? _jar;
 
     public JobRunner(DownloadJob job, RunnerContext ctx)
@@ -89,6 +116,7 @@ internal sealed class JobRunner : IJobRunner
 
             using var http = HttpFetcher.CreateClient(_job.MaxConnections, S);
 
+            await WaitForAdapterAsync(stop).ConfigureAwait(false);
             if (!_job.Probed) await ProbeAsync(http, stop).ConfigureAwait(false);
 
             EnsureSaveDirectory();
@@ -185,6 +213,12 @@ internal sealed class JobRunner : IJobRunner
                 result = await HttpProbe.ProbeAsync(http, spec, S.UserAgent, keepOpen: true, clientToOwn: null, rangeStart: startAt, ct)
                     .ConfigureAwait(false);
                 break;
+            }
+            catch (Exception ex) when (NetworkAdapterOfflineException.IsIn(ex))
+            {
+                // the adapter went away: wait for it, then start the count again
+                await WaitForAdapterAsync(ct).ConfigureAwait(false);
+                attempt = 0;
             }
             catch (Exception ex) when (attempt <= 3 && IsTransientProbeFailure(ex))
             {
@@ -692,6 +726,23 @@ internal sealed class JobRunner : IJobRunner
             finally
             {
                 slot.End();
+            }
+
+            if (NetworkAdapterOfflineException.IsIn(error))
+            {
+                // the chosen adapter is gone: no retry is spent, the part waits for it (a pause ends the wait)
+                try
+                {
+                    await WaitForAdapterAsync(a.Cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    _scheduler.Release(seg, slot);
+                    throw;
+                }
+
+                attempt = 0;
+                continue;
             }
 
             // ----- retry bookkeeping -----
@@ -1274,6 +1325,6 @@ internal sealed class JobRunner : IJobRunner
 
         return new JobSnapshot(_job.Id, _job.State, _job.FileName, _job.SaveDirectory, downloaded, _job.TotalSize,
             speed, eta, connections, infos, _job.AcceptsRanges, _job.Error, _job.ErrorKind,
-            _job.Stats.Splits, _job.Stats.Takeovers, _job.Stats.Retries, _job.Stats.Fallbacks, _job.Stats.PeakConnections);
+            _job.Stats.Splits, _job.Stats.Takeovers, _job.Stats.Retries, _job.Stats.Fallbacks, _job.Stats.PeakConnections, Waiting: _waiting);
     }
 }

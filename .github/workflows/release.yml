@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         run: ./tools/ci/next-version.ps1 -Output $env:GITHUB_OUTPUT
 
-      - name: Helper programs that ship with the program (yt-dlp, ffmpeg)
+      - name: Helper programs that ship with the program (yt-dlp, ffmpeg, 7-Zip)
         shell: pwsh
         run: ./tools/get-tools.ps1 -Tool all
 

@@ -46,12 +46,12 @@ internal sealed class TorrentSession : IAsyncDisposable
         public readonly RateMeter Up = new();
     }
 
-    public TorrentSession(EngineSettings settings, Func<long> globalLimit, ILogger logger, Func<string, NetworkAdapterInfo?>? findAdapter = null)
+    public TorrentSession(EngineSettings settings, Func<long> globalLimit, ILogger logger)
     {
         _settings = settings;
         _globalLimit = globalLimit;
         _logger = logger;
-        _network = new TorrentNetwork(settings, findAdapter);
+        _network = new TorrentNetwork(settings);
         _network.RouteChanged += route => _ = OnRouteChangedAsync(route);
     }
 

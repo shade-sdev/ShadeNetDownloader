@@ -238,6 +238,30 @@
                                     Text="{Binding MaxRecordingMinutes, UpdateSourceTrigger=LostFocus}" />
                     </ui:CardControl>
 
+                    <TextBlock Text="Archives" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon FolderZip24}" Margin="0,0,0,8">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Extract archives when they finish" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="zip, 7z, rar, tar and gz, also in several parts (once the last part is in). Into a folder next to the archive; nothing is overwritten. One with a password asks for it. Right-click a finished archive for Extract at any time." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding ExtractArchives, Mode=TwoWay}" AutomationProperties.Name="Extract archives when they finish" />
+                    </ui:CardControl>
+
+                    <ui:CardControl Icon="{ui:SymbolIcon Delete24}" Margin="0,0,0,8" IsEnabled="{Binding ExtractArchives}">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="…then put the archive in the Recycle Bin" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="All its parts, once everything in it was extracted and checked. You can still restore them from the Recycle Bin." />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ui:ToggleSwitch IsChecked="{Binding DeleteArchivesAfterExtracting, Mode=TwoWay}" AutomationProperties.Name="Put the archive in the Recycle Bin after extracting it" />
+                    </ui:CardControl>
+
                     <TextBlock Text="Torrents" Style="{StaticResource SectionTitle}" Margin="2,16,0,8" />
 
                     <ui:CardControl Icon="{ui:SymbolIcon Open24}" Margin="0,0,0,8">
@@ -344,18 +368,6 @@
                         </ui:CardControl.Header>
                         <ComboBox MinWidth="220" ItemsSource="{Binding EncryptionChoices}" SelectedItem="{Binding SelectedEncryption, Mode=TwoWay}"
                                   DisplayMemberPath="Label" AutomationProperties.Name="Encryption" />
-                    </ui:CardControl>
-
-                    <ui:CardControl Icon="{ui:SymbolIcon VirtualNetwork24}" Margin="0,0,0,8">
-                        <ui:CardControl.Header>
-                            <StackPanel>
-                                <TextBlock Text="Use only this network adapter" FontSize="14" />
-                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
-                                           Text="For example your VPN's. Torrents then use nothing else: while it is not connected they wait, and never fall back to your usual network. Port forwarding and local peers are not used then." />
-                            </StackPanel>
-                        </ui:CardControl.Header>
-                        <ComboBox MinWidth="220" MaxWidth="320" ItemsSource="{Binding AdapterChoices}" SelectedItem="{Binding SelectedAdapter, Mode=TwoWay}"
-                                  DisplayMemberPath="Label" AutomationProperties.Name="Network adapter for torrents" />
                     </ui:CardControl>
 
                     <ui:CardControl Icon="{ui:SymbolIcon ShieldLock24}" Margin="0,0,0,8">
@@ -606,6 +618,22 @@
 
                 <!-- ================= Network ================= -->
                 <StackPanel DataContext="{Binding Network}" Visibility="{Binding DataContext.IsNetwork, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource B2V}}">
+                    <TextBlock Text="Network adapter" Style="{StaticResource SectionTitle}" />
+
+                    <ui:CardControl Icon="{ui:SymbolIcon VirtualNetwork24}" Margin="0,0,0,24">
+                        <ui:CardControl.Header>
+                            <StackPanel>
+                                <TextBlock Text="Use only this network adapter" FontSize="14" />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap"
+                                           Text="For example your VPN's. Downloads, videos, recordings and torrents then use nothing else: while it is not connected they wait, and never fall back to your usual network (a kill switch)." />
+                                <TextBlock Style="{StaticResource CardHint}" TextWrapping="Wrap" Text="{Binding BindingText}" Margin="0,4,0,0"
+                                           Visibility="{Binding BindingText, Converter={StaticResource NullToCollapsed}}" />
+                            </StackPanel>
+                        </ui:CardControl.Header>
+                        <ComboBox MinWidth="220" MaxWidth="320" ItemsSource="{Binding AdapterChoices}" SelectedItem="{Binding SelectedAdapter, Mode=TwoWay}"
+                                  DisplayMemberPath="Label" AutomationProperties.Name="Network adapter" />
+                    </ui:CardControl>
+
                     <TextBlock Text="Proxy" Style="{StaticResource SectionTitle}" />
 
                     <ui:CardControl Icon="{ui:SymbolIcon Router24}" Margin="0,0,0,8">
@@ -780,7 +808,7 @@
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
                             </ItemsControl>
-                            <TextBlock Text="No Chrome, Edge or Brave was found. Open your browser, type chrome://extensions (or edge://extensions) in the address bar and follow steps 2 and 3."
+                            <TextBlock Text="No Chrome, Edge or Brave was found. Open your browser, type chrome://extensions (or edge://extensions) in the address bar and follow steps 2 and 3. Firefox has its own steps below."
                                        TextWrapping="Wrap" FontSize="12" Margin="0,4,0,6"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                        Visibility="{Binding HasNoInstalledBrowser, Converter={StaticResource B2V}}" />
@@ -789,6 +817,16 @@
                                            Command="{Binding CopyExtensionFolderCommand}" Margin="0,0,8,0" />
                                 <ui:Button Content="Show folder" Icon="{ui:SymbolIcon FolderOpen24}"
                                            Command="{Binding OpenExtensionFolderCommand}" />
+                            </StackPanel>
+                            <!-- Firefox: its own way -->
+                            <StackPanel Margin="0,14,0,0" Visibility="{Binding HasFirefox, Converter={StaticResource B2V}}">
+                                <TextBlock Text="Firefox" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding FirefoxSteps}" TextWrapping="Wrap" FontSize="12" Margin="0,4,0,0"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ui:TextBox Text="{Binding FirefoxManifest, Mode=OneWay}" IsReadOnly="True" Margin="0,8,0,0" FontSize="12"
+                                            Visibility="{Binding HasSignedFirefoxAddOn, Converter={StaticResource InverseB2V}}" />
+                                <ui:Button Content="Add to Firefox" Icon="{ui:SymbolIcon Open24}" Appearance="Primary" Margin="0,8,0,0"
+                                           Command="{Binding AddToFirefoxCommand}" />
                             </StackPanel>
                             <TextBlock Text="{Binding ExtensionNote}" TextWrapping="Wrap" FontSize="12" Margin="0,8,0,0"
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"

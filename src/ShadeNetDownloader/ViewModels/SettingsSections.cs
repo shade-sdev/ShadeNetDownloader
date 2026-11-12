@@ -259,32 +259,26 @@ public sealed partial class DownloadSettingsViewModel : ObservableObject
 
     readonly TorrentAssociation _associations;
     readonly ShadeNet.Core.DownloadManager? _manager;
-    readonly Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>> _adapters;
 
     /// <param name="associations">Opening magnet links and .torrent files with ShadeNet; tests pass one on a throw-away registry key.</param>
     /// <param name="manager">For how torrents reach the network and the banned peers (none in some tests).</param>
-    /// <param name="adapters">The network adapters to choose from (tests pass their own).</param>
     public DownloadSettingsViewModel(SettingsService settings, Action applyEngine, Action categoriesChanged, TorrentAssociation? associations = null,
-        ShadeNet.Core.DownloadManager? manager = null, Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>>? adapters = null)
+        ShadeNet.Core.DownloadManager? manager = null)
     {
         _settings = settings;
         _applyEngine = applyEngine;
         _categoriesChanged = categoriesChanged;
         _associations = associations ?? new TorrentAssociation();
         _manager = manager;
-        _adapters = adapters ?? ShadeNet.Core.Torrents.NetworkAdapters.List;
         _downloadRootText = Engine.DownloadRoot;
         LoadCategories();
         RefreshAssociations();
-        RefreshAdapters();
+        RefreshTorrentNetwork();
     }
 
-    // ---- torrents: encryption, the adapter, the proxy, banned peers ----
+    // ---- torrents: encryption, the proxy, banned peers ----
 
     public sealed record EncryptionChoice(TorrentEncryption Value, string Label);
-
-    /// <summary>A network adapter torrents can be bound to; <see cref="Id"/> null for "any".</summary>
-    public sealed record AdapterChoice(string? Id, string Name, string Label);
 
     static readonly IReadOnlyList<EncryptionChoice> Encryptions = new[]
     {
@@ -305,58 +299,6 @@ public sealed partial class DownloadSettingsViewModel : ObservableObject
             OnPropertyChanged();
             EnginePropertiesChanged();
         }
-    }
-
-    public ObservableCollection<AdapterChoice> AdapterChoices { get; } = new();
-
-    AdapterChoice? _selectedAdapter;
-    bool _listingAdapters;
-
-    public AdapterChoice? SelectedAdapter
-    {
-        get => _selectedAdapter;
-        set
-        {
-            if (value == null || _listingAdapters || value == _selectedAdapter) return;
-            _selectedAdapter = value;
-            Engine.TorrentNetworkAdapter = value.Id;
-            Engine.TorrentNetworkAdapterName = value.Id == null ? null : value.Name;
-            OnPropertyChanged();
-            EnginePropertiesChanged();
-            RefreshTorrentNetwork();
-        }
-    }
-
-    /// <summary>Lists the adapters again (one may have come or gone); the chosen one stays listed while it is not there.</summary>
-    public void RefreshAdapters()
-    {
-        _listingAdapters = true;
-        try
-        {
-            AdapterChoices.Clear();
-            AdapterChoices.Add(new AdapterChoice(null, "", "Any network (usual)"));
-            foreach (var a in _adapters())
-            {
-                var address = a.Addresses.FirstOrDefault(x => x.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? a.Addresses.FirstOrDefault();
-                AdapterChoices.Add(new AdapterChoice(a.Id, a.Name, a.Connected ? $"{a.Name}  ·  {address}" : $"{a.Name} (not connected)"));
-            }
-
-            var chosen = Engine.TorrentNetworkAdapter;
-            if (chosen != null && AdapterChoices.All(c => !string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)))
-            {
-                var name = Engine.TorrentNetworkAdapterName ?? "The chosen adapter";
-                AdapterChoices.Add(new AdapterChoice(chosen, name, $"{name} (not there now)"));
-            }
-
-            _selectedAdapter = AdapterChoices.FirstOrDefault(c => string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)) ?? AdapterChoices[0];
-        }
-        finally
-        {
-            _listingAdapters = false;
-        }
-
-        OnPropertyChanged(nameof(SelectedAdapter));
-        RefreshTorrentNetwork();
     }
 
     public bool TorrentUseProxy
@@ -640,6 +582,34 @@ public sealed partial class DownloadSettingsViewModel : ObservableObject
         }
     }
 
+    // ---- archives ----
+
+    /// <summary>A finished archive (zip, 7z, rar …, one file or all its parts) is unpacked into a folder next to it.</summary>
+    public bool ExtractArchives
+    {
+        get => Engine.ExtractArchives;
+        set
+        {
+            if (Engine.ExtractArchives == value) return;
+            Engine.ExtractArchives = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    /// <summary>Once unpacked, the archive (all its parts) goes to the Recycle Bin.</summary>
+    public bool DeleteArchivesAfterExtracting
+    {
+        get => Engine.DeleteArchivesAfterExtracting;
+        set
+        {
+            if (Engine.DeleteArchivesAfterExtracting == value) return;
+            Engine.DeleteArchivesAfterExtracting = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
     public bool TorrentUseDht
     {
         get => Engine.TorrentUseDht;
@@ -762,13 +732,89 @@ public sealed partial class NetworkSettingsViewModel : ObservableObject
     readonly SettingsService _settings;
     readonly Action _applyEngine;
 
-    public NetworkSettingsViewModel(SettingsService settings, Action applyEngine)
+    readonly Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>> _adapters;
+
+    /// <param name="adapters">The network adapters to choose from (tests pass their own).</param>
+    public NetworkSettingsViewModel(SettingsService settings, Action applyEngine, Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>>? adapters = null)
     {
         _settings = settings;
         _applyEngine = applyEngine;
+        _adapters = adapters ?? ShadeNet.Core.Torrents.NetworkAdapters.List;
         _proxyAddress = settings.Current.Engine.ProxyAddress;
         LoadLimits();
+        RefreshAdapters();
     }
+
+    // ---- one network adapter (a VPN's): everything goes through it, or waits ----
+
+    /// <summary>A network adapter ShadeNet can be bound to; <see cref="Id"/> null for "any".</summary>
+    public sealed record AdapterChoice(string? Id, string Name, string Label);
+
+    public ObservableCollection<AdapterChoice> AdapterChoices { get; } = new();
+
+    AdapterChoice? _selectedAdapter;
+    bool _listingAdapters;
+
+    public AdapterChoice? SelectedAdapter
+    {
+        get => _selectedAdapter;
+        set
+        {
+            if (value == null || _listingAdapters || value == _selectedAdapter) return;
+            _selectedAdapter = value;
+            Engine.NetworkAdapter = value.Id;
+            Engine.NetworkAdapterName = value.Id == null ? null : value.Name;
+            OnPropertyChanged();
+            Changed();
+            RefreshBinding();
+        }
+    }
+
+    /// <summary>Lists the adapters again (one may have come or gone); the chosen one stays listed while it is not there.</summary>
+    public void RefreshAdapters()
+    {
+        _listingAdapters = true;
+        try
+        {
+            AdapterChoices.Clear();
+            AdapterChoices.Add(new AdapterChoice(null, "", "Any network (usual)"));
+            foreach (var a in _adapters())
+            {
+                var address = a.Addresses.FirstOrDefault(x => x.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? a.Addresses.FirstOrDefault();
+                AdapterChoices.Add(new AdapterChoice(a.Id, a.Name, a.Connected ? $"{a.Name}  ·  {address}" : $"{a.Name} (not connected)"));
+            }
+
+            var chosen = Engine.NetworkAdapter;
+            if (chosen != null && AdapterChoices.All(c => !string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)))
+            {
+                var name = Engine.NetworkAdapterName ?? "The chosen adapter";
+                AdapterChoices.Add(new AdapterChoice(chosen, name, $"{name} (not there now)"));
+            }
+
+            _selectedAdapter = AdapterChoices.FirstOrDefault(c => string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)) ?? AdapterChoices[0];
+        }
+        finally
+        {
+            _listingAdapters = false;
+        }
+
+        OnPropertyChanged(nameof(SelectedAdapter));
+        RefreshBinding();
+    }
+
+    /// <summary>"Bound to Proton VPN (10.2.0.2): …", or what is waited for; empty when not bound.</summary>
+    [ObservableProperty] string _bindingText = "";
+
+    /// <summary>The words under the adapter list, again (the adapters or the choice changed).</summary>
+    public void RefreshBinding()
+    {
+        ShadeNet.Core.Net.NetworkLock.Invalidate();
+        var b = ShadeNet.Core.Net.NetworkLock.Resolve(Engine);
+        BindingText = !b.Locked ? ""
+            : b.Offline ? $"{b.AdapterName} is not connected: downloads, videos, recordings and torrents wait until it is, and use no other network."
+            : $"Everything goes only through {b.AdapterName} ({string.Join(", ", new[] { b.V4, b.V6 }.Where(a => a != null))}). If it disconnects, downloads wait for it.";
+    }
+
 
     EngineSettings Engine => _settings.Current.Engine;
 

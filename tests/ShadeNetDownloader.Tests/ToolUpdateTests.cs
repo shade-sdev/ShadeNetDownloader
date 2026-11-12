@@ -107,21 +107,22 @@ public class ToolUpdateTests
         var (service, tools, settings, _, dir, _, _) = Env();
         using var d = dir;
 
+        var all = Enum.GetValues<ShadeNet.Core.Tools.ManagedTool>().Length;   // yt-dlp, ffmpeg, 7-Zip
         await service.CheckDueAsync();
-        Assert.Equal(2, tools.Checked.Count);                              // both tools
+        Assert.Equal(all, tools.Checked.Count);                            // every tool
         Assert.NotNull(settings.Current.Tools.LastCheck);
 
         await service.CheckDueAsync();                                     // the same day: no second look
-        Assert.Equal(2, tools.Checked.Count);
+        Assert.Equal(all, tools.Checked.Count);
 
         settings.Current.Tools.LastCheck = new DateTimeOffset(2026, 10, 20, 11, 0, 0, TimeSpan.Zero);   // 25 h ago
         await service.CheckDueAsync();
-        Assert.Equal(4, tools.Checked.Count);
+        Assert.Equal(2 * all, tools.Checked.Count);
 
         settings.Current.Tools.CheckForUpdates = false;
         settings.Current.Tools.LastCheck = null;
         await service.CheckDueAsync();
-        Assert.Equal(4, tools.Checked.Count);                              // off means off
+        Assert.Equal(2 * all, tools.Checked.Count);                        // off means off
     }
 
     [Fact]

@@ -29,6 +29,8 @@
                       Visibility="{Binding CanShareAgain, Converter={StaticResource B2V}}" />
             <MenuItem Header="Check the files again" Icon="{ui:SymbolIcon DocumentSearch24}" Command="{Binding CheckFilesAgainCommand}"
                       Visibility="{Binding CanRecheck, Converter={StaticResource B2V}}" />
+            <MenuItem Header="Extract" Icon="{ui:SymbolIcon FolderZip24}" Command="{Binding ExtractCommand}"
+                      Visibility="{Binding CanExtract, Converter={StaticResource B2V}}" />
             <MenuItem Header="Pause" Icon="{ui:SymbolIcon Pause24}" Command="{Binding PauseCommand}"
                       Visibility="{Binding CanPause, Converter={StaticResource B2V}}" />
             <MenuItem Header="Resume" Icon="{ui:SymbolIcon Play24}" Command="{Binding ResumeCommand}"

@@ -20,6 +20,16 @@ FFmpeg (LGPL build)
     project. FFmpeg is a trademark of Fabrice Bellard, originator of the FFmpeg project.
     You can replace this ffmpeg with another build at any time: Settings > Downloads > Helper programs.
 
+7-Zip
+    Unpacks finished archives (zip, 7z, rar, tar and the rest).
+    https://www.7-zip.org   (the copies ShadeNet ships come unchanged from https://github.com/ip7z/7zip/releases)
+    Copyright (C) 1999-2026 Igor Pavlov.
+    Licence: GNU Lesser General Public License, version 2.1 or later, with the "unRAR license restriction" for the code
+    that reads RAR archives (it may not be used to re-create the RAR compression algorithm), and the BSD 3-clause licence
+    for some parts. The full text is in tools\7zip\License.txt next to the program. 7-Zip's source code is available
+    from https://www.7-zip.org/download.html .
+    You can use another 7-Zip at any time: Settings > Downloads > Helper programs.
+
 Libraries inside ShadeNet Downloader
 ------------------------------------
 

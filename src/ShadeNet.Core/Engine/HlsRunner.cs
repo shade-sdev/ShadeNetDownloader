@@ -117,6 +117,30 @@ internal sealed class HlsRunner : IJobRunner
     readonly object _moves = new();
     string? _note;
 
+    /// <summary>What it waits for instead of downloading ("Waiting for Proton VPN to connect…"); null while it is not waiting.</summary>
+    volatile string? _waiting;
+
+    /// <summary>The chosen network adapter is gone (Settings > Network): the pieces wait for it, their retries untouched.</summary>
+    async Task WaitForAdapterAsync(CancellationToken ct)
+    {
+        try
+        {
+            await NetworkLock.WaitUntilOnlineAsync(S, b =>
+            {
+                _waiting = b.WaitingText;
+                _ctx.Publish(MakeSnapshot(0));
+            }, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_waiting != null)
+            {
+                _waiting = null;
+                _ctx.Publish(MakeSnapshot(0));
+            }
+        }
+    }
+
     public HlsRunner(DownloadJob job, RunnerContext ctx)
     {
         _job = job;
@@ -166,6 +190,7 @@ internal sealed class HlsRunner : IJobRunner
             var workers = Math.Clamp(S.EffectiveConnections(new Uri(_job.Url).Host, _job.MaxConnections), 1, 16);
             using var http = HttpFetcher.CreateClient(workers, S);
 
+            await WaitForAdapterAsync(stop).ConfigureAwait(false);
             var plan = await PlanAsync(http, stop).ConfigureAwait(false);
             Data.Live = plan.Live;
             EnsureWorkFolder();
@@ -488,6 +513,11 @@ internal sealed class HlsRunner : IJobRunner
             try
             {
                 return await HlsClient.FetchTextAsync(http, Spec(url), S.UserAgent, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (NetworkAdapterOfflineException.IsIn(ex) && !ct.IsCancellationRequested)
+            {
+                await WaitForAdapterAsync(ct).ConfigureAwait(false);
+                attempt = 0;
             }
             catch (Exception ex) when (attempt <= 3 && IsTransient(ex) && !ct.IsCancellationRequested)
             {
@@ -970,6 +1000,12 @@ internal sealed class HlsRunner : IJobRunner
                 attempt--;   // not a failure: the piece starts over on a new connection, at once
                 _job.Stats.AddReplacedConnection();
                 _ctx.Logger.LogDebug("A piece of {File} was far slower than the others; asking again", _job.FileName);
+            }
+            catch (Exception ex) when (NetworkAdapterOfflineException.IsIn(ex) && !ct.IsCancellationRequested)
+            {
+                // the chosen adapter is gone: not a failure either; the piece waits for it
+                await WaitForAdapterAsync(ct).ConfigureAwait(false);
+                attempt = 0;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && attempt <= limit && IsTransient(ex))
             {
@@ -1591,6 +1627,6 @@ internal sealed class HlsRunner : IJobRunner
 
         return new JobSnapshot(_job.Id, _job.State, _job.FileName, _job.SaveDirectory, downloaded, total, speed, eta, active,
             Array.Empty<SegmentInfo>(), true, _job.Error, _job.ErrorKind, 0, 0, _job.Stats.Retries, 0, _job.Stats.PeakConnections,
-            _note, parts, done, Data.Live, seconds);
+            _note, parts, done, Data.Live, seconds, Waiting: _waiting);
     }
 }

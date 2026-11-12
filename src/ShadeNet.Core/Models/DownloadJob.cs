@@ -63,6 +63,9 @@ public sealed class DownloadJob
     /// <summary>Where <see cref="FirstResponse"/> starts in the file.</summary>
     internal long FirstResponseStart { get; set; }
 
+    /// <summary>A finished archive's unpacking, in words ("Extracting…", "Extracted to Photos"); not persisted.</summary>
+    public string? Extraction { get; set; }
+
     /// <summary>Guards <see cref="Segments"/> and every <see cref="Segment"/> field while a runner is active.</summary>
     internal object Sync { get; } = new();
 

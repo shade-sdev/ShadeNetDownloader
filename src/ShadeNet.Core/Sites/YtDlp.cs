@@ -63,6 +63,23 @@ public static partial class YtDlp
         return null;
     }
 
+    /// <summary>
+    /// What makes yt-dlp go the way ShadeNet goes: <c>--source-address</c> when bound to an adapter (Settings > Network), <c>--proxy</c>
+    /// with ShadeNet's own proxy. Throws <see cref="Net.NetworkAdapterOfflineException"/> while the adapter is not connected.
+    /// </summary>
+    internal static IReadOnlyList<string> NetworkArguments(EngineSettings? settings)
+    {
+        var args = new List<string>();
+        if (settings == null) return args;
+        var binding = Net.NetworkLock.Resolve(settings);
+        if (binding.Offline) throw new DownloadException(JobErrorKind.Network, new Net.NetworkAdapterOfflineException(binding.AdapterName).Message);
+        if (Net.NetworkLock.SourceAddress(binding) is { } source) args.AddRange(new[] { "--source-address", source });
+        if (settings.Proxy == ProxyMode.Manual && Net.HttpFetcher.TryParseProxy(settings.ProxyAddress) is { } proxy)
+            args.AddRange(new[] { "--proxy", proxy.AbsoluteUri.TrimEnd('/') });
+        else if (settings.Proxy == ProxyMode.None) args.AddRange(new[] { "--proxy", "" });   // (an empty one: no proxy, not Windows')
+        return args;
+    }
+
     /// <summary>A page yt-dlp should be asked about: a YouTube video, short, live stream or youtu.be link.</summary>
     public static bool IsSupportedPage(string? url)
     {
@@ -81,9 +98,13 @@ public static partial class YtDlp
 
     /// <param name="cookies">The browser's sign-in for the page's site, as a <c>Cookie</c> header value. It goes to yt-dlp in a temporary file that is
     /// deleted when yt-dlp is done, and only this once: a live stream or a private video cannot be read without a signed-in session.</param>
-    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null, string? cookies = null)
+    /// <param name="network">ShadeNet's network settings: yt-dlp then reaches the page the way ShadeNet does (from the chosen adapter's
+    /// address, through ShadeNet's own proxy), and is not started while the chosen adapter is not connected.</param>
+    public static async Task<YtDlpInfo> ResolveAsync(string exe, string pageUrl, CancellationToken ct, TimeSpan? timeout = null, string? cookies = null,
+        EngineSettings? network = null)
     {
         var arguments = new List<string> { "-J", "--no-playlist", "--no-warnings", "--no-update" };
+        arguments.AddRange(NetworkArguments(network));
         string? cookieFile = null;
         try
         {

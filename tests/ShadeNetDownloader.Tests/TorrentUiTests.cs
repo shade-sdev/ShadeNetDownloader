@@ -43,6 +43,19 @@ public class TorrentUiTests
     });
 
     [Fact]
+    public void The_trackers_written_out_in_a_magnet_link_are_part_of_it_not_links_of_their_own()
+    {
+        const string magnet = "magnet:?xt=urn:btih:e201f41208cdc9b238a2c3b6db87089d63e6db86&dn=Film.mkv&xl=2545859877"
+                               + "&tr=udp://tracker.opentrackr.org:1337/announce&tr=http://open.tracker.cl:1337/announce&tr=https://tracker.example/announce"
+                               + "&tr=udp://leet-tracker.moe:1337/announce";
+
+        Assert.Equal(new[] { magnet }, UrlParser.Extract(magnet));
+        Assert.True(UrlParser.IsSingleUrl(magnet));
+        // a web address of its own next to it still counts
+        Assert.Equal(new[] { magnet, "https://example.com/a.zip" }, UrlParser.Extract(magnet + "\nhttps://example.com/a.zip"));
+    }
+
+    [Fact]
     public void Magnet_links_and_torrent_files_are_found_in_pasted_text()
     {
         var links = UrlParser.Extract(

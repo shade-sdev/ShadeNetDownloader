@@ -173,8 +173,8 @@ public class TorrentNetworkTests
         await using var swarm = await TorrentSwarm.CreateAsync(h.Dir("swarm"), OneFile);
         var m = h.NewManager(tweak: s =>
         {
-            s.TorrentNetworkAdapter = "{0BADC0DE-0000-4000-8000-000000000000}";
-            s.TorrentNetworkAdapterName = "Test VPN";
+            s.NetworkAdapter = "{0BADC0DE-0000-4000-8000-000000000000}";
+            s.NetworkAdapterName = "Test VPN";
         });
 
         JobSnapshot? last = null;
@@ -187,7 +187,7 @@ public class TorrentNetworkTests
         Assert.Contains("Test VPN, which is not connected", m.DescribeTorrentNetwork());
 
         // the adapter "connects" (here: the loopback one, which is what the swarm is on)
-        m.Settings.TorrentNetworkAdapter = LoopbackAdapter();
+        m.Settings.NetworkAdapter = LoopbackAdapter();
         m.ApplySettings();
         await Done(job);
         Assert.Equal(swarm.Expected("data.bin"), ReadShared(job.TargetPath));

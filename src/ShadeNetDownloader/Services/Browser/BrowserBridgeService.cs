@@ -185,6 +185,27 @@ public sealed class BrowserBridgeService : IBrowserBridge, IAsyncDisposable
                             await connection.SendAsync(await _processor.HandleAsync(request).ConfigureAwait(false)).ConfigureAwait(false);
                         break;
 
+                    case MessageTypes.Grab:
+                        if (message.As<GrabRequest>() is { } grab)
+                        {
+                            var accepted = Uri.TryCreate(grab.PageUrl, UriKind.Absolute, out var page) && page.Scheme is "http" or "https";
+                            if (accepted)
+                            {
+                                var grabbed = ShadeNet.Core.Links.LinkGrabber.Clean((grab.Links ?? Array.Empty<GrabbedLinkItem>()).Take(10_000)
+                                    .Select(l => new ShadeNet.Core.Links.GrabbedLink(l.Url ?? "", l.Text)), page);
+                                var cookies = grab.Cookies?.Where(c => c.Key.Length < 256 && c.Value.Length < 16_384 && !c.Value.Contains('\n'))
+                                    .Take(30).ToDictionary(c => c.Key, c => c.Value, StringComparer.OrdinalIgnoreCase);
+                                var title = grab.Title is { Length: > 0 } t ? t[..Math.Min(t.Length, 300)] : null;
+                                _ui.BringToFront();
+                                _ui.ShowGrabber(new ShadeNet.Core.Links.GrabbedPage(page!.AbsoluteUri, title, grabbed), cookies,
+                                    grab.UserAgent is { Length: < 1024 } ua ? ua : null);
+                            }
+
+                            await connection.SendAsync(new { type = MessageTypes.CaptureResult, id = grab.Id, accepted }).ConfigureAwait(false);
+                        }
+
+                        break;
+
                     case MessageTypes.Ping:
                         await connection.SendAsync(new { type = MessageTypes.Pong }).ConfigureAwait(false);
                         break;

@@ -523,7 +523,7 @@ public sealed class DownloadManager : IDisposable
 
     /// <summary>How torrents reach the network now, in words: directly, through the proxy, bound to an adapter (and what is not used).</summary>
     public string DescribeTorrentNetwork() =>
-        TorrentSession.DescribeRoute(_torrents?.Route ?? TorrentNetwork.RouteFor(Settings, NetworkAdapters.Find), Settings);
+        TorrentSession.DescribeRoute(_torrents?.Route ?? TorrentNetwork.RouteFor(Settings), Settings);
 
     /// <summary>The port the torrent engine listens on (0 before any torrent ran).</summary>
     public int TorrentListenPort => _torrents?.ListenPort ?? 0;
@@ -760,7 +760,12 @@ public sealed class DownloadManager : IDisposable
             lock (_gate) _running.Remove(job.Id);
             cts.Dispose();
 
-            if (outcome == RunOutcome.Completed && !rj.Removing) JobCompleted?.Invoke(job);
+            if (outcome == RunOutcome.Completed && !rj.Removing)
+            {
+                JobCompleted?.Invoke(job);
+                if (Settings.ExtractArchives) _ = ExtractWhenCompleteAsync(job);
+            }
+
             Pump();
         });
     }
@@ -804,6 +809,7 @@ public sealed class DownloadManager : IDisposable
     public void ApplySettings()
     {
         Settings.Normalize();
+        NetworkLock.Invalidate();   // (the adapter may be another one now)
         Pump();
         if (_torrents is { } torrents) _ = torrents.ApplySettingsAsync();   // limits, port, DHT (sharing limits are read as it goes)
     }
@@ -1111,6 +1117,125 @@ public sealed class DownloadManager : IDisposable
 
         return new JobSnapshot(job.Id, job.State, job.FileName, job.SaveDirectory, downloaded, job.TotalSize, 0, null, 0,
             infos, job.AcceptsRanges, job.Error, job.ErrorKind, job.Stats.Splits, job.Stats.Takeovers,
-            job.Stats.Retries, job.Stats.Fallbacks, job.Stats.PeakConnections);
+            job.Stats.Retries, job.Stats.Fallbacks, job.Stats.PeakConnections, job.State == DownloadState.Completed ? job.Extraction : null);
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // Archives
+    // ------------------------------------------------------------------------------------------------------------
+
+    readonly HashSet<string> _extracting = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A page is read this far for its links, no further (a page is not tens of megabytes).</summary>
+    const int MaxPageBytes = 8 * 1024 * 1024;
+
+    /// <summary>
+    /// The links of a web page, for the link grabber: the page is fetched (with <paramref name="web"/>'s sign-in and referring page,
+    /// through the proxy and the adapter like any download) and its links read. Throws a message for people when it is no page.
+    /// </summary>
+    public async Task<Links.GrabbedPage> GrabPageAsync(string url, RequestSpec? web = null, CancellationToken ct = default)
+    {
+        using var http = HttpFetcher.CreateClient(2, Settings);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(45));
+        var spec = (web ?? new RequestSpec(url)) with { Url = url };
+        var (response, finalUrl) = await HttpFetcher.GetAsync(http, spec, Settings.UserAgent, null, timeout.Token).ConfigureAwait(false);
+        using var _ = response;
+        if (!response.IsSuccessStatusCode)
+            throw new DownloadException(JobErrorKind.HttpStatus, $"The site answered {(int)response.StatusCode} ({response.ReasonPhrase}) for that page.");
+        var type = response.Content.Headers.ContentType?.MediaType ?? "";
+        if (type.Length > 0 && !type.Contains("html", StringComparison.OrdinalIgnoreCase) && !type.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+            throw new DownloadException(JobErrorKind.Unsupported, "That address is a file, not a page with links: add it as a download.");
+
+        await using var body = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+        using var copy = new MemoryStream();
+        var buffer = new byte[81920];
+        int read;
+        while (copy.Length < MaxPageBytes && (read = await body.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) > 0) copy.Write(buffer, 0, read);
+
+        var charset = response.Content.Headers.ContentType?.CharSet;
+        System.Text.Encoding encoding;
+        try
+        {
+            encoding = string.IsNullOrWhiteSpace(charset) ? System.Text.Encoding.UTF8 : System.Text.Encoding.GetEncoding(charset.Trim('"'));
+        }
+        catch (ArgumentException)
+        {
+            encoding = System.Text.Encoding.UTF8;
+        }
+
+        return Links.LinkGrabber.FromHtml(encoding.GetString(copy.GetBuffer(), 0, (int)copy.Length), new Uri(finalUrl));
+    }
+
+    /// <summary>An archive was unpacked, or could not be (the app says so, and puts the archive in the Recycle Bin when asked to).</summary>
+    public event Action<DownloadJob, Archives.ArchiveSet, Archives.ExtractResult>? ArchiveExtracted;
+
+    /// <summary>Whether a download is an archive (or a part of one) that can be unpacked.</summary>
+    public static bool IsArchive(DownloadJob job) =>
+        job.Kind == DownloadKind.File && Archives.ArchiveExtractor.IsArchive(job.TargetPath);
+
+    /// <summary>
+    /// A finished download that is an archive is unpacked once all of it is here: a part waits for the other parts the list is still
+    /// downloading (the last one to finish unpacks them all).
+    /// </summary>
+    async Task ExtractWhenCompleteAsync(DownloadJob job)
+    {
+        if (!IsArchive(job) || Archives.ArchiveExtractor.SetOf(job.TargetPath) is not { } set) return;
+        lock (_gate)
+        {
+            if (_jobs.Any(j => j.Id != job.Id && j.Kind == DownloadKind.File && j.State != DownloadState.Completed && set.Includes(j.TargetPath)))
+                return;   // another part is still coming
+        }
+
+        await ExtractAsync(job, set, null, automatic: true).ConfigureAwait(false);
+    }
+
+    /// <summary>"Extract": unpacks a finished archive now, with its password if it has one.</summary>
+    public async Task<Archives.ExtractResult> ExtractAsync(Guid id, string? password = null)
+    {
+        if (Find(id) is not { State: DownloadState.Completed } job || !IsArchive(job) || Archives.ArchiveExtractor.SetOf(job.TargetPath) is not { } set)
+            return new Archives.ExtractResult(Archives.ExtractStatus.Failed, Message: "That download is not a finished archive.");
+        return await ExtractAsync(job, set, password, automatic: false).ConfigureAwait(false);
+    }
+
+    async Task<Archives.ExtractResult> ExtractAsync(DownloadJob job, Archives.ArchiveSet set, string? password, bool automatic)
+    {
+        lock (_gate)
+        {
+            if (!_extracting.Add(set.First)) return new Archives.ExtractResult(Archives.ExtractStatus.Failed, Message: "It is being extracted already.");
+        }
+
+        try
+        {
+            job.Extraction = "Extracting…";
+            JobUpdated?.Invoke(Snapshot(job));
+            Archives.ExtractResult result;
+            try
+            {
+                result = await Task.Run(() => Archives.ArchiveExtractor.Extract(set, password, CancellationToken.None, Settings.FindSevenZip())).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _logger.LogWarning(ex, "Extracting {File} failed", job.FileName);
+                result = new Archives.ExtractResult(Archives.ExtractStatus.Failed, Message: ex.Message);
+            }
+
+            job.Extraction = result.Status switch
+            {
+                Archives.ExtractStatus.Extracted => $"Extracted to {Path.GetFileName(result.Folder)}",
+                Archives.ExtractStatus.NeedsPassword => "Needs a password to extract",
+                Archives.ExtractStatus.WrongPassword => "Wrong password: not extracted",
+                // (an automatic try while a part is missing says nothing: the part may come later)
+                Archives.ExtractStatus.Incomplete => automatic ? null : "A part is missing: not extracted",
+                _ => "Could not extract: " + result.Message,
+            };
+            JobUpdated?.Invoke(Snapshot(job));
+            if (!(automatic && result.Status == Archives.ExtractStatus.Incomplete)) ArchiveExtracted?.Invoke(job, set, result);
+            return result;
+        }
+        finally
+        {
+            lock (_gate) _extracting.Remove(set.First);
+        }
     }
 }

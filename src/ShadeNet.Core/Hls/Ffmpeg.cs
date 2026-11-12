@@ -103,10 +103,12 @@ public static class Ffmpeg
     /// The request carries what the browser's player sent (referrer, cookies, any other header); progress is written to the standard
     /// output as <c>key=value</c> lines, and a <c>q</c> on the standard input ends the recording cleanly (the file is finished properly).
     /// </summary>
+    /// <param name="httpProxy">A proxy for the stream's requests ("http://127.0.0.1:port": ShadeNet's relay bound to the chosen adapter).</param>
     public static IReadOnlyList<string> RecordArguments(string url, string output, string? userAgent, string? referer, string? cookies,
-        IReadOnlyDictionary<string, string>? headers)
+        IReadOnlyDictionary<string, string>? headers, string? httpProxy = null)
     {
         var args = new List<string> { "-hide_banner", "-loglevel", "error", "-y", "-nostats", "-progress", "pipe:1" };
+        if (!string.IsNullOrEmpty(httpProxy)) args.AddRange(new[] { "-http_proxy", httpProxy });
         if (!string.IsNullOrWhiteSpace(userAgent) && IsHeaderValue(userAgent)) args.AddRange(new[] { "-user_agent", userAgent });
 
         var lines = new List<string>();

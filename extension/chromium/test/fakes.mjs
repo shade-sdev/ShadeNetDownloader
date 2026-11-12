@@ -31,6 +31,7 @@ export class FakeApp {
   constructor() {
     this.settings = { enabled: true, excludedHosts: [], minSizeBytes: 0, appVersion: '9.9' };
     this.captures = [];
+    this.grabs = [];
     this.available = true;               // false: connectNative works but the host reports an error and closes
     this.running = true;                 // false: the app is closed; a hello that may launch it starts it, one that may not is told so
     this.launches = 0;
@@ -64,6 +65,9 @@ export class FakeApp {
     }
     if (message.type === 'hello' && this.answerHello) {
       await port.deliver({ type: 'hello-ack', ...this.settings });
+    } else if (message.type === 'grab') {
+      this.grabs.push(message);
+      await port.deliver({ type: 'capture-result', id: message.id, accepted: true });
     } else if (message.type === 'capture') {
       this.captures.push(message);
       const reply = await this.capture(message);

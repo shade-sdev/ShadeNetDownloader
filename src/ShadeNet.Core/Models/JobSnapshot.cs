@@ -25,7 +25,8 @@ public sealed record JobSnapshot(
     int PartsDone = 0,
     bool Live = false,
     double Seconds = 0,
-    TorrentStatus? Torrent = null)
+    TorrentStatus? Torrent = null,
+    string? Waiting = null)
 {
     public double Fraction => Total is > 0 ? Math.Clamp((double)Downloaded / Total.Value, 0, 1) : 0;
 }

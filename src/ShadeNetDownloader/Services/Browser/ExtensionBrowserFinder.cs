@@ -21,6 +21,25 @@ public static class ExtensionBrowserFinder
         new ExtensionBrowserTarget("Brave", "brave.exe", "brave://extensions"),
     };
 
+    /// <summary>Firefox takes the add-on its own way: a signed package it is handed, or (until then) its page for temporary add-ons.</summary>
+    public static readonly ExtensionBrowserTarget Firefox = new("Firefox", "firefox.exe", "about:debugging#/runtime/this-firefox");
+
+    public static bool IsInstalled(ExtensionBrowserTarget browser) => HasAppPath(browser);
+
+    /// <summary>Starts a browser with an argument of one's own (a page, a file); false when it cannot be started.</summary>
+    public static bool TryOpen(ExtensionBrowserTarget browser, string argument)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(browser.Exe, argument.Contains(' ') ? $"\"{argument}\"" : argument) { UseShellExecute = true });
+            return true;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
     /// <param name="isInstalled">Whether a browser's program is installed; only tests pass one.</param>
     public static IReadOnlyList<ExtensionBrowserTarget> Installed(Func<ExtensionBrowserTarget, bool>? isInstalled = null) =>
         Browsers.Where(isInstalled ?? HasAppPath).ToList();

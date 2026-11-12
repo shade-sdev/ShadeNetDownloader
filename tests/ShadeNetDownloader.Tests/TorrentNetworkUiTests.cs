@@ -48,32 +48,35 @@ public class TorrentNetworkUiTests
     static readonly NetworkAdapterInfo Wifi = new("{11111111-0000-4000-8000-000000000002}", "Wi-Fi", "Intel Wi-Fi", false, Array.Empty<IPAddress>());
 
     [Fact]
-    public void Settings_bind_torrents_to_an_adapter_and_keep_it_listed_while_it_is_gone()
+    public void Settings_bind_everything_to_an_adapter_and_keep_it_listed_while_it_is_gone()
     {
         using var dir = new TempDir();
         var settings = NewSettings(dir.Path);
         var adapters = new List<NetworkAdapterInfo> { Vpn, Wifi };
         using var manager = new DownloadManager(settings.Current.Engine);
-        var page = new DownloadSettingsViewModel(settings, () => manager.ApplySettings(), () => { }, manager: manager, adapters: () => adapters);
+        var page = new NetworkSettingsViewModel(settings, () => manager.ApplySettings(), () => adapters);
 
         Assert.Equal(new[] { "Any network (usual)", "Proton VPN  ·  10.2.0.2", "Wi-Fi (not connected)" }, page.AdapterChoices.Select(c => c.Label));
         Assert.Null(page.SelectedAdapter!.Id);
-        Assert.Equal("Right now torrents go directly.", page.TorrentNetworkText);
+        Assert.Equal("", page.BindingText);
 
         page.SelectedAdapter = page.AdapterChoices[1];
-        Assert.Equal(Vpn.Id, settings.Current.Engine.TorrentNetworkAdapter);
-        Assert.Equal("Proton VPN", settings.Current.Engine.TorrentNetworkAdapterName);
+        Assert.Equal(Vpn.Id, settings.Current.Engine.NetworkAdapter);
+        Assert.Equal("Proton VPN", settings.Current.Engine.NetworkAdapterName);
+        Assert.Equal(Vpn.Id, new SettingsService(dir.Path).Load().Engine.NetworkAdapter);   // saved
 
-        // the VPN is disconnected and Windows drops its adapter: it stays the choice, and says so
+        // the VPN is disconnected and Windows drops its adapter: it stays the choice, and says so (here and for torrents)
         adapters.Remove(Vpn);
         page.RefreshAdapters();
         Assert.Equal(Vpn.Id, page.SelectedAdapter!.Id);
         Assert.Equal("Proton VPN (not there now)", page.SelectedAdapter.Label);
-        Assert.Contains("Proton VPN, which is not connected", page.TorrentNetworkText);
-        Assert.Equal(Vpn.Id, settings.Current.Engine.TorrentNetworkAdapter);   // (listing again changes nothing)
+        Assert.Contains("Proton VPN is not connected", page.BindingText);
+        Assert.Contains("Proton VPN, which is not connected", manager.DescribeTorrentNetwork());
+        Assert.Equal(Vpn.Id, settings.Current.Engine.NetworkAdapter);   // (listing again changes nothing)
 
         page.SelectedAdapter = page.AdapterChoices[0];
-        Assert.Null(settings.Current.Engine.TorrentNetworkAdapter);
+        Assert.Null(settings.Current.Engine.NetworkAdapter);
+        Assert.Equal("", page.BindingText);
     }
 
     [Fact]
@@ -84,7 +87,7 @@ public class TorrentNetworkUiTests
         settings.Current.Engine.Proxy = ProxyMode.Manual;
         settings.Current.Engine.ProxyAddress = "socks5://127.0.0.1:1080";
         using var manager = new DownloadManager(settings.Current.Engine);
-        var page = new DownloadSettingsViewModel(settings, () => manager.ApplySettings(), () => { }, manager: manager, adapters: () => Array.Empty<NetworkAdapterInfo>());
+        var page = new DownloadSettingsViewModel(settings, () => manager.ApplySettings(), () => { }, manager: manager);
 
         Assert.Equal(TorrentEncryption.Prefer, page.SelectedEncryption.Value);
         page.SelectedEncryption = page.EncryptionChoices.Single(c => c.Value == TorrentEncryption.Require);
@@ -106,7 +109,7 @@ public class TorrentNetworkUiTests
         var settings = NewSettings(dir.Path);
         using var manager = new DownloadManager(settings.Current.Engine);
         await manager.BanTorrentPeerAsync("203.0.113.7:51413");
-        var page = new DownloadSettingsViewModel(settings, () => manager.ApplySettings(), () => { }, manager: manager, adapters: () => Array.Empty<NetworkAdapterInfo>());
+        var page = new DownloadSettingsViewModel(settings, () => manager.ApplySettings(), () => { }, manager: manager);
 
         Assert.True(page.HasBanned);
         Assert.Contains("203.0.113.7", page.BannedText);

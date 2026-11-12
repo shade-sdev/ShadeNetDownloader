@@ -122,6 +122,57 @@ public class ToolManagerTests : IDisposable
         Assert.Null(await m.CheckAsync(ManagedTool.YtDlp, default));
     }
 
+    const string SevenZipApi = "https://api.github.com/repos/ip7z/7zip/releases/latest";
+
+    static string SevenZipRelease(string tag, string installerSha, string helperSha) => $$"""
+        {"tag_name":"{{tag}}","published_at":"2026-11-07T11:45:33Z","assets":[
+          {"name":"7z{{tag.Replace(".", "")}}-x64.exe","browser_download_url":"https://github.com/ip7z/7zip/releases/download/{{tag}}/7z{{tag.Replace(".", "")}}-x64.exe","digest":"sha256:{{installerSha}}"},
+          {"name":"7zr.exe","browser_download_url":"https://github.com/ip7z/7zip/releases/download/{{tag}}/7zr.exe","digest":"sha256:{{helperSha}}"},
+          {"name":"7z{{tag.Replace(".", "")}}-arm64.exe","browser_download_url":"https://example.invalid/arm","digest":"sha256:00"}]}
+        """;
+
+    [Fact]
+    public async Task Seven_Zip_is_found_where_it_was_bundled_and_a_newer_release_is_offered_with_its_checksums()
+    {
+        Put(Path.Combine(App, "tools", "7zip"), "7z.exe");
+        var web = new FakeWeb();
+        var installerSha = new string('a', 64);
+        var helperSha = new string('b', 64);
+        web.Json(SevenZipApi, SevenZipRelease("26.06", installerSha, helperSha));
+        var m = Manager(web, versionOf: (_, _, _) => Task.FromResult<string?>("25.01"));
+
+        Assert.Equal(Path.Combine(App, "tools", "7zip", "7z.exe"), m.Find(ManagedTool.SevenZip));
+        Assert.Equal(ToolSource.Bundled, m.SourceOf(ManagedTool.SevenZip));
+        Assert.Equal("7-Zip", ToolManager.NameOf(ManagedTool.SevenZip));
+
+        var update = (await m.CheckAsync(ManagedTool.SevenZip, default))!;
+        Assert.Equal(("25.01", "26.06"), (update.Current, update.Latest));
+        Assert.Equal("https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.exe", update.AssetUrl);
+        Assert.Equal(installerSha, update.Sha256);
+        Assert.Equal("https://github.com/ip7z/7zip/releases/download/26.06/7zr.exe", update.HelperUrl);
+        Assert.Equal(helperSha, update.HelperSha256);
+
+        // the same version: nothing to offer
+        Assert.Null(await Manager(web, versionOf: (_, _, _) => Task.FromResult<string?>("26.06")).CheckAsync(ManagedTool.SevenZip, default));
+    }
+
+    [Fact]
+    public async Task A_7_Zip_download_that_does_not_match_its_checksum_is_not_used()
+    {
+        var web = new FakeWeb();
+        var installer = Encoding.UTF8.GetBytes("not what was published");
+        web.Json(SevenZipApi, SevenZipRelease("26.06", new string('a', 64), new string('b', 64)));
+        web.Bytes("https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.exe", installer);
+        var m = Manager(web, versionOf: (_, _, _) => Task.FromResult<string?>(null));
+
+        var update = (await m.CheckAsync(ManagedTool.SevenZip, default))!;   // not installed: offered
+        Assert.Null(update.Current);
+        var ex = await Assert.ThrowsAsync<DownloadException>(() => m.UpdateAsync(update, default));
+        Assert.Contains("does not match its published checksum", ex.Message);
+        Assert.False(Directory.Exists(Path.Combine(User, "7zip")));
+        Assert.DoesNotContain(web.Asked, a => a.EndsWith("7zr.exe"));   // (stopped before anything else was fetched)
+    }
+
     [Fact]
     public async Task A_copy_the_user_chose_is_never_checked_or_touched()
     {

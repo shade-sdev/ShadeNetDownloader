@@ -23,6 +23,8 @@ sealed class FakeCaptureUi : ICaptureUi
     public void Quit() => Quits++;
     public List<IReadOnlyList<string>> OpenedLinks { get; } = new();
     public void OpenLinks(IReadOnlyList<string> links) => OpenedLinks.Add(links);
+    public List<ShadeNet.Core.Links.GrabbedPage> Grabbed { get; } = new();
+    public void ShowGrabber(ShadeNet.Core.Links.GrabbedPage page, IReadOnlyDictionary<string, string>? cookiesByHost, string? userAgent) => Grabbed.Add(page);
 }
 
 public class CaptureProcessorTests
@@ -563,7 +565,8 @@ public class BrowserIntegrationInstallerTests
         e.Installer.Install();
 
         var status = e.Installer.GetStatus();
-        Assert.Equal(BrowserIntegrationInstaller.Browsers.Select(b => b.Name).OrderBy(n => n), status.RegisteredBrowsers.OrderBy(n => n));
+        Assert.Equal(BrowserIntegrationInstaller.Browsers.Select(b => b.Name).Append(BrowserIntegrationInstaller.FirefoxName).OrderBy(n => n),
+            status.RegisteredBrowsers.OrderBy(n => n));
 
         foreach (var browser in BrowserIntegrationInstaller.Browsers)
         {
@@ -581,6 +584,33 @@ public class BrowserIntegrationInstallerTests
         var path = root.GetProperty("path").GetString()!;
         Assert.True(Path.IsPathRooted(path), "browsers need an absolute path");
         Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public void Firefox_gets_a_manifest_of_its_own_that_allows_only_the_ShadeNet_add_on()
+    {
+        using var e = new Env();
+        e.Installer.Install();
+
+        using (var key = Registry.CurrentUser.OpenSubKey($@"{e.RegistryRoot}\Mozilla\NativeMessagingHosts\{BridgeProtocol.HostName}"))
+            Assert.Equal(e.Installer.FirefoxManifestPath, key!.GetValue(null));
+        var root = JsonDocument.Parse(File.ReadAllText(e.Installer.FirefoxManifestPath)).RootElement;
+        Assert.Equal(BridgeProtocol.HostName, root.GetProperty("name").GetString());
+        Assert.Equal(new[] { BrowserIntegrationInstaller.FirefoxExtensionId }, root.GetProperty("allowed_extensions").EnumerateArray().Select(x => x.GetString()).ToArray());
+        Assert.False(root.TryGetProperty("allowed_origins", out _));   // (Firefox refuses a manifest that has it)
+        Assert.True(File.Exists(root.GetProperty("path").GetString()));
+
+        // the ID is the one in the add-on's own manifest
+        var dir = AppContext.BaseDirectory;
+        while (dir != null && !Directory.Exists(Path.Combine(dir, "extension", "firefox"))) dir = Path.GetDirectoryName(dir);
+        Assert.NotNull(dir);
+        var addOn = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir!, "extension", "firefox", "manifest.json"))).RootElement;
+        Assert.Equal(BrowserIntegrationInstaller.FirefoxExtensionId, addOn.GetProperty("browser_specific_settings").GetProperty("gecko").GetProperty("id").GetString());
+
+        e.Installer.Uninstall();
+        Assert.Null(Registry.CurrentUser.OpenSubKey($@"{e.RegistryRoot}\Mozilla\NativeMessagingHosts\{BridgeProtocol.HostName}"));
+        Assert.False(File.Exists(e.Installer.FirefoxManifestPath));
+        Assert.DoesNotContain(BrowserIntegrationInstaller.FirefoxName, e.Installer.GetStatus().RegisteredBrowsers);
     }
 
     [Fact]

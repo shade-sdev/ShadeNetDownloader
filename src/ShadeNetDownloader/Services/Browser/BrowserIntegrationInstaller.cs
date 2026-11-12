@@ -14,9 +14,10 @@ public sealed record IntegrationStatus(bool HostFilesPresent, bool ExtensionFold
 }
 
 /// <summary>
-/// Registers the native messaging host with the Chromium browsers so that the extension can reach the app:
-/// a manifest file plus one registry value per browser, all under HKEY_CURRENT_USER (no administrator rights, nothing
-/// machine-wide). Everything it writes can be removed again with <see cref="Uninstall"/>.
+/// Registers the native messaging host with the Chromium browsers and Firefox so that the extension can reach the app:
+/// a manifest file (one for the Chromium browsers, one for Firefox, which names extensions its own way) plus one registry value
+/// per browser, all under HKEY_CURRENT_USER (no administrator rights, nothing machine-wide). Everything it writes can be removed
+/// again with <see cref="Uninstall"/>.
 /// </summary>
 public sealed class BrowserIntegrationInstaller
 {
@@ -25,6 +26,11 @@ public sealed class BrowserIntegrationInstaller
     /// what lets the host manifest name exactly one extension in <c>allowed_origins</c>.
     /// </summary>
     public const string ExtensionId = "bcegodlanfeghhakadmalbkbhbhbejop";
+
+    /// <summary>The Firefox add-on's ID (<c>browser_specific_settings.gecko.id</c> in <c>extension/firefox/manifest.json</c>).</summary>
+    public const string FirefoxExtensionId = "browser-integration@shadenet-downloader";
+
+    public const string FirefoxName = "Mozilla Firefox";
 
     public static readonly IReadOnlyList<BrowserTarget> Browsers = new[]
     {
@@ -50,6 +56,13 @@ public sealed class BrowserIntegrationInstaller
     public string ManifestPath => Path.Combine(HostDirectory, BridgeProtocol.HostName + ".json");
     public string HostExecutable => Path.Combine(_appDir, "NativeHost", "ShadeNet.NativeHost.exe");
     public string ExtensionFolder => Path.Combine(_appDir, "browser", "chromium");
+    public string FirefoxManifestPath => Path.Combine(HostDirectory, BridgeProtocol.HostName + ".firefox.json");
+    public string FirefoxExtensionFolder => Path.Combine(_appDir, "browser", "firefox");
+
+    /// <summary>The Firefox add-on as a file: the signed one when the release carries it, else none (see <see cref="FirefoxExtensionFolder"/>).</summary>
+    public string? FirefoxPackage => File.Exists(Path.Combine(_appDir, "browser", "shadenet-firefox.xpi")) ? Path.Combine(_appDir, "browser", "shadenet-firefox.xpi") : null;
+
+    string FirefoxKeyPath => $@"{_registryRoot}\Mozilla\NativeMessagingHosts\{BridgeProtocol.HostName}";
 
     /// <summary>The host carries its own .NET runtime (hostfxr next to it): it runs on a computer that has none installed.</summary>
     public bool HostIsSelfContained => File.Exists(Path.Combine(_appDir, "NativeHost", "hostfxr.dll"));
@@ -66,6 +79,12 @@ public sealed class BrowserIntegrationInstaller
             using var key = Registry.CurrentUser.OpenSubKey(KeyPath(browser));
             if (key?.GetValue(null) as string is { } path && string.Equals(path, ManifestPath, StringComparison.OrdinalIgnoreCase) && File.Exists(ManifestPath))
                 registered.Add(browser.Name);
+        }
+
+        using (var firefox = Registry.CurrentUser.OpenSubKey(FirefoxKeyPath))
+        {
+            if (firefox?.GetValue(null) as string is { } path && string.Equals(path, FirefoxManifestPath, StringComparison.OrdinalIgnoreCase) && File.Exists(FirefoxManifestPath))
+                registered.Add(FirefoxName);
         }
 
         return new IntegrationStatus(File.Exists(HostExecutable), Directory.Exists(ExtensionFolder), registered);
@@ -108,6 +127,18 @@ public sealed class BrowserIntegrationInstaller
             using var key = Registry.CurrentUser.CreateSubKey(KeyPath(browser));
             key.SetValue(null, ManifestPath, RegistryValueKind.String);
         }
+
+        // Firefox: the same host, allowed for exactly the ShadeNet add-on (by its ID: Firefox has no extension origins here)
+        File.WriteAllText(FirefoxManifestPath, JsonSerializer.Serialize(new
+        {
+            name = BridgeProtocol.HostName,
+            description = "ShadeNet Downloader browser integration",
+            path,
+            type = "stdio",
+            allowed_extensions = new[] { FirefoxExtensionId },
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        using (var firefox = Registry.CurrentUser.CreateSubKey(FirefoxKeyPath))
+            firefox.SetValue(null, FirefoxManifestPath, RegistryValueKind.String);
     }
 
     /// <summary>Removes everything <see cref="Install"/> wrote.</summary>
@@ -115,8 +146,9 @@ public sealed class BrowserIntegrationInstaller
     {
         foreach (var browser in Browsers)
             Registry.CurrentUser.DeleteSubKey(KeyPath(browser), throwOnMissingSubKey: false);
+        Registry.CurrentUser.DeleteSubKey(FirefoxKeyPath, throwOnMissingSubKey: false);
 
-        foreach (var file in new[] { ManifestPath, LauncherPath, HostConfigPath })
+        foreach (var file in new[] { ManifestPath, FirefoxManifestPath, LauncherPath, HostConfigPath })
         {
             try
             {

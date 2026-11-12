@@ -15,6 +15,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# the user's own browser integration is put back as it was at the end (see host-registrations.ps1)
+. (Join-Path $PSScriptRoot "host-registrations.ps1")
+$savedHosts = Save-HostRegistrations
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $docs = Join-Path $root "docs"
 $env:DOTNET_ROOT = "C:\Users\Shade\.dotnet"
@@ -114,6 +117,7 @@ finally {
     $crash = Join-Path $data "crash.log"
     if (Test-Path $crash) { Write-Host "=== crash.log"; Get-Content $crash | Select-Object -First 20 | ForEach-Object { Write-Host $_ } }
     try { & $appExe --uninstall-browser-integration; Start-Sleep -Milliseconds 800 } catch { }
+    Restore-HostRegistrations $savedHosts
     foreach ($k in $saved.Keys) { New-Item -Path $k -Force | Out-Null; Set-Item -Path $k -Value $saved[$k] }
     if ($app -and -not $app.HasExited) { $app.Kill() }
     Get-Process ShadeNetDownloader, ShadeNet.NativeHost -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt $scriptStart } | ForEach-Object { $_.Kill() }

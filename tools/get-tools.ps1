@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
-  Fetches the helper programs ShadeNet bundles: yt-dlp (resolves YouTube and many other sites) and ffmpeg (joins streams).
+  Fetches the helper programs ShadeNet bundles: yt-dlp (resolves YouTube and many other sites), ffmpeg (joins streams) and 7-Zip
+  (unpacks finished archives).
 
 .DESCRIPTION
   Both go to tools\<name>\ (not part of the source; the build copies them next to the program when present, and the
@@ -10,13 +11,18 @@
     yt-dlp  https://github.com/yt-dlp/yt-dlp/releases/latest     (Unlicense: free to bundle)
     ffmpeg  https://github.com/BtbN/FFmpeg-Builds/releases        (the *LGPL* build: it may be shipped with a closed-source
                                                                    program; the GPL builds may not without GPL obligations)
+    7-Zip   https://github.com/ip7z/7zip/releases/latest          (Igor Pavlov's own builds; GNU LGPL with the unRAR restriction:
+                                                                   shipped unchanged, with its License.txt. 7z.exe + 7z.dll, the
+                                                                   only build that reads RAR, come out of the x64 installer, which
+                                                                   the standalone 7zr.exe unpacks; GitHub's SHA-256 of each file is
+                                                                   checked)
 
   Run again at any time to update. Inside the program, Settings > Downloads > Helper programs looks for newer versions about
   once a day, asks before installing one, and puts the update in the user's own folder (the install folder is not writable);
   the copy that came with the program is never modified. tool.json next to each program records what it is.
 #>
 param(
-    [ValidateSet("yt-dlp", "ffmpeg", "all")] [string]$Tool = "yt-dlp",
+    [ValidateSet("yt-dlp", "ffmpeg", "7zip", "all")] [string]$Tool = "yt-dlp",
     [switch]$Force
 )
 
@@ -76,6 +82,37 @@ if ($Tool -in "ffmpeg", "all") {
     $release = Invoke-RestMethod "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest" -Headers @{ "User-Agent" = "ShadeNetDownloader" }
     $built = ($release.assets | Where-Object { $_.name -eq $asset } | Select-Object -First 1).updated_at
     @{ version = ([datetime]$built).ToString("yyyy-MM-dd"); published = ([datetime]$built).ToUniversalTime().ToString("o") } | ConvertTo-Json | Set-Content (Join-Path $dir "tool.json")
+}
+
+if ($Tool -in "7zip", "all") {
+    Write-Host "7-Zip"
+    $dir = Join-Path $tools "7zip"
+    $release = Invoke-RestMethod "https://api.github.com/repos/ip7z/7zip/releases/latest" -Headers @{ "User-Agent" = "ShadeNetDownloader" }
+    $version = $release.tag_name
+    $installerName = "7z$($version.Replace('.', ''))-x64.exe"
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("sn-7zip-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    New-Item -ItemType Directory $tmp | Out-Null
+    try {
+        foreach ($name in "7zr.exe", $installerName) {
+            $asset = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+            if (-not $asset) { throw "the 7-Zip $version release has no $name" }
+            if ($asset.digest -notmatch "^sha256:([0-9a-f]{64})$") { throw "GitHub gives no SHA-256 for $name" }
+            $file = Join-Path $tmp $name
+            Write-Host "  downloading $($asset.browser_download_url)"
+            Invoke-WebRequest $asset.browser_download_url -OutFile $file -UseBasicParsing
+            $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $Matches[1]) { throw "checksum mismatch for $name (expected $($Matches[1]), got $actual)" }
+            Write-Host "  checksum ok ($actual)"
+        }
+        $out = Join-Path $tmp "out"
+        & (Join-Path $tmp "7zr.exe") x (Join-Path $tmp $installerName) "-o$out" 7z.exe 7z.dll License.txt -y | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "7zr could not unpack $installerName ($LASTEXITCODE)" }
+        New-Item -ItemType Directory $dir -Force | Out-Null
+        foreach ($f in "7z.exe", "7z.dll", "License.txt") { Copy-Item (Join-Path $out $f) (Join-Path $dir $f) -Force }
+    }
+    finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+    Write-Host "  $((& (Join-Path $dir '7z.exe') | Where-Object { $_ } | Select-Object -First 1).Trim())"
+    @{ version = $version; published = ([datetime]$release.published_at).ToUniversalTime().ToString("o") } | ConvertTo-Json | Set-Content (Join-Path $dir "tool.json")
 }
 
 Write-Host "done: $tools"

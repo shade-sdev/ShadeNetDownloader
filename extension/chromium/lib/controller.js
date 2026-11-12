@@ -13,6 +13,8 @@ import { PieceTracker } from './pieces.js';
 import { RangedFileTracker } from './files.js';
 import { TracksTracker, cleanTitle, describeTracks, extensionFor, heightOf, isVideoPage } from './youtube.js';
 import { browserTimers } from './native.js';
+import { initiatorOf, ownOrigin } from './headers.js';
+import { cleanLinks, collectLinks, cookiesByHost } from './grab.js';
 import { acceptPageAddress, embedWatchUrl, isDecoyVideo, isPageSite, looksLikeOneVideo } from './sites.js';
 
 export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes: 0, pageSignIn: true, magnetLinks: true };
@@ -20,6 +22,7 @@ export const DEFAULT_SETTINGS = { enabled: true, excludedHosts: [], minSizeBytes
 const CONNECT_TIMEOUT_MS = 10000;   // the app may have to be started
 const ANSWER_TIMEOUT_MS = 8000;
 const MENU_LINK = 'shadenet-link';
+const MENU_PAGE_LINKS = 'shadenet-page-links';
 
 let nextRuleId = 9000;
 
@@ -61,6 +64,14 @@ export function defaultFetchHead(url, recorded, chromeApi = globalThis.chrome, f
   });
 }
 
+function ownHost(chromeApi) {
+  try {
+    return new URL(ownOrigin(chromeApi)).host || chromeApi.runtime.id;
+  } catch {
+    return chromeApi.runtime.id;
+  }
+}
+
 async function fetchAs(url, recorded, chromeApi, fetchImpl, init, read) {
   const referer = headerValue(recorded, 'referer');
   const origin = headerValue(recorded, 'origin');
@@ -80,7 +91,8 @@ async function fetchAs(url, recorded, chromeApi, fetchImpl, init, read) {
           condition: {
             regexFilter: '^' + url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$',
             resourceTypes: ['xmlhttprequest'],
-            initiatorDomains: [chromeApi.runtime.id],
+            // (the extension's own host: its id in Chrome, its per-profile uuid in Firefox)
+            initiatorDomains: [ownHost(chromeApi)],
           },
         }],
       });
@@ -180,12 +192,8 @@ export class Controller {
    */
   attribute(details) {
     if (!details || (Number.isInteger(details.tabId) && details.tabId >= 0)) return details;
-    let origin;
-    try {
-      origin = new URL(details.initiator).origin;
-    } catch {
-      return undefined;   // not from a web page (the extension's own requests, for one)
-    }
+    const origin = initiatorOf(details);   // (Chrome's initiator, Firefox's originUrl)
+    if (!origin) return undefined;          // not from a web page (the extension's own requests, for one)
 
     if (!/^https?:/i.test(origin)) return undefined;
     const tabId = this.tabShowing(origin);
@@ -421,6 +429,7 @@ export class Controller {
     if (!menus?.create) return;
     menus.removeAll?.(() => {
       menus.create({ id: MENU_LINK, title: 'Download with ShadeNet', contexts: ['link', 'video', 'audio'] });
+      menus.create({ id: MENU_PAGE_LINKS, title: 'Download links with ShadeNet…', contexts: ['page', 'selection', 'frame'] });
     });
   }
 
@@ -518,6 +527,10 @@ export class Controller {
 
   async onContextMenu(info, tab) {
     await this.ready;
+    if (info.menuItemId === MENU_PAGE_LINKS) {
+      await this.grabLinks(info, tab);
+      return;
+    }
     if (info.menuItemId !== MENU_LINK) return;
     const url = info.linkUrl || info.srcUrl;
     if (isMagnetUrl(url)) {
@@ -537,6 +550,42 @@ export class Controller {
       this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
     } catch {
       this.flash('!', '#c4452d');
+    }
+  }
+
+  // ---- "Download links with ShadeNet…": the page's links, to pick from in the app -----------------------------
+
+  /**
+   * The links of the page (or of the selected part of it) go to ShadeNet's link grabber, with the browser's sign-in for each site
+   * they point to; the user picks the files there.
+   */
+  async grabLinks(info, tab) {
+    if (!tab?.id) return { accepted: false };
+    try {
+      if (!(await this.link.ensureConnected(CONNECT_TIMEOUT_MS))) throw new Error(this.link.lastError || 'app unavailable');
+      const [found] = await this.chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: [Number.isInteger(info.frameId) ? info.frameId : 0] },
+        func: collectLinks,
+        args: [Boolean(info.selectionText)],
+      });
+      const links = cleanLinks(found?.result?.links);
+      const message = {
+        type: 'grab',
+        id: this.link.newId(),
+        pageUrl: info.frameUrl || info.pageUrl || tab.url,
+        title: found?.result?.title || tab.title || '',
+        userAgent: this.userAgent,
+        links,
+        cookies: await cookiesByHost(this.chrome, links, cookiesToHeader),
+      };
+      this.trace(`grab: ${links.length} links from ${message.pageUrl}`);
+      const result = await this.link.request(message, ANSWER_TIMEOUT_MS);
+      this.flash(result?.accepted ? '✓' : '!', result?.accepted ? '#2e9d57' : '#c4452d');
+      return result;
+    } catch (error) {
+      this.trace(`grab failed: ${error?.message ?? error}`);
+      this.flash('!', '#c4452d');
+      return { accepted: false };
     }
   }
 
