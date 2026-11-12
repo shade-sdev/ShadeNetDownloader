@@ -16,7 +16,9 @@ public static partial class SevenZip
     /// The 7-Zip to use: the one chosen in Settings (a file, or the folder that holds it), else an update ShadeNet downloaded, else the
     /// copy that came with the program, else an installed 7-Zip, else one on the PATH.
     /// </summary>
-    public static string? Locate(string? configured, string? appFolder = null, string? pathVariable = null, string? userFolder = null)
+    /// <param name="programFolders">Where installed programs are; null = the real Program Files folders (tests pass none).</param>
+    public static string? Locate(string? configured, string? appFolder = null, string? pathVariable = null, string? userFolder = null,
+        IReadOnlyList<string>? programFolders = null)
     {
         if (!string.IsNullOrWhiteSpace(configured))
         {
@@ -32,9 +34,11 @@ public static partial class SevenZip
         foreach (var candidate in new[] { Path.Combine(appFolder, "tools", "7zip", Exe), Path.Combine(appFolder, "7zip", Exe), Path.Combine(appFolder, Exe) })
             if (File.Exists(candidate)) return candidate;
 
-        foreach (var programs in new[] { Environment.SpecialFolder.ProgramFiles, Environment.SpecialFolder.ProgramFilesX86 })
+        programFolders ??= [Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86)];
+        foreach (var programs in programFolders)
         {
-            var installed = Path.Combine(Environment.GetFolderPath(programs), "7-Zip", Exe);
+            if (string.IsNullOrEmpty(programs)) continue;
+            var installed = Path.Combine(programs, "7-Zip", Exe);
             if (File.Exists(installed)) return installed;
         }
 

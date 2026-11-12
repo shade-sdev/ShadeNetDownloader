@@ -161,8 +161,7 @@ public sealed partial class LinkGrabberViewModel : ObservableObject
             Kinds.Add(new LinkKindFilter(group.Key, group.Count(), Refilter));
 
         // a page with no file at all: its links are shown (another page may be what is wanted)
-        if (Rows.Count > 0 && Rows.All(r => !r.IsFile)) _onlyFiles = false;
-        OnPropertyChanged(nameof(OnlyFiles));
+        if (Rows.Count > 0 && Rows.All(r => !r.IsFile)) OnlyFiles = false;
         if (Rows.Count == 0) LoadError = "This page has no links to download.";
         Refilter();
     }
