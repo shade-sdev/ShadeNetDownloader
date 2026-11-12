@@ -16,6 +16,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# the user's own browser integration is put back as it was at the end (see host-registrations.ps1)
+. (Join-Path $PSScriptRoot "host-registrations.ps1")
+$savedHosts = Save-HostRegistrations
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $env:DOTNET_ROOT = "C:\Users\Shade\.dotnet"
 $appExe = Join-Path $root "src\ShadeNetDownloader\bin\Debug\net10.0-windows\ShadeNetDownloader.exe"
@@ -64,6 +67,7 @@ try {
 }
 finally {
     try { & $appExe --uninstall-browser-integration; Start-Sleep -Milliseconds 800 } catch { }
+    Restore-HostRegistrations $savedHosts
     if ($app -and -not $app.HasExited) { $app.Kill() }
     Get-Process ShadeNetDownloader -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt $scriptStart } | ForEach-Object { $_.Kill() }
     Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -like "*$profile*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }

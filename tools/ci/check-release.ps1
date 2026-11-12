@@ -48,7 +48,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::OpenRead($package)
 try {
     $names = $zip.Entries | Where-Object { $_.Name } | ForEach-Object { $_.FullName }
-    foreach ($must in "ShadeNetDownloader.exe", "Uninstall.exe", "NativeHost/ShadeNet.NativeHost.exe", "browser/chromium/manifest.json", "licenses/THIRD-PARTY-NOTICES.txt") {
+    foreach ($must in "ShadeNetDownloader.exe", "Uninstall.exe", "NativeHost/ShadeNet.NativeHost.exe", "browser/chromium/manifest.json", "browser/firefox/manifest.json", "licenses/THIRD-PARTY-NOTICES.txt") {
         if ($names -contains $must) { Ok "the package has $must" } else { Fail "the package lacks $must" }
     }
     $tools = @($names | Where-Object { $_.StartsWith("tools/") })

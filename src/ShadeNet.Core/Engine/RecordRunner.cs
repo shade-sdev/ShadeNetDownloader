@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Extensions.Logging;
 using ShadeNet.Core.Hls;
 using ShadeNet.Core.Models;
+using ShadeNet.Core.Net;
 using ShadeNet.Core.Util;
 
 namespace ShadeNet.Core.Engine;
@@ -28,6 +29,9 @@ internal sealed class RecordRunner : IJobRunner
     double _speed;
     long _lastSaved = Stopwatch.GetTimestamp();
     string? _note;
+
+    /// <summary>"Waiting for Proton VPN to connect…" while the chosen adapter is gone; null otherwise.</summary>
+    volatile string? _waiting;
 
     public RecordRunner(DownloadJob job, RunnerContext ctx)
     {
@@ -95,7 +99,21 @@ internal sealed class RecordRunner : IJobRunner
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8,
             };
-            foreach (var a in Ffmpeg.RecordArguments(_job.FinalUrl ?? _job.Url, part, _job.UserAgent ?? _ctx.Settings.UserAgent, _job.Referer, _job.Cookies, _job.Headers))
+            // bound to one adapter (Settings > Network): ffmpeg cannot bind itself, so it goes through a relay of ShadeNet's that is bound
+            // to it (and waits first while the adapter is gone)
+            if (NetworkLock.Resolve(_ctx.Settings).Offline)
+            {
+                await NetworkLock.WaitUntilOnlineAsync(_ctx.Settings, b =>
+                {
+                    _waiting = b.WaitingText;
+                    _ctx.Publish(MakeSnapshot(0));
+                }, stop).ConfigureAwait(false);
+                _waiting = null;
+            }
+
+            await using var relay = NetworkLock.Resolve(_ctx.Settings).Locked ? LocalRelay.Start(_ctx.Settings) : null;
+            foreach (var a in Ffmpeg.RecordArguments(_job.FinalUrl ?? _job.Url, part, _job.UserAgent ?? _ctx.Settings.UserAgent, _job.Referer, _job.Cookies, _job.Headers,
+                         relay?.Address))
                 info.ArgumentList.Add(a);
 
             using var process = new Process { StartInfo = info };
@@ -273,7 +291,7 @@ internal sealed class RecordRunner : IJobRunner
         var done = _job.State == DownloadState.Completed && _job.TotalSize is { } total ? total : Math.Max(_bytes, Data.BytesDone);
         return new JobSnapshot(_job.Id, _job.State, _job.FileName, _job.SaveDirectory, done, null, speed, null,
             _job.State == DownloadState.Downloading ? 1 : 0, Array.Empty<SegmentInfo>(), false, _job.Error, _job.ErrorKind, 0, 0, 0, 0, 0,
-            _note, 0, 0, true, Math.Max(_seconds, Data.SecondsDone));
+            _note, 0, 0, true, Math.Max(_seconds, Data.SecondsDone), Waiting: _waiting);
     }
 
     static void TryDelete(string path)

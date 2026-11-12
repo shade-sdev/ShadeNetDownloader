@@ -17,6 +17,9 @@ public enum ManagedTool
 {
     YtDlp,
     Ffmpeg,
+
+    /// <summary>7z.exe with its 7z.dll: unpacks finished archives.</summary>
+    SevenZip,
 }
 
 /// <summary>Where the program in use comes from.</summary>
@@ -38,7 +41,10 @@ public enum ToolSource
 }
 
 /// <param name="Current">The version in use; <c>null</c> when the tool is not installed at all.</param>
-public sealed record ToolUpdate(ManagedTool Tool, string? Current, string Latest, string AssetUrl, string ChecksumUrl, string AssetName, DateTimeOffset? Published)
+/// <param name="Sha256">The download's SHA-256 as the release page gives it (instead of a checksum file).</param>
+/// <param name="HelperUrl">A second download the update needs (7-Zip's standalone 7zr.exe, which unpacks its installer).</param>
+public sealed record ToolUpdate(ManagedTool Tool, string? Current, string Latest, string AssetUrl, string ChecksumUrl, string AssetName, DateTimeOffset? Published,
+    string? Sha256 = null, string? HelperUrl = null, string? HelperSha256 = null)
 {
     public string Name => ToolManager.NameOf(Tool);
 }
@@ -61,7 +67,7 @@ public interface IToolUpdates
 }
 
 /// <summary>
-/// Finds yt-dlp and ffmpeg (the user's choice, else a downloaded update, else the bundled copy, else the PATH), checks the
+/// Finds yt-dlp, ffmpeg and 7-Zip (the user's choice, else a downloaded update, else the bundled copy, else the PATH), checks the
 /// projects' release pages for newer versions, and installs an update into the user's own folder after the user agreed.
 /// Downloads are verified against the checksums published with the release before anything is replaced.
 /// </summary>
@@ -75,6 +81,7 @@ public sealed class ToolManager : IToolUpdates
     const string FfmpegApi = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest";
     const string FfmpegAsset = "ffmpeg-master-latest-win64-lgpl.zip";
     const string FfmpegDownload = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest";
+    const string SevenZipApi = "https://api.github.com/repos/ip7z/7zip/releases/latest";
 
     readonly EngineSettings _settings;
     readonly string _userTools;
@@ -97,24 +104,39 @@ public sealed class ToolManager : IToolUpdates
         _versionOf = versionOf ?? DefaultVersionOf;
     }
 
-    public static string NameOf(ManagedTool tool) => tool == ManagedTool.YtDlp ? "yt-dlp" : "ffmpeg";
+    public static string NameOf(ManagedTool tool) => tool switch
+    {
+        ManagedTool.YtDlp => "yt-dlp",
+        ManagedTool.Ffmpeg => "ffmpeg",
+        _ => "7-Zip",
+    };
 
-    static string ExeOf(ManagedTool tool) => NameOf(tool) + (OperatingSystem.IsWindows() ? ".exe" : "");
+    /// <summary>The tool's folder under tools\ (the bundled copy's and the user's).</summary>
+    static string FolderOf(ManagedTool tool) => tool == ManagedTool.SevenZip ? "7zip" : NameOf(tool);
 
-    string ConfiguredPath(ManagedTool tool) => (tool == ManagedTool.YtDlp ? _settings.YtDlpPath : _settings.FfmpegPath) ?? "";
+    static string ExeOf(ManagedTool tool) => (tool == ManagedTool.SevenZip ? "7z" : NameOf(tool)) + (OperatingSystem.IsWindows() ? ".exe" : "");
 
-    string UserExe(ManagedTool tool) => Path.Combine(_userTools, NameOf(tool), ExeOf(tool));
+    string ConfiguredPath(ManagedTool tool) => tool switch
+    {
+        ManagedTool.YtDlp => _settings.YtDlpPath,
+        ManagedTool.Ffmpeg => _settings.FfmpegPath,
+        _ => _settings.SevenZipPath,
+    } ?? "";
+
+    string UserExe(ManagedTool tool) => Path.Combine(_userTools, FolderOf(tool), ExeOf(tool));
 
     string? BundledExe(ManagedTool tool) =>
-        new[] { Path.Combine(_appFolder, "tools", NameOf(tool), ExeOf(tool)), Path.Combine(_appFolder, NameOf(tool), ExeOf(tool)), Path.Combine(_appFolder, ExeOf(tool)) }
+        new[] { Path.Combine(_appFolder, "tools", FolderOf(tool), ExeOf(tool)), Path.Combine(_appFolder, FolderOf(tool), ExeOf(tool)), Path.Combine(_appFolder, ExeOf(tool)) }
             .FirstOrDefault(File.Exists);
 
     // ---- which one is in use ----
 
-    public string? Find(ManagedTool tool) =>
-        tool == ManagedTool.YtDlp
-            ? YtDlp.Locate(_settings.YtDlpPath, _appFolder, _pathVariable, _userTools)
-            : Ffmpeg.Locate(_settings.FfmpegPath, _appFolder, _pathVariable, _userTools);
+    public string? Find(ManagedTool tool) => tool switch
+    {
+        ManagedTool.YtDlp => YtDlp.Locate(_settings.YtDlpPath, _appFolder, _pathVariable, _userTools),
+        ManagedTool.Ffmpeg => Ffmpeg.Locate(_settings.FfmpegPath, _appFolder, _pathVariable, _userTools),
+        _ => Archives.SevenZip.Locate(_settings.SevenZipPath, _appFolder, _pathVariable, _userTools),
+    };
 
     public ToolSource SourceOf(ManagedTool tool)
     {
@@ -149,6 +171,7 @@ public sealed class ToolManager : IToolUpdates
     static async Task<string?> DefaultVersionOf(ManagedTool tool, string exe, CancellationToken ct)
     {
         if (tool == ManagedTool.YtDlp) return await YtDlp.VersionAsync(exe, ct).ConfigureAwait(false);
+        if (tool == ManagedTool.SevenZip) return await Archives.SevenZip.VersionAsync(exe, ct).ConfigureAwait(false);
 
         try
         {
@@ -208,7 +231,48 @@ public sealed class ToolManager : IToolUpdates
         var source = SourceOf(tool);
         if (source is ToolSource.Custom or ToolSource.Path) return null;   // not ours to update
 
-        return tool == ManagedTool.YtDlp ? await CheckYtDlpAsync(ct).ConfigureAwait(false) : await CheckFfmpegAsync(ct).ConfigureAwait(false);
+        return tool switch
+        {
+            ManagedTool.YtDlp => await CheckYtDlpAsync(ct).ConfigureAwait(false),
+            ManagedTool.Ffmpeg => await CheckFfmpegAsync(ct).ConfigureAwait(false),
+            _ => await CheckSevenZipAsync(ct).ConfigureAwait(false),
+        };
+    }
+
+    /// <summary>
+    /// 7-Zip's own releases (github.com/ip7z/7zip, Igor Pavlov's): the x64 installer holds 7z.exe and 7z.dll, and the standalone 7zr.exe
+    /// unpacks it. GitHub gives each file's SHA-256, which is checked before anything is used.
+    /// </summary>
+    async Task<ToolUpdate?> CheckSevenZipAsync(CancellationToken ct)
+    {
+        using var json = await GetJsonAsync(SevenZipApi, ct).ConfigureAwait(false);
+        var latest = json.RootElement.TryGetProperty("tag_name", out var tag) ? tag.GetString() : null;
+        if (string.IsNullOrEmpty(latest) || !json.RootElement.TryGetProperty("assets", out var assets)) return null;
+
+        var current = await VersionAsync(ManagedTool.SevenZip, ct).ConfigureAwait(false);
+        if (current != null && !IsNewerVersion(latest, current)) return null;
+
+        var installer = $"7z{latest.Replace(".", "")}-x64.exe";
+        (string Url, string Sha256)? Asset(string name)
+        {
+            foreach (var a in assets.EnumerateArray())
+            {
+                if (!(a.TryGetProperty("name", out var n) && n.GetString() == name)) continue;
+                var digest = a.TryGetProperty("digest", out var d) ? d.GetString() : null;
+                var url = a.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
+                if (url == null || digest == null || !digest.StartsWith("sha256:", StringComparison.Ordinal)) return null;
+                return (url, digest["sha256:".Length..]);
+            }
+
+            return null;
+        }
+
+        if (Asset(installer) is not { } main || Asset("7zr.exe") is not { } helper) return null;
+        DateTimeOffset? published = json.RootElement.TryGetProperty("published_at", out var p)
+                                    && DateTimeOffset.TryParse(p.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var when)
+            ? when
+            : null;
+        return new ToolUpdate(ManagedTool.SevenZip, current, latest, main.Url, "", installer, published, main.Sha256, helper.Url, helper.Sha256);
     }
 
     async Task<ToolUpdate?> CheckYtDlpAsync(CancellationToken ct)
@@ -288,8 +352,15 @@ public sealed class ToolManager : IToolUpdates
         if (!bundledIsNewer) return;
         try
         {
-            File.Delete(user);
-            File.Delete(RecordPath(user));
+            if (tool == ManagedTool.SevenZip)
+            {
+                Directory.Delete(Path.GetDirectoryName(user)!, recursive: true);   // (7z.exe, 7z.dll and the rest go together)
+            }
+            else
+            {
+                File.Delete(user);
+                File.Delete(RecordPath(user));
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -302,7 +373,8 @@ public sealed class ToolManager : IToolUpdates
     public async Task<string> UpdateAsync(ToolUpdate update, CancellationToken ct)
     {
         var tool = update.Tool;
-        var folder = Path.Combine(_userTools, NameOf(tool));
+        if (tool == ManagedTool.SevenZip) return await UpdateSevenZipAsync(update, ct).ConfigureAwait(false);
+        var folder = Path.Combine(_userTools, FolderOf(tool));
         var target = UserExe(tool);
         var staged = Path.Combine(folder, "staged-" + ExeOf(tool));
         var temp = Path.Combine(Path.GetTempPath(), "shadenet-tool-" + Guid.NewGuid().ToString("N")[..8]);
@@ -363,8 +435,79 @@ public sealed class ToolManager : IToolUpdates
         }
     }
 
+    /// <summary>
+    /// 7-Zip: its installer and the standalone 7zr.exe are downloaded and checked; 7zr takes 7z.exe, 7z.dll and the licence out of the
+    /// installer (nothing is installed); the new 7z.exe must start before the files replace the ones in use.
+    /// </summary>
+    async Task<string> UpdateSevenZipAsync(ToolUpdate update, CancellationToken ct)
+    {
+        var folder = Path.Combine(_userTools, FolderOf(ManagedTool.SevenZip));
+        var temp = Path.Combine(Path.GetTempPath(), "shadenet-tool-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(temp);
+        try
+        {
+            var installer = Path.Combine(temp, update.AssetName);
+            await DownloadAsync(update.AssetUrl, installer, ct).ConfigureAwait(false);
+            await VerifyAsync(installer, update, ct).ConfigureAwait(false);
+            var helper = Path.Combine(temp, "7zr.exe");
+            await DownloadAsync(update.HelperUrl ?? throw new DownloadException(JobErrorKind.Tool, "The release has no 7zr.exe; nothing was installed."), helper, ct)
+                .ConfigureAwait(false);
+            await VerifyAsync(helper, update with { AssetName = "7zr.exe", Sha256 = update.HelperSha256 }, ct).ConfigureAwait(false);
+
+            var staged = Path.Combine(temp, "out");
+            var info = new ProcessStartInfo(helper) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "x", installer, "-o" + staged, "7z.exe", "7z.dll", "License.txt", "-y" }) info.ArgumentList.Add(a);
+            using (var process = Process.Start(info)!)
+            {
+                await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
+                await process.WaitForExitAsync(ct).ConfigureAwait(false);
+                if (process.ExitCode != 0 || !File.Exists(Path.Combine(staged, "7z.exe")) || !File.Exists(Path.Combine(staged, "7z.dll")))
+                    throw new DownloadException(JobErrorKind.Tool, "7-Zip's installer could not be unpacked; nothing was installed.");
+            }
+
+            // it must start before it replaces a program that works
+            var version = await _versionOf(ManagedTool.SevenZip, Path.Combine(staged, "7z.exe"), ct).ConfigureAwait(false)
+                          ?? throw new DownloadException(JobErrorKind.Tool, "The new 7-Zip does not start on this computer; the old one was kept.");
+
+            Directory.CreateDirectory(folder);
+            try
+            {
+                foreach (var name in new[] { "7z.dll", "License.txt", "7z.exe" })
+                    File.Copy(Path.Combine(staged, name), Path.Combine(folder, name), overwrite: true);
+            }
+            catch (IOException ex)
+            {
+                throw new DownloadException(JobErrorKind.Tool, "7-Zip is in use and cannot be replaced right now. Try again when no archive is being extracted.", ex);
+            }
+
+            WriteRecord(Path.Combine(folder, "7z.exe"), version, update.Published ?? DateTimeOffset.UtcNow);
+            return version;
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(temp, recursive: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // the system's temp cleaner gets it
+            }
+        }
+    }
+
     async Task VerifyAsync(string file, ToolUpdate update, CancellationToken ct)
     {
+        if (update.Sha256 != null)
+        {
+            string hash;
+            await using (var stream = File.OpenRead(file))
+                hash = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false)).ToLowerInvariant();
+            if (hash != update.Sha256.ToLowerInvariant())
+                throw new DownloadException(JobErrorKind.DataCorruption, $"The download of {update.Name} ({update.AssetName}) does not match its published checksum; nothing was installed.");
+            return;
+        }
+
         var sums = await GetStringAsync(update.ChecksumUrl, ct).ConfigureAwait(false);
         var line = sums.Split('\n').Select(l => l.Trim())
             .FirstOrDefault(l => l.EndsWith(update.AssetName, StringComparison.OrdinalIgnoreCase) && l.Length > update.AssetName.Length + 60);

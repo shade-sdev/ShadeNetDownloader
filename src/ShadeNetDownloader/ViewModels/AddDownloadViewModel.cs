@@ -164,6 +164,27 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             Run(() => FileName = FileNameHelper.Sanitize(_yt.Title) + src.Extension);   // the container follows the quality (mp4 or mkv)
     }
 
+    // ---- a web page: grab its links ----
+
+    RequestSpec? _pageSpec;
+
+    /// <summary>The link is a web page (not a file): the dialog offers to grab the links on it.</summary>
+    [ObservableProperty] bool _isWebPage;
+
+    /// <summary>The page whose links the user wants (the dialog closes, the link grabber opens for it); null otherwise.</summary>
+    public RequestSpec? GrabPage { get; private set; }
+
+    /// <summary>The dialog is to close without adding anything (the link grabber takes over).</summary>
+    public event Action? CloseRequested;
+
+    [RelayCommand]
+    void GrabLinks()
+    {
+        if (_pageSpec == null) return;
+        GrabPage = _pageSpec;
+        CloseRequested?.Invoke();
+    }
+
     // ---- a torrent ----
 
     TorrentInfo? _torrent;
@@ -287,7 +308,7 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         catch (Exception ex) when (ex is DownloadException or HttpRequestException or System.IO.IOException or UnauthorizedAccessException)
         {
             if (cts.IsCancellationRequested) return;
-            ProbeError = ex is HttpRequestException ? "Can't reach that address. Check the link and your connection." : ex.Message;
+            ProbeError = NetworkAdapterOfflineException.IsIn(ex) ? OfflineText(ex) : ex is HttpRequestException ? "Can't reach that address. Check the link and your connection." : ex.Message;
             ProbeHint = "";
             ProbeState = ProbeState.Failed;
             return;
@@ -437,6 +458,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         IsWebTorrent = false;
         TorrentNote = null;
         TorrentSwarmText = null;
+        IsWebPage = false;
+        _pageSpec = null;
         TorrentSelectionText = "";
         DownloadTorrentContents = true;
         ProbingText = "Checking the link…";
@@ -551,6 +574,9 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                 Resumable = result.AcceptsRanges;
             });
             Refine(FileName);
+            // a web page rather than a file: its links can be grabbed instead
+            _pageSpec = result.ContentType is "text/html" or "application/xhtml+xml" ? spec : null;
+            IsWebPage = _pageSpec != null;
             ProbeState = ProbeState.Ready;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -584,11 +610,11 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
                       "yt-dlp was not found. Run tools\\get-tools.ps1, or choose its location in Settings > Downloads.");
         try
         {
-            return await YtDlp.ResolveAsync(exe, url, ct).ConfigureAwait(false);
+            return await YtDlp.ResolveAsync(exe, url, ct, network: settings).ConfigureAwait(false);
         }
         catch (DownloadException ex) when (signIn != null && ex.Kind == JobErrorKind.Tool && !ex.Message.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
         {
-            return await YtDlp.ResolveAsync(exe, url, ct, cookies: signIn).ConfigureAwait(false);
+            return await YtDlp.ResolveAsync(exe, url, ct, cookies: signIn, network: settings).ConfigureAwait(false);
         }
     }
 
@@ -821,11 +847,20 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         };
     }
 
+    /// <summary>The chosen network adapter is not connected (Settings > Network): what the user is told.</summary>
+    static string OfflineText(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+            if (e is NetworkAdapterOfflineException offline) return offline.Message;
+        return ex.Message;
+    }
+
     static string Friendly(Exception ex) => ex switch
     {
         // ShadeNet's guess only when the server said nothing itself (it knows better: a disabled account is no expired link)
         HttpStatusException h => h.Message + (h.Kind == JobErrorKind.AddressExpired && h.ServerReason == null ? " The link may have expired or need you to be signed in." : ""),
         DownloadException d => d.Message,
+        _ when NetworkAdapterOfflineException.IsIn(ex) => OfflineText(ex),
         HttpRequestException { InnerException: SocketException } => "Can't reach that address. Check the link and your connection.",
         HttpRequestException h => h.Message.Contains("No such host", StringComparison.OrdinalIgnoreCase)
             ? "That web address does not exist." : "Can't reach that address. Check the link and your connection.",

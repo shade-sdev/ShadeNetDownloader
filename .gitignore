@@ -5,6 +5,7 @@ obj-*/
 .vs/
 *.user
 tools/ffmpeg/
+tools/7zip/
 extension/dist/
 extension/node_modules/
 .claude
@@ -12,3 +13,5 @@ extension/node_modules/
 .git
 docs/
 dist/
+# built add-ons and other release pieces
+/artifacts/

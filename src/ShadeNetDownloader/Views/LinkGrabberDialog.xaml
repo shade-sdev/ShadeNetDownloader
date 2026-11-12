@@ -1,0 +1,112 @@
+<ui:ContentDialog x:Class="ShadeNetDownloader.Views.LinkGrabberDialog"
+                  Style="{StaticResource {x:Type ui:ContentDialog}}"
+                  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                  xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+                  xmlns:vm="clr-namespace:ShadeNetDownloader.ViewModels"
+                  Title="Links on this page"
+                  PrimaryButtonText="{Binding PrimaryText}"
+                  PrimaryButtonIcon="{ui:SymbolIcon ArrowDownload24}"
+                  PrimaryButtonAppearance="Primary"
+                  SecondaryButtonText="Add to queue"
+                  CloseButtonText="Cancel"
+                  DefaultButton="Primary"
+                  DialogWidth="760" DialogMaxWidth="860"
+                  IsPrimaryButtonEnabled="{Binding CanAdd}"
+                  IsSecondaryButtonEnabled="{Binding CanAdd}">
+
+    <ui:ContentDialog.Resources>
+        <BooleanToVisibilityConverter x:Key="B2V" />
+
+        <DataTemplate DataType="{x:Type vm:GrabbedLinkRow}">
+            <Grid Margin="0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" VerticalAlignment="Center" MinWidth="0" Margin="0,0,8,0"
+                          AutomationProperties.Name="{Binding Name}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Url}" />
+                    <TextBlock Text="{Binding Caption}" FontSize="12" TextTrimming="CharacterEllipsis"
+                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+                <TextBlock Grid.Column="2" Text="{Binding Category}" FontSize="12" VerticalAlignment="Center" Margin="10,0,4,0"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+            </Grid>
+        </DataTemplate>
+    </ui:ContentDialog.Resources>
+
+    <StackPanel>
+        <TextBlock Text="{Binding PageTitle}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+        <TextBlock Text="{Binding PageUrl}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,10"
+                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" ToolTip="{Binding PageUrl}" />
+
+        <StackPanel Orientation="Horizontal" Margin="0,8" Visibility="{Binding IsLoading, Converter={StaticResource B2V}}">
+            <ui:ProgressRing IsIndeterminate="True" Width="20" Height="20" />
+            <TextBlock Text="Reading the page…" Margin="10,0,0,0" VerticalAlignment="Center" />
+        </StackPanel>
+        <TextBlock Text="{Binding LoadError}" TextWrapping="Wrap" Margin="0,4,0,8"
+                   Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                   Visibility="{Binding LoadError, Converter={StaticResource NullToCollapsed}}" />
+
+        <Grid Margin="0,0,0,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <ui:TextBox Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Narrow down by name or address"
+                        Icon="{ui:SymbolIcon Search24}" AutomationProperties.Name="Filter the links" />
+            <CheckBox Grid.Column="1" Content="Files only" IsChecked="{Binding OnlyFiles, Mode=TwoWay}" Margin="12,0,0,0" VerticalAlignment="Center"
+                      ToolTip="Hide links to other pages" />
+        </Grid>
+
+        <ItemsControl ItemsSource="{Binding Kinds}" Focusable="False" Margin="0,0,0,6">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <CheckBox Content="{Binding Label}" IsChecked="{Binding IsOn, Mode=TwoWay}" Margin="0,0,14,4" MinWidth="0" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border BorderThickness="1" CornerRadius="6" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+            <ListBox ItemsSource="{Binding Shown}" Height="320" BorderThickness="0" Background="Transparent"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="Links">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                        <Setter Property="Padding" Value="8,2" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+        </Border>
+
+        <Grid Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="{Binding Summary}" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <ui:Button Grid.Column="1" Content="Choose all shown" Command="{Binding SelectShownCommand}" Margin="0,0,8,0" />
+            <ui:Button Grid.Column="2" Content="Choose none" Command="{Binding SelectNoneCommand}" />
+        </Grid>
+
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <CheckBox Content="Put them in one folder:" IsChecked="{Binding IntoFolder, Mode=TwoWay}" VerticalAlignment="Center" />
+            <ui:TextBox Grid.Column="1" Text="{Binding FolderName, UpdateSourceTrigger=PropertyChanged}" Margin="8,0,0,0"
+                        IsEnabled="{Binding IntoFolder}" AutomationProperties.Name="Folder name" />
+        </Grid>
+    </StackPanel>
+</ui:ContentDialog>

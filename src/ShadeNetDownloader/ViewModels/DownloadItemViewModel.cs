@@ -34,6 +34,9 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     /// <summary>A torrent whose files are known: they can be checked against it again.</summary>
     public bool CanRecheck => IsTorrent && Job.Torrent?.Files != null;
 
+    /// <summary>A finished archive (or a part of one): it can be extracted.</summary>
+    public bool CanExtract => State == DownloadState.Completed && ShadeNet.Core.DownloadManager.IsArchive(Job);
+
     public DownloadJob Job { get; }
     public Guid Id => Job.Id;
 
@@ -146,6 +149,7 @@ public sealed partial class DownloadItemViewModel : ObservableObject
         OnPropertyChanged(nameof(IsRecording));
         OnPropertyChanged(nameof(CanShareAgain));
         OnPropertyChanged(nameof(CanRecheck));
+        OnPropertyChanged(nameof(CanExtract));
     }
 
     /// <summary>Applies a fresh engine snapshot (called on the UI thread, at most ~10×/s).</summary>
@@ -213,12 +217,20 @@ public sealed partial class DownloadItemViewModel : ObservableObject
             case DownloadState.Completed:
                 StatusText = "Completed";
                 DetailText = $"{(total is { } ct ? ByteFormat.Size(ct) : done)}  ·  {Host}"
-                             + (Job.CompletedAt is { } when ? $"  ·  {WhenText(when)}" : "");
+                             + (Job.CompletedAt is { } when ? $"  ·  {WhenText(when)}" : "")
+                             + (s.Note is { } extraction ? $"  ·  {extraction}" : "");   // an archive's unpacking
                 break;
             case DownloadState.Failed:
                 StatusText = "Failed";
                 DetailText = s.Error ?? "The download failed.";
                 break;
+        }
+
+        // the chosen network adapter is gone (Settings > Network): the download is held, not failing
+        if (s.Waiting != null && s.State is DownloadState.Downloading or DownloadState.Probing)
+        {
+            StatusText = "Waiting";
+            DetailText = s.Waiting;
         }
 
         if (s.Torrent is { } torrent) DescribeTorrent(s, torrent, of);
@@ -356,6 +368,10 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     /// <summary>A finished torrent: share it with others again, until the sharing limits.</summary>
     [RelayCommand]
     Task ShareAgain() => _owner.ShareAgainAsync(this);
+
+    /// <summary>A finished archive: unpack it now (its password is asked for when it has one).</summary>
+    [RelayCommand]
+    Task Extract() => _owner.CheckExtractAsync(this);
 
     /// <summary>A torrent: check every piece on the disk again; whatever is missing or damaged is downloaded again.</summary>
     [RelayCommand]

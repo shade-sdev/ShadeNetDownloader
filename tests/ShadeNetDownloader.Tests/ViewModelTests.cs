@@ -30,6 +30,19 @@ sealed class FakeDialogs : IDialogService
         Opened.Add(links);
         return Task.CompletedTask;
     }
+
+    public List<ShadeNet.Core.Links.GrabbedPage?> Grabbed { get; } = new();
+
+    public Task ShowGrabberAsync(ShadeNet.Core.Links.GrabbedPage? page, string? pageUrl = null, ShadeNet.Core.Net.RequestSpec? web = null,
+        IReadOnlyDictionary<string, string>? cookiesByHost = null, string? userAgent = null)
+    {
+        Grabbed.Add(page);
+        return Task.CompletedTask;
+    }
+
+    public string? Password { get; set; }
+
+    public Task<string?> AskPasswordAsync(string fileName, bool wrongBefore) => Task.FromResult(Password);
 }
 
 public class ViewModelTests

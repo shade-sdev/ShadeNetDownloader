@@ -44,6 +44,9 @@ public interface ICaptureUi
     /// <summary>Show the Add dialog with these links (a magnet link or a .torrent file Windows opened with ShadeNet).</summary>
     void OpenLinks(IReadOnlyList<string> links);
 
+    /// <summary>Show the link grabber with a page's links (and the browser's sign-in per site).</summary>
+    void ShowGrabber(ShadeNet.Core.Links.GrabbedPage page, IReadOnlyDictionary<string, string>? cookiesByHost, string? userAgent);
+
     void BringToFront();
 
     /// <summary>Quit the program for real (not just hide it in the tray).</summary>

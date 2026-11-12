@@ -50,6 +50,13 @@ internal static class HttpFetcher
             MaxResponseDrainSize = 0,
             UseCookies = false,                                  // cookies come from the capture, never leak across hosts
             AllowAutoRedirect = false,                           // redirects are followed by hand so credentials stay on-host
+            // every connection (to a site, or to the proxy) leaves through the chosen adapter, or not at all (Settings > Network)
+            ConnectCallback = async (context, ct) =>
+            {
+                var socket = await NetworkLock.ConnectAsync(context.DnsEndPoint.Host, context.DnsEndPoint.Port,
+                    System.Net.Sockets.AddressFamily.Unspecified, NetworkLock.Resolve(settings), ct).ConfigureAwait(false);
+                return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+            },
         };
 
         switch (settings.Proxy)

@@ -26,18 +26,24 @@ public static partial class UrlParser
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var found = new List<(int At, string Link)>();
+
+        // magnet links first: a magnet link names its trackers, often written out as plain addresses ("&tr=http://tracker/announce"),
+        // and those are part of it, not links of their own
+        var magnets = new List<(int Start, int End)>();
+        foreach (Match m in MagnetRegex().Matches(text))
+        {
+            magnets.Add((m.Index, m.Index + m.Length));
+            var magnet = m.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!');
+            if (magnet.Contains("xt=", StringComparison.OrdinalIgnoreCase) && seen.Add(magnet)) found.Add((m.Index, magnet));
+        }
+
         foreach (Match m in UrlRegex().Matches(text))
         {
+            if (magnets.Any(s => m.Index > s.Start && m.Index < s.End)) continue;
             // Trailing punctuation that belongs to the sentence, not the link.
             var url = m.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!', '?');
             if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")) continue;
             if (seen.Add(url)) found.Add((m.Index, url));
-        }
-
-        foreach (Match m in MagnetRegex().Matches(text))
-        {
-            var magnet = m.Value.TrimEnd('.', ',', ';', ')', ']', '}', '!');
-            if (magnet.Contains("xt=", StringComparison.OrdinalIgnoreCase) && seen.Add(magnet)) found.Add((m.Index, magnet));
         }
 
         foreach (Match m in TorrentFileRegex().Matches(text))

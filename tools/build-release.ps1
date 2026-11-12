@@ -53,12 +53,13 @@ $stamp = @("-p:Version=$version", "-p:UpdateRepository=$UpdateRepository")
 Write-Host "ShadeNet Downloader $version ($Runtime), updates from $UpdateRepository"
 
 Step "helper programs"
-if (-not (Test-Path "tools\yt-dlp\yt-dlp.exe") -or -not (Test-Path "tools\ffmpeg\ffmpeg.exe")) {
+if (-not (Test-Path "tools\yt-dlp\yt-dlp.exe") -or -not (Test-Path "tools\ffmpeg\ffmpeg.exe") -or -not (Test-Path "tools\7zip\7z.exe")) {
     & (Join-Path $PSScriptRoot "get-tools.ps1") -Tool all
 }
-foreach ($t in "tools\yt-dlp\yt-dlp.exe", "tools\ffmpeg\ffmpeg.exe") { if (-not (Test-Path $t)) { throw "$t is missing" } }
+foreach ($t in "tools\yt-dlp\yt-dlp.exe", "tools\ffmpeg\ffmpeg.exe", "tools\7zip\7z.exe", "tools\7zip\7z.dll") { if (-not (Test-Path $t)) { throw "$t is missing" } }
 Write-Host "yt-dlp $(& tools\yt-dlp\yt-dlp.exe --version)"
 Write-Host (& tools\ffmpeg\ffmpeg.exe -version | Select-Object -First 1)
+Write-Host ((& tools\7zip\7z.exe | Where-Object { $_ } | Select-Object -First 1).Trim())
 
 if (-not $SkipTests) {
     Step "tests"

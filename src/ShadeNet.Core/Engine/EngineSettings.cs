@@ -137,7 +137,16 @@ public sealed class EngineSettings
         TorrentUploadLimit = Math.Max(0, TorrentUploadLimit);
         TorrentPort = TorrentPort is >= 0 and <= 65535 ? TorrentPort : 0;
         if (!Enum.IsDefined(TorrentEncryption)) TorrentEncryption = TorrentEncryption.Prefer;
-        TorrentNetworkAdapter = string.IsNullOrWhiteSpace(TorrentNetworkAdapter) ? null : TorrentNetworkAdapter.Trim();
+        // (the adapter used to be a torrents-only setting: a choice made there now holds for everything)
+        if (string.IsNullOrWhiteSpace(NetworkAdapter) && !string.IsNullOrWhiteSpace(TorrentNetworkAdapter))
+        {
+            NetworkAdapter = TorrentNetworkAdapter;
+            NetworkAdapterName ??= TorrentNetworkAdapterName;
+        }
+
+        TorrentNetworkAdapter = null;
+        TorrentNetworkAdapterName = null;
+        NetworkAdapter = string.IsNullOrWhiteSpace(NetworkAdapter) ? null : NetworkAdapter.Trim();
         InvalidateCategories();
     }
 
@@ -162,8 +171,23 @@ public sealed class EngineSettings
     /// <summary>Total speed of all downloads in bytes per second; 0 = no limit.</summary>
     public long GlobalSpeedLimit { get; set; }
 
+    /// <summary>
+    /// The network adapter ShadeNet is bound to (its Windows id), e.g. a VPN's: downloads, videos, recordings and torrents use only its
+    /// addresses, and wait (they never fall back to another network) while it is not connected. Null: any.
+    /// </summary>
+    public string? NetworkAdapter { get; set; }
+
+    /// <summary>The name of <see cref="NetworkAdapter"/> when it was chosen, shown while it is not there.</summary>
+    public string? NetworkAdapterName { get; set; }
+
     public bool AutoResumeOnStartup { get; set; }
     public bool WriteMarkOfTheWeb { get; set; } = true;
+
+    /// <summary>A finished archive (zip, 7z, rar, tar …, one file or all its parts) is unpacked into a folder next to it.</summary>
+    public bool ExtractArchives { get; set; }
+
+    /// <summary>After it was unpacked, the archive (all its parts) goes to the Recycle Bin (the app does that).</summary>
+    public bool DeleteArchivesAfterExtracting { get; set; }
 
     /// <summary>ffmpeg for joining streams: a file, or a folder that holds it. Empty = look next to the program, then on the PATH.</summary>
     public string FfmpegPath { get; set; } = "";
@@ -179,6 +203,11 @@ public sealed class EngineSettings
     public string? FindFfmpeg() => ShadeNet.Core.Hls.Ffmpeg.Locate(FfmpegPath, userFolder: ToolsFolder);
 
     public string? FindYtDlp() => ShadeNet.Core.Sites.YtDlp.Locate(YtDlpPath, userFolder: ToolsFolder);
+
+    /// <summary>7-Zip (7z.exe, with its 7z.dll) for unpacking archives: a file, or a folder that holds it. Empty = look for it.</summary>
+    public string SevenZipPath { get; set; } = "";
+
+    public string? FindSevenZip() => ShadeNet.Core.Archives.SevenZip.Locate(SevenZipPath, userFolder: ToolsFolder);
 
     /// <summary>A live recording stops by itself after this long (zero = it goes on until the stream ends or the user stops it).</summary>
     public TimeSpan MaxRecordingLength { get; set; } = TimeSpan.Zero;
@@ -314,13 +343,11 @@ public sealed class EngineSettings
     /// </summary>
     public bool TorrentUseProxy { get; set; } = true;
 
-    /// <summary>
-    /// The network adapter torrents are bound to (its Windows id), e.g. a VPN's: torrents use only its addresses, and stop (they do not
-    /// fall back to another network) while it is not connected. Null: any.
-    /// </summary>
+    /// <summary>The adapter of an earlier version's torrents-only setting; read once, moved to <see cref="NetworkAdapter"/>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TorrentNetworkAdapter { get; set; }
 
-    /// <summary>The name of <see cref="TorrentNetworkAdapter"/> when it was chosen, shown while it is not there.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TorrentNetworkAdapterName { get; set; }
 
     /// <summary>Whether connections to peers are encrypted.</summary>

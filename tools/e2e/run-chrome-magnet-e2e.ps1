@@ -17,6 +17,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# the user's own browser integration is put back as it was at the end (see host-registrations.ps1)
+. (Join-Path $PSScriptRoot "host-registrations.ps1")
+$savedHosts = Save-HostRegistrations
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $dotnet = if ($env:DOTNET_ROOT) { $env:DOTNET_ROOT } else { "C:\Users\Shade\.dotnet" }
 $env:DOTNET_ROOT = $dotnet
@@ -94,6 +97,7 @@ finally {
     if (Test-Path $crash) { Write-Host "=== crash.log"; Get-Content $crash | Select-Object -First 25 | ForEach-Object { Write-Host $_ } }
     if ($app -and -not $app.HasExited) { $app.Kill() }   # (only this run's own instance)
     try { & $appExe --uninstall-browser-integration; Start-Sleep -Milliseconds 800 } catch { }
+    Restore-HostRegistrations $savedHosts
     foreach ($p in @($swarm, $server)) { if ($p -and -not $p.HasExited) { $p.Kill() } }
     # the native host this run's Chrome started (it ends with Chrome; one left over is this run's: started from this build's folder)
     Get-Process ShadeNet.NativeHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -like (Join-Path $root "src\ShadeNetDownloader\bin\$Config\*") } | ForEach-Object { $_.Kill() }

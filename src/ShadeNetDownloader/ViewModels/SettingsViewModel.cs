@@ -94,12 +94,15 @@ public sealed partial class SettingsViewModel : ObservableObject
         foreach (var name in new[] { nameof(IsGeneral), nameof(IsDownloads), nameof(IsCategories), nameof(IsQueue), nameof(IsNetwork), nameof(IsBrowser), nameof(IsAppearance), nameof(IsAbout) })
             OnPropertyChanged(name);
 
-        // what opens magnet links may have been changed in Windows' Default apps meanwhile; adapters come and go; the proxy may be new
+        // what opens magnet links may have been changed in Windows' Default apps meanwhile; the proxy or the adapter may be new
         if (value == SettingsSection.Downloads)
         {
             Downloads.RefreshAssociations();
-            Downloads.RefreshAdapters();
+            Downloads.RefreshTorrentNetwork();
         }
+
+        // adapters come and go (a VPN connects)
+        if (value == SettingsSection.Network) Network.RefreshAdapters();
     }
 
     public bool IsGeneral { get => Section == SettingsSection.General; set { if (value) Section = SettingsSection.General; } }
@@ -337,16 +340,64 @@ public sealed partial class SettingsViewModel : ObservableObject
         ExtensionNote = TryCopyFolder() ? "The folder is copied: press Ctrl+V in the box that opens." : "";
     }
 
+    // ---- Firefox ----
+
+    /// <summary>Firefox is installed: its own way of adding the add-on is shown.</summary>
+    public bool HasFirefox { get; } = ExtensionBrowserFinder.IsInstalled(ExtensionBrowserFinder.Firefox);
+
+    /// <summary>The release carries the add-on signed by Mozilla (Firefox keeps it); without it, Firefox can only load it until it closes.</summary>
+    public bool HasSignedFirefoxAddOn => _installer.FirefoxPackage != null;
+
+    /// <summary>The file Firefox's "Load Temporary Add-on…" asks for.</summary>
+    public string FirefoxManifest => Path.Combine(_installer.FirefoxExtensionFolder, "manifest.json");
+
+    public string FirefoxSteps => HasSignedFirefoxAddOn
+        ? "Click Add to Firefox: Firefox opens the add-on and asks whether to add it. Click Add."
+        : "Firefox keeps only add-ons signed by Mozilla, and this build of ShadeNet does not carry the signed one yet. Until then Firefox can "
+          + "run it until it closes: click Add to Firefox, then on the page that opens click Load Temporary Add-on…, press Ctrl+V in the "
+          + "file box (the path below is copied for you) and Open.";
+
+    [RelayCommand]
+    void AddToFirefox()
+    {
+        var firefox = ExtensionBrowserFinder.Firefox;
+        if (_installer.FirefoxPackage is { } package)
+        {
+            IntegrationError = ExtensionBrowserFinder.TryOpen(firefox, package) ? "" : "Could not start Firefox. Open the add-on file in Firefox yourself: " + package;
+            ExtensionNote = "";
+            return;
+        }
+
+        if (!File.Exists(FirefoxManifest))
+        {
+            IntegrationError = "The Firefox add-on is missing from this installation.";
+            return;
+        }
+
+        if (!ExtensionBrowserFinder.TryOpen(firefox, firefox.ExtensionsAddress))
+        {
+            IntegrationError = $"Could not start Firefox. Open it yourself and type {firefox.ExtensionsAddress} in the address bar.";
+            return;
+        }
+
+        IntegrationError = "";
+        ExtensionNote = TryCopy(FirefoxManifest)
+            ? "The add-on's path is copied: click Load Temporary Add-on… and press Ctrl+V in the file box."
+            : "Click Load Temporary Add-on… and choose the file shown above.";
+    }
+
     [RelayCommand]
     void CopyExtensionFolder() =>
         ExtensionNote = TryCopyFolder() ? "Copied. Press Ctrl+V in the box that opens." : "Could not copy. Select the folder above and press Ctrl+C.";
 
     /// <summary>Another program may hold the clipboard for a moment; the folder is shown in a box too, so a failed copy is no error.</summary>
-    bool TryCopyFolder()
+    bool TryCopyFolder() => TryCopy(ExtensionFolder);
+
+    static bool TryCopy(string text)
     {
         try
         {
-            Clipboard.SetText(ExtensionFolder);
+            Clipboard.SetText(text);
             return true;
         }
         catch (System.Runtime.InteropServices.ExternalException)

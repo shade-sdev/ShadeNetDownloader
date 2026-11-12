@@ -35,13 +35,21 @@ public sealed partial class ToolRowViewModel : ObservableObject
         _ = RefreshAsync();
     }
 
-    public string Title => _tool == ManagedTool.YtDlp ? "yt-dlp" : "ffmpeg";
+    public string Title => ToolManager.NameOf(_tool);
 
-    public string Description => _tool == ManagedTool.YtDlp
-        ? "Finds the videos behind YouTube pages. ShadeNet downloads them itself."
-        : "Joins video streams into one file, without re-encoding.";
+    public string Description => _tool switch
+    {
+        ManagedTool.YtDlp => "Finds the videos behind YouTube pages. ShadeNet downloads them itself.",
+        ManagedTool.Ffmpeg => "Joins video streams into one file, without re-encoding.",
+        _ => "Unpacks finished archives: zip, 7z, rar (also with a password, and in several parts), tar and the rest.",
+    };
 
-    string Configured => (_tool == ManagedTool.YtDlp ? _settings.Current.Engine.YtDlpPath : _settings.Current.Engine.FfmpegPath) ?? "";
+    string Configured => _tool switch
+    {
+        ManagedTool.YtDlp => _settings.Current.Engine.YtDlpPath,
+        ManagedTool.Ffmpeg => _settings.Current.Engine.FfmpegPath,
+        _ => _settings.Current.Engine.SevenZipPath,
+    } ?? "";
 
     [ObservableProperty] string _pathText = "";
     [ObservableProperty] string _status = "";
@@ -61,8 +69,18 @@ public sealed partial class ToolRowViewModel : ObservableObject
     {
         if (_loading) return;
         var path = (value ?? "").Trim().Trim('"');
-        if (_tool == ManagedTool.YtDlp) _settings.Current.Engine.YtDlpPath = path;
-        else _settings.Current.Engine.FfmpegPath = path;
+        switch (_tool)
+        {
+            case ManagedTool.YtDlp:
+                _settings.Current.Engine.YtDlpPath = path;
+                break;
+            case ManagedTool.Ffmpeg:
+                _settings.Current.Engine.FfmpegPath = path;
+                break;
+            default:
+                _settings.Current.Engine.SevenZipPath = path;
+                break;
+        }
         _settings.Save();
         _changed();
         _ = RefreshAsync();

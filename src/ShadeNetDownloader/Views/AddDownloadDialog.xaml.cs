@@ -13,5 +13,8 @@ public partial class AddDownloadDialog : ContentDialog
 
         // The link box is where the user starts typing/pasting.
         Loaded += (_, _) => UrlBox.Focus();
+
+        // "Grab the links on it": this dialog closes, the link grabber opens (see DialogService)
+        viewModel.CloseRequested += () => Hide();
     }
 }

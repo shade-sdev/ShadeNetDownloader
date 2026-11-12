@@ -46,6 +46,7 @@ public sealed class TestServer : IAsyncDisposable
     readonly ConcurrentDictionary<string, int> _counters = new();
     readonly ConcurrentQueue<RequestRecord> _log = new();
     readonly ConcurrentDictionary<string, string> _pages = new();
+    readonly ConcurrentDictionary<string, byte[]> _files = new();
     long _bytesServed;
     int _requestCount;
 
@@ -122,6 +123,31 @@ public sealed class TestServer : IAsyncDisposable
             ctx.Response.Headers.Location = "/landing";
             return Task.CompletedTask;
         });
+        app.MapGet("/bytes/{id}/{name}", async (HttpContext ctx, string id, string name) =>
+        {
+            self!.Record(ctx);
+            if (!self._files.TryGetValue(id, out var bytes))
+            {
+                ctx.Response.StatusCode = 404;
+                return;
+            }
+
+            ctx.Response.ContentType = "application/octet-stream";
+            ctx.Response.Headers.AcceptRanges = "bytes";
+            long from = 0, to = bytes.Length - 1;
+            var range = ctx.Request.Headers.Range.ToString();
+            if (range.StartsWith("bytes=", StringComparison.Ordinal))
+            {
+                var parts = range[6..].Split('-');
+                from = long.Parse(parts[0]);
+                if (parts.Length > 1 && parts[1].Length > 0) to = Math.Min(to, long.Parse(parts[1]));
+                ctx.Response.StatusCode = 206;
+                ctx.Response.Headers.ContentRange = $"bytes {from}-{to}/{bytes.Length}";
+            }
+
+            ctx.Response.ContentLength = to - from + 1;
+            await ctx.Response.Body.WriteAsync(bytes.AsMemory((int)from, (int)(to - from + 1)));
+        });
         app.MapGet("/pages/{id}", async (HttpContext ctx, string id) =>
         {
             self!.Record(ctx);
@@ -162,6 +188,14 @@ public sealed class TestServer : IAsyncDisposable
     }
 
     /// <summary>Serves <paramref name="html"/> at a new address (an "owner page" that lists download links).</summary>
+    /// <summary>Serves these bytes as a file of this name (with ranges, like a file server).</summary>
+    public string AddFile(byte[] bytes, string name)
+    {
+        var id = Guid.NewGuid().ToString("N")[..8];
+        _files[id] = bytes;
+        return $"{BaseUrl}/bytes/{id}/{Uri.EscapeDataString(name)}";
+    }
+
     public string AddPage(string html)
     {
         var id = Guid.NewGuid().ToString("N")[..8];

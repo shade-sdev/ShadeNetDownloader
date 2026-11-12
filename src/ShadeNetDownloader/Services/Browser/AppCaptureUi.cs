@@ -34,6 +34,19 @@ public sealed class AppCaptureUi : ICaptureUi
     public void Notify(string message, ToastKind kind) => Ui?.BeginInvoke(() => _toasts.Show(message, kind));
 
     /// <summary>Like a capture, the user already chose this (in Explorer, in a browser): it waits for a dialog that is open.</summary>
+    public void ShowGrabber(ShadeNet.Core.Links.GrabbedPage page, IReadOnlyDictionary<string, string>? cookiesByHost, string? userAgent) =>
+        Ui?.BeginInvoke(async () =>
+        {
+            try
+            {
+                await _dialogs.ShowGrabberAsync(page, null, null, cookiesByHost, userAgent);
+            }
+            catch (Exception)
+            {
+                // a dialog that could not open: the browser's links are simply not shown
+            }
+        });
+
     public void OpenLinks(IReadOnlyList<string> links) =>
         Ui?.BeginInvoke(async () =>
         {

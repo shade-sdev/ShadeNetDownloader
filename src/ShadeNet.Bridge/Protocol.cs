@@ -61,6 +61,9 @@ public static class MessageTypes
     // extension → app
     public const string Hello = "hello";
     public const string Capture = "capture";
+
+    /// <summary>"Download links with ShadeNet…": a page's links for the link grabber (answered with a capture-result).</summary>
+    public const string Grab = "grab";
     public const string Ping = "ping";
 
     // host → app (added by the native host itself)
@@ -201,6 +204,26 @@ public sealed record HostError
     public string Type { get; init; } = MessageTypes.HostError;
     public string Code { get; init; } = "";
     public string Message { get; init; } = "";
+}
+
+/// <summary>A page's links the browser sends to the link grabber (untrusted: checked and capped by the app).</summary>
+public sealed class GrabRequest
+{
+    public string Type { get; init; } = MessageTypes.Grab;
+    public string Id { get; init; } = "";
+    public string PageUrl { get; init; } = "";
+    public string? Title { get; init; }
+    public string? UserAgent { get; init; }
+    public GrabbedLinkItem[]? Links { get; init; }
+
+    /// <summary>The browser's Cookie header value for each site the links point to (host → cookies).</summary>
+    public Dictionary<string, string>? Cookies { get; init; }
+}
+
+public sealed class GrabbedLinkItem
+{
+    public string Url { get; init; } = "";
+    public string? Text { get; init; }
 }
 
 /// <summary>A received frame: its <c>type</c> and the parsed JSON.</summary>

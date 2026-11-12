@@ -41,10 +41,15 @@ public sealed partial class DownloadsViewModel : ObservableObject
     NavItem _filter = new(NavKind.All, "All downloads", Wpf.Ui.Controls.SymbolRegular.ArrowDownload24);
     string _search = "";
 
-    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null, SettingsService? settings = null)
+    readonly IDialogService? _dialogs;
+
+    /// <param name="dialogs">For an archive's password (none in some tests: Extract then says it needs one).</param>
+    public DownloadsViewModel(DownloadManager manager, ToastService toasts, IBrowserBridge? bridge = null, SettingsService? settings = null,
+        IDialogService? dialogs = null)
     {
         _manager = manager;
         _toasts = toasts;
+        _dialogs = dialogs;
         _bridge = bridge;
         _settings = settings;
         _sort = settings?.Current.Sort ?? new ListSortSettings();
@@ -68,6 +73,7 @@ public sealed partial class DownloadsViewModel : ObservableObject
         _manager.JobRemoved += id => _ui.BeginInvoke(() => DropItem(id));
         _manager.JobUpdated += s => _pending[s.Id] = s;
         _manager.JobCompleted += OnCompleted;
+        _manager.ArchiveExtracted += (job, set, result) => _ui.BeginInvoke(() => OnExtracted(job, set, result));
 
         _tick = new DispatcherTimer(DispatcherPriority.Background, _ui) { Interval = TimeSpan.FromMilliseconds(100) };
         _tick.Tick += (_, _) => ApplyPending();
@@ -384,6 +390,59 @@ public sealed partial class DownloadsViewModel : ObservableObject
             if (!_byId.TryGetValue(id, out var item)) continue; // card not created yet: keep for the next tick
             _pending.TryRemove(new KeyValuePair<Guid, JobSnapshot>(id, snapshot));
             item.Update(snapshot);
+        }
+    }
+
+    // ---- archives ----
+
+    readonly HashSet<Guid> _extractingByHand = new();
+
+    /// <summary>An archive was unpacked (or could not be): the user is told, and the archive goes to the Recycle Bin when Settings say so.</summary>
+    internal void OnExtracted(DownloadJob job, ShadeNet.Core.Archives.ArchiveSet set, ShadeNet.Core.Archives.ExtractResult result)
+    {
+        var name = set.Parts.Count > 1 ? $"{set.Stem} ({set.Parts.Count} parts)" : Path.GetFileName(set.First);
+        switch (result.Status)
+        {
+            case ShadeNet.Core.Archives.ExtractStatus.Extracted:
+                var recycled = _manager.Settings.DeleteArchivesAfterExtracting && RecycleBin.Send(set.Parts);
+                _toasts.Show($"Extracted {name}" + (recycled ? " (the archive is in the Recycle Bin)" : ""), ToastKind.Success, "Open folder",
+                    () => OpenPath(result.Folder!));
+                break;
+            case ShadeNet.Core.Archives.ExtractStatus.NeedsPassword or ShadeNet.Core.Archives.ExtractStatus.WrongPassword:
+                // (asked by hand: the password box is open already)
+                if (_extractingByHand.Contains(job.Id)) break;
+                _toasts.Show($"{name} is locked with a password.", ToastKind.Info, "Enter password", () => _ = ExtractAsync(job.Id, job.FileName));
+                break;
+            default:
+                _toasts.Show($"Could not extract {name}: {result.Message}", ToastKind.Error);
+                break;
+        }
+    }
+
+    /// <summary>"Extract": unpacks a finished archive now, asking for its password when it has one.</summary>
+    public Task CheckExtractAsync(DownloadItemViewModel item) => ExtractAsync(item.Id, item.FileName);
+
+    async Task ExtractAsync(Guid id, string fileName)
+    {
+        if (!_extractingByHand.Add(id)) return;
+        try
+        {
+            var result = await _manager.ExtractAsync(id);
+            while (result.Status is ShadeNet.Core.Archives.ExtractStatus.NeedsPassword or ShadeNet.Core.Archives.ExtractStatus.WrongPassword)
+            {
+                var password = _dialogs == null ? null : await _dialogs.AskPasswordAsync(fileName, result.Status == ShadeNet.Core.Archives.ExtractStatus.WrongPassword);
+                if (password == null)
+                {
+                    if (_dialogs == null) _toasts.Show($"{fileName} is locked with a password.", ToastKind.Info);
+                    return;
+                }
+
+                result = await _manager.ExtractAsync(id, password);
+            }
+        }
+        finally
+        {
+            _extractingByHand.Remove(id);
         }
     }
 

@@ -39,10 +39,11 @@
         <Content Include="Assets\Icons\*" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
-    <!-- yt-dlp and ffmpeg (tools\get-tools.ps1) travel with the app when they have been fetched; the installer ships them. -->
+    <!-- yt-dlp, ffmpeg and 7-Zip (tools\get-tools.ps1) travel with the app when they have been fetched; the installer ships them. -->
     <ItemGroup>
         <Content Include="..\..\tools\yt-dlp\*" Link="tools\yt-dlp\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="..\..\tools\ffmpeg\*" Link="tools\ffmpeg\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\tools\7zip\*" Link="tools\7zip\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
         <Content Include="..\..\tools\THIRD-PARTY-NOTICES.txt" Link="licenses\THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
@@ -50,6 +51,14 @@
     <ItemGroup>
         <Content Include="..\..\extension\chromium\**\*" Exclude="..\..\extension\chromium\test\**;..\..\extension\chromium\node_modules\**"
                  Link="browser\chromium\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <!-- Firefox runs the same code with a manifest of its own -->
+        <Content Include="..\..\extension\chromium\**\*"
+                 Exclude="..\..\extension\chromium\test\**;..\..\extension\chromium\node_modules\**;..\..\extension\chromium\manifest.json;..\..\extension\chromium\README.md"
+                 Link="browser\firefox\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="..\..\extension\firefox\manifest.json" Link="browser\firefox\manifest.json" CopyToOutputDirectory="PreserveNewest" />
+        <!-- the add-on signed by Mozilla (see tools/build-firefox-addon.ps1), once it is there: release Firefox keeps only signed ones -->
+        <Content Include="..\..\extension\firefox\shadenet-firefox.xpi" Condition="Exists('..\..\extension\firefox\shadenet-firefox.xpi')"
+                 Link="browser\shadenet-firefox.xpi" CopyToOutputDirectory="PreserveNewest" />
     </ItemGroup>
 
     <!-- The native messaging host the browser starts; the installer registers its path. -->

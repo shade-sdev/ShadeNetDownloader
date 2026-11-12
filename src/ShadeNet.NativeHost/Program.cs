@@ -73,7 +73,9 @@ internal static class Program
 
         try
         {
-            await app.SendAsync(new HostHello { Origin = args.FirstOrDefault(a => a.StartsWith("chrome-extension://", StringComparison.Ordinal)) });
+            // (Chrome passes the extension's origin; Firefox passes the host manifest's path and then the add-on's ID)
+            await app.SendAsync(new HostHello { Origin = args.FirstOrDefault(a => a.StartsWith("chrome-extension://", StringComparison.Ordinal))
+                                                         ?? args.Skip(1).FirstOrDefault(a => a.Contains('@')) });
             if (hello != null) await app.SendRawAsync(hello, CancellationToken.None);
 
             using var done = new CancellationTokenSource();

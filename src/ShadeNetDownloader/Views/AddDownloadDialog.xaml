@@ -79,6 +79,23 @@
                    Text="{Binding SessionNote}" TextWrapping="Wrap"
                    Visibility="{Binding SessionNote, Converter={StaticResource NullToCollapsed}}" />
 
+        <!-- a web page rather than a file: its links can be grabbed -->
+        <Border Margin="0,12,0,0" Padding="12,10" CornerRadius="10" BorderThickness="1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                Visibility="{Binding IsWebPage, Converter={StaticResource B2V}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" TextWrapping="Wrap" FontSize="13"
+                           Text="This address is a web page, not a file. ShadeNet can list the files it links to, to pick from." />
+                <ui:Button Grid.Column="1" Content="Grab the links on it…" Icon="{ui:SymbolIcon LinkMultiple24}" Margin="10,0,0,0"
+                           Command="{Binding GrabLinksCommand}" />
+            </Grid>
+        </Border>
+
         <!-- ================= what the server says (single link) ================= -->
         <Border Margin="0,12,0,0" Padding="14" CornerRadius="10" BorderThickness="1"
                 BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"

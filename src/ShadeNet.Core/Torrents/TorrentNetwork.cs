@@ -16,7 +16,7 @@ using EngineSettings = ShadeNet.Core.Engine.EngineSettings;
 namespace ShadeNet.Core.Torrents;
 
 /// <summary>A network adapter of this computer, as Settings lists them.</summary>
-/// <param name="Id">Windows' id for it (what <see cref="EngineSettings.TorrentNetworkAdapter"/> keeps).</param>
+/// <param name="Id">Windows' id for it (what <see cref="EngineSettings.NetworkAdapter"/> keeps).</param>
 /// <param name="Connected">It is up and has an address torrents can use.</param>
 public sealed record NetworkAdapterInfo(string Id, string Name, string Description, bool Connected, IReadOnlyList<IPAddress> Addresses);
 
@@ -125,10 +125,9 @@ internal sealed class TorrentNetwork : IDisposable
     /// <summary>MonoTorrent's own client name for trackers (some refuse clients they do not know).</summary>
     static readonly string UserAgent = TryUserAgent();
 
-    public TorrentNetwork(EngineSettings settings, Func<string, NetworkAdapterInfo?>? findAdapter = null)
+    public TorrentNetwork(EngineSettings settings)
     {
         _settings = settings;
-        FindAdapter = findAdapter ?? NetworkAdapters.Find;
         _route = Compute();
         Factories = MonoTorrent.Factories.Default
             .WithPeerConnectionCreator("ipv4", uri => new SocketPeerConnection(uri, new RoutedSocketConnector(this)))
@@ -140,8 +139,6 @@ internal sealed class TorrentNetwork : IDisposable
                 new RoutedUdpTrackerConnection(this, uri, AddressFamily.InterNetworkV6)));
         NetworkChange.NetworkAddressChanged += OnAddressChanged;
     }
-
-    Func<string, NetworkAdapterInfo?> FindAdapter { get; }
 
     public MonoTorrent.Factories Factories { get; }
 
@@ -165,36 +162,33 @@ internal sealed class TorrentNetwork : IDisposable
         return next;
     }
 
-    TorrentRoute Compute() => RouteFor(_settings, FindAdapter);
+    TorrentRoute Compute() => RouteFor(_settings);
 
-    /// <summary>The route the settings and the adapters give now.</summary>
-    internal static TorrentRoute RouteFor(EngineSettings settings, Func<string, NetworkAdapterInfo?> findAdapter)
+    /// <summary>The route the settings and the adapters give now (the adapter as ShadeNet's network lock has it: see <see cref="NetworkLock"/>).</summary>
+    internal static TorrentRoute RouteFor(EngineSettings settings)
     {
         Uri? proxy = null;
         var httpProxy = settings.Proxy != ProxyMode.None;
         if (settings.Proxy == ProxyMode.Manual && settings.TorrentUseProxy && HttpFetcher.TryParseProxy(settings.ProxyAddress) is { } p) proxy = p;
         else if (settings.Proxy == ProxyMode.Manual && !settings.TorrentUseProxy) httpProxy = false;
 
-        if (string.IsNullOrEmpty(settings.TorrentNetworkAdapter)) return new TorrentRoute(proxy, httpProxy, false, null, null, null);
-
-        var adapter = findAdapter(settings.TorrentNetworkAdapter);
-        var name = adapter?.Name ?? settings.TorrentNetworkAdapterName ?? "the chosen network adapter";
-        if (adapter is not { Connected: true }) return new TorrentRoute(proxy, httpProxy, true, name, null, null);
-        var v4 = adapter.Addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
-        // (a global address rather than a temporary one: what a peer was told stays reachable)
-        var v6 = adapter.Addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetworkV6);
-        return new TorrentRoute(proxy, httpProxy, true, name, v4, v6);
+        var binding = NetworkLock.Resolve(settings);
+        return new TorrentRoute(proxy, httpProxy, binding.Locked, binding.AdapterName, binding.V4, binding.V6);
     }
 
     void OnAddressChanged(object? sender, EventArgs e)
     {
-        if (string.IsNullOrEmpty(_settings.TorrentNetworkAdapter)) return;
+        if (string.IsNullOrEmpty(_settings.NetworkAdapter)) return;
         // (Windows raises it several times for one change: once things have settled)
         lock (_gate)
         {
             if (_disposed) return;
             _debounce?.Dispose();
-            _debounce = new Timer(_ => Refresh(), null, 1500, Timeout.Infinite);
+            _debounce = new Timer(_ =>
+            {
+                NetworkLock.Invalidate();
+                Refresh();
+            }, null, 1500, Timeout.Infinite);
         }
     }
 

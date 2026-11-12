@@ -45,7 +45,10 @@ with your sign-in. Everything is in the box: no .NET, no extra tools to install.
 | **Videos** | Paste the address of a YouTube (or Facebook, Instagram, X, TikTok, Vimeo, Reddit …) video page, choose a quality, and ShadeNet downloads it. HLS and DASH streams are fetched in parallel and joined without re-encoding. Subtitles can be saved or put inside the file. |
 | **Live recordings** | A live stream is recorded until you press **Stop and save** (or until a length limit you set). |
 | **Torrents** | Magnet links and `.torrent` files (from the Add dialog, the browser, or Windows): pick the files and their priority, download in order to watch while it arrives, see the peers, files and trackers, pause and resume across restarts, and share back what you downloaded until a limit you set. |
-| **Browser extension** | For Chrome, Edge, Brave and other Chromium browsers. It hands your downloads to ShadeNet **with the cookies and headers the site needs**, and puts a **Download video** button on videos, named after the video. |
+| **Browser extension** | For Chrome, Edge, Brave, other Chromium browsers and Firefox. It hands your downloads to ShadeNet **with the cookies and headers the site needs**, puts a **Download video** button on videos, named after the video, and sends a page's links to the link grabber. |
+| **Link grabber** | The files a page links to (or the links you selected), listed to pick from: narrow them by kind or words, put them in one folder, download them with the page's sign-in. |
+| **Archives** | Finished zip, 7z, rar, tar and gz archives, also in several parts, can be unpacked automatically or with a right-click; a password is asked for, and every file is checked against the archive's checksums. |
+| **One network adapter** | Bind everything (downloads, videos, recordings, torrents) to your VPN's adapter: while it is down nothing goes out, and downloads wait for it instead of failing. |
 | **Tidy** | Downloads are sorted into category folders (Video, Music, Documents, Programs …). A queue with a schedule, a speed limit, search, sorting, and a details view with a live speed graph and a map of the file. |
 | **Yours to style** | Light, dark or Windows' own; ready-made themes, gradient themes, and a choice of app icons. |
 | **Self-updating** | It looks for a newer version about once a day and **asks** before installing it. |
@@ -55,7 +58,7 @@ with your sign-in. Everything is in the box: no .NET, no extra tools to install.
 ## Install
 
 1. Open the **[latest release](https://github.com/shade-sdev/ShadeNetDownloader/releases/latest)** and download
-   `ShadeNetDownloader-Setup-<version>.exe` (about 300 MB: the whole program, yt-dlp and ffmpeg are inside).
+   `ShadeNetDownloader-Setup-<version>.exe` (about 300 MB: the whole program, yt-dlp, ffmpeg and 7-Zip are inside).
 2. Run it. **No administrator rights are needed**; ShadeNet installs for your user only.
 
 <div align="center">
@@ -130,6 +133,28 @@ Press **Add download** (or **Ctrl+N**), or just press **Ctrl+V** anywhere in the
 4. **Advanced** holds a sign-in cookie and a referring page, for links that only answer a signed-in browser. (The
    [browser extension](#the-browser-extension) fills these in for you.)
 5. Choose **Download now** to start, or **Add to queue** to let it wait its turn.
+
+### The link grabber
+
+Paste the address of a **web page** instead of a file: the Add dialog says it is a page and offers **Grab the links on it…**. (In the
+browser, right-click a page, or a selection on it, and choose **Download links with ShadeNet…**.) The grabber lists the files the
+page links to, with the words the page showed for them:
+
+* **Files only** hides links to other pages; the kinds above the list (*Compressed (12)*, *Video (3)* …) show or hide each kind, and the
+  box narrows the list by name or address.
+* Tick the files you want (**Choose all shown** ticks the visible ones), and optionally **put them in one folder** named after the page.
+* **Download N files** starts them, **Add to queue** queues them. The page is sent as their referring page; links the browser sent go with
+  your sign-in on each site.
+
+### Archives
+
+Turn on **Extract archives when they finish** (Settings → Downloads → *Archives*), or right-click a finished archive and choose
+**Extract**. ShadeNet unpacks zip, 7z, rar, tar (and .tar.gz/.bz2/.xz) and gz files, also archives in several parts (`name.part1.rar`,
+`name.rar` + `.r00`, `name.7z.001` …): it waits until the last part has arrived. The files go to a new folder next to the archive
+(named after it, or the archive's own folder when everything in it is in one); nothing is overwritten. An archive locked with a
+password asks for it (also a RAR in several parts). Every file is checked against the archive's own checksum, so a damaged archive is
+reported, not unpacked wrong. Optionally the archive then goes to the Recycle Bin. The unpacking is done by
+[7-Zip](https://www.7-zip.org), which comes with ShadeNet (see [The helper programs](#the-helper-programs)).
 
 ### Managing downloads
 
@@ -213,7 +238,8 @@ recording open so it can be continued later; a recording made by ffmpeg is saved
 
 ### The helper programs
 
-**yt-dlp** and **ffmpeg** come with ShadeNet (in `tools\` next to the program) and are used automatically. Settings → Downloads →
+**yt-dlp**, **ffmpeg** and **7-Zip** (which unpacks finished archives) come with ShadeNet (in `tools\` next to the program) and are
+used automatically; a 7-Zip installed on the computer is used when the bundled one is missing. Settings → Downloads →
 *Helper programs* shows which copy is used and its version, lets you point to your own copy, and has a **Check** button. About
 once a day ShadeNet also looks for newer versions and **asks** before installing any.
 
@@ -289,7 +315,7 @@ ShadeNet, removes everything it registered.
 ## The browser extension
 
 The extension lets ShadeNet take over your browser's downloads and add a **Download video** button to videos. It works in
-**Chrome, Edge, Brave** and other Chromium-based browsers. (Firefox is not supported yet.)
+**Chrome, Edge, Brave** and other Chromium-based browsers, and in **Firefox** (see below).
 
 ### Set it up (once)
 
@@ -309,6 +335,11 @@ If you left *Set up the browser connection* ticked in the installer, its last pa
 Browsers don't let a program add an extension for you, so that last click is yours. The extension can talk only to ShadeNet (its
 ID is fixed and ShadeNet accepts nothing else), and it **updates with the program**: after an update it reloads itself.
 
+**Firefox:** press **Set up** as above (it registers ShadeNet with Firefox too), then **Add to Firefox** in Settings → Browser. Firefox
+keeps only add-ons signed by Mozilla: a release that carries the signed add-on installs it with one click. Without it, Firefox runs the
+add-on until it closes (Settings → Browser shows the steps: *Load Temporary Add-on…* on Firefox's `about:debugging` page).
+Maintainers sign it with `pwsh tools/build-firefox-addon.ps1 -Sign` (an addons.mozilla.org API key is needed; see the script).
+
 ### What you get
 
 * **Downloads are taken over.** When the browser starts a download, the extension pauses it, asks ShadeNet, and if ShadeNet takes
@@ -316,6 +347,8 @@ ID is fixed and ShadeNet accepts nothing else), and it **updates with the progra
   loses a download.** Sign-in cookies, the referring page and the browser's identity travel with it, so links that only answer a
   signed-in browser work.
 * **Right-click → Download with ShadeNet** on a link, video or audio (a magnet link too).
+* **Right-click → Download links with ShadeNet…** on a page (or on text you selected) sends its links to the
+  [link grabber](#the-link-grabber), with your sign-in on each site they point to.
 * **Magnet links you click** open in ShadeNet's Add dialog, with the torrent's files (*Open magnet links I click with ShadeNet*
   in Settings → Browser; off, the browser handles them as before). A **`.torrent` file** the browser downloads becomes a torrent
   in ShadeNet, fetched with your sign-in on that site (in the Add dialog you can keep just the `.torrent` file instead).
@@ -392,6 +425,7 @@ Open **Settings** (bottom left, or **Ctrl+,**).
 * **Connections per download:** the starting point for new downloads (1 to 32). A site's own limit, or the Add dialog, can lower it.
 * **Resume unfinished downloads when ShadeNet starts:** off means they wait, paused, until you resume them.
 * **Stop live recordings after (minutes).**
+* **Archives:** *Extract archives when they finish*, and *…then put the archive in the Recycle Bin* (see [Archives](#archives)).
 * **Torrents:** *Open magnet links and .torrent files with ShadeNet* (see [above](#opening-magnet-links-and-torrent-files-from-windows)),
   how long a finished torrent is shared (until it has sent *N* × its size, or for so many minutes; 0 turns
   sharing off), an upload speed limit for all torrents, the port other peers connect to (0 = a free one each start, over IPv4
@@ -399,14 +433,12 @@ Open **Settings** (bottom left, or **Ctrl+,**).
   the port (UPnP), and finding peers on the local network. Then:
   * **Encrypt connections to peers:** *Prefer encrypted* (the most peers), *Encrypted only* (some networks slow down torrent
     traffic they can recognise) or *Off*.
-  * **Use only this network adapter:** e.g. your VPN's. Torrents then use only its addresses; while it is not connected they wait
-    and never fall back to your usual network.
   * **Send torrents through the proxy:** with a proxy set in Settings → Network (an HTTP proxy, or `socks5://host:port`, with
     `user:password@` if it needs a sign-in), trackers and peers are reached only through it. What a proxy cannot carry (UDP
     trackers, the DHT, local peers, port forwarding) is then not used. A line under these settings says how torrents reach the
     network right now.
   * **Banned peers**, with **Unban all**.
-* **Helper programs:** yt-dlp and ffmpeg (see above).
+* **Helper programs:** yt-dlp, ffmpeg and 7-Zip (see above).
 </details>
 
 <details>
@@ -429,7 +461,11 @@ See [Queue, schedule and "when finished"](#queue-schedule-and-when-finished).
 
 <img src="screenshots/settings-network.png" alt="Settings, Network page" width="760">
 
-* **How to reach the internet:** *Windows* (the proxy set in Windows), *None* (direct) or *Manual* (`host:port`).
+* **Use only this network adapter:** e.g. your VPN's. Downloads, videos, recordings and torrents then use only its addresses: while
+  it is not connected, nothing goes out and downloads say *Waiting for … to connect* instead of failing (a kill switch); they carry on
+  once it is back. Name lookups still use Windows' own DNS.
+* **How to reach the internet:** *Windows* (the proxy set in Windows), *None* (direct) or *Manual* (`host:port` for an HTTP proxy,
+  or `socks5://host:port`; `user:password@` before the host for a sign-in). yt-dlp and torrents use it too.
 * **Connect time-out** (3 to 120 s) and **Retries** (0 to 50) before a broken download fails. The first retry of a connection
   is immediate; after that ShadeNet waits a little longer each time, and always as long as a busy server asks (`Retry-After`).
 * **Browser identity (User-Agent)** sent to sites unless the extension supplies the browser's own.
@@ -497,7 +533,8 @@ keep the usual icon.
   small package that is **verified (size and SHA-256)** before use; ShadeNet then closes, replaces its own files, and starts again.
   Your downloads, settings, shortcuts and helper programs are untouched, and a failed update puts the old version back.
   Running downloads are paused and saved, and continue afterwards.
-* **yt-dlp and ffmpeg:** checked about once a day too, with the same "ask first" rule.
+* **yt-dlp, ffmpeg and 7-Zip:** checked about once a day too, with the same "ask first" rule. A new 7-Zip comes from its author's
+  own releases (github.com/ip7z/7zip) and is checked against GitHub's SHA-256 before it is used.
 * A copy of ShadeNet that was not installed with the setup program (for example one you built yourself) says that a new version
   exists but cannot update itself; it links to the release page instead.
 
@@ -517,7 +554,8 @@ Turn the automatic look off in *Settings → About*; **Check for updates** still
 | **Downloads are slow** | Check the speed limit in the bottom bar, the *Connections per site* list in Settings → Network, and your proxy setting. |
 | **A magnet link stays at *Getting the file list from peers…*** | Nobody sharing it was found yet. Leave it: it starts as soon as a peer answers. Check that *Find peers without a tracker (DHT)* is on in Settings → Downloads; an old or rare torrent may have nobody left. |
 | **A torrent downloads slowly or says *Looking for peers…*** | Few people share it (the swarm count on its card tells). Turning on *Ask the router to forward the port* helps others connect to you; allow ShadeNet if Windows asks about the firewall. Through a proxy, only HTTP trackers can be asked: add some in Details → Trackers. |
-| **A torrent says *Waiting for … to connect*** | Torrents are bound to that network adapter (Settings → Downloads → *Torrents*) and it is not connected: connect your VPN, or choose *Any network*. |
+| **A download says *Waiting for … to connect*** | ShadeNet is bound to that network adapter (Settings → Network) and it is not connected: connect your VPN, or choose *Any network*. |
+| **An archive was not extracted** | Right-click it → **Extract** says why: a part still missing, a password, a damaged archive, or 7-Zip missing (Settings → Downloads → *Helper programs*). |
 | **I can't find the window** | ShadeNet is probably in the notification area (closing the window keeps it running): click its icon. |
 | **The taskbar or desktop icon looks old after an update** | Windows keeps the picture of an icon it has seen. From version 1.0.5 an update refreshes the shortcuts' pictures, and from 1.0.6 the taskbar button follows the icon you choose in Settings → Appearance. On older versions, update ShadeNet first. |
 
@@ -528,7 +566,7 @@ Log files: the browser connection writes `%LOCALAPPDATA%\ShadeNet\host.log`; a c
 ## Privacy and limits
 
 * ShadeNet runs entirely on your computer. It has **no account and no telemetry**. The only things it contacts are the sites you
-  download from, GitHub (the daily look for updates), and the publishers of yt-dlp and ffmpeg (their own daily look).
+  download from, GitHub (the daily look for updates), and the publishers of yt-dlp, ffmpeg and 7-Zip (their own daily look).
 * **Torrents are shared in public.** While a torrent downloads or is shared, everyone in its swarm (and its trackers) can see your
   IP address, and your internet provider can see that you use BitTorrent. ShadeNet opens no port for torrents until you add one.
   A proxy or a VPN adapter (Settings → Downloads → *Torrents*) hides your address from them; encryption only hides what you share
@@ -553,7 +591,7 @@ cd ShadeNetDownloader
 dotnet build                                   # the whole solution
 dotnet run --project src/ShadeNetDownloader    # start the app
 pwsh tools/ci/test.ps1                         # every test suite, as the release pipeline runs them
-pwsh tools/get-tools.ps1 -Tool all             # fetch yt-dlp and ffmpeg (verified) into tools/
+pwsh tools/get-tools.ps1 -Tool all             # fetch yt-dlp, ffmpeg and 7-Zip (verified) into tools/
 pwsh tools/build-release.ps1                   # the installer and the update package in dist/
 ```
 

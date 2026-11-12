@@ -48,10 +48,16 @@ public sealed class JobStore : IDisposable
         Migrate();
     }
 
+    /// <summary>
+    /// Brings the database to <see cref="SchemaVersion"/>. Every step looks at what is there rather than trusting the version number
+    /// alone: two builds of ShadeNet can share one database (a development build and the installed one), and an older build used to
+    /// write its own, lower version back over a newer one's; the newer one then added a column it already had, and could not start.
+    /// So a column is added only when it is missing, and the version is never lowered.
+    /// </summary>
     void Migrate()
     {
         var version = Convert.ToInt32(Scalar("PRAGMA user_version;"), CultureInfo.InvariantCulture);
-        if (version < 1)
+        if (version < 1 && !HasTable("jobs"))
         {
             Exec("""
                 CREATE TABLE jobs (
@@ -93,20 +99,32 @@ public sealed class JobStore : IDisposable
                 """);
         }
 
-        if (version < 2)
-        {
-            // stream (HLS) downloads: what kind of job this is, and the quality chosen / progress so far
-            Exec("ALTER TABLE jobs ADD COLUMN kind INTEGER NOT NULL DEFAULT 0;");
-            Exec("ALTER TABLE jobs ADD COLUMN stream_data TEXT;");
-        }
+        // stream (HLS) downloads: what kind of job this is, and the quality chosen / progress so far
+        AddColumn("jobs", "kind", "INTEGER NOT NULL DEFAULT 0");
+        AddColumn("jobs", "stream_data", "TEXT");
 
-        if (version < 3)
-        {
-            // torrent downloads: which torrent, which files, what has been shared
-            Exec("ALTER TABLE jobs ADD COLUMN torrent_data TEXT;");
-        }
+        // torrent downloads: which torrent, which files, what has been shared
+        AddColumn("jobs", "torrent_data", "TEXT");
 
-        Exec($"PRAGMA user_version={SchemaVersion};");
+        if (version < SchemaVersion) Exec($"PRAGMA user_version={SchemaVersion};");
+    }
+
+    bool HasTable(string table)
+    {
+        using var cmd = _db.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=$t;";
+        cmd.Parameters.AddWithValue("$t", table);
+        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+    }
+
+    /// <summary>Adds a column unless the table has it already (see <see cref="Migrate"/>).</summary>
+    void AddColumn(string table, string column, string definition)
+    {
+        using var cmd = _db.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name=$c;";
+        cmd.Parameters.AddWithValue("$c", column);
+        if (Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return;
+        Exec($"ALTER TABLE {table} ADD COLUMN {column} {definition};");
     }
 
     /// <param name="segments">
