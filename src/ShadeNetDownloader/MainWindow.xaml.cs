@@ -288,6 +288,12 @@ public partial class MainWindow : FluentWindow
                 try
                 {
                     var ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (ext == ".torrent")
+                    {
+                        all.Add(file);   // a torrent to download
+                        continue;
+                    }
+
                     if (ext is ".txt" or ".url" or ".html" or ".htm" or ".md" or ".csv" or ".lst" or ".list"
                         && new FileInfo(file).Length <= 2 * 1024 * 1024)
                         all.AddRange(UrlParser.Extract(File.ReadAllText(file)));

@@ -24,6 +24,12 @@ sealed class FakeDialogs : IDialogService
         Opened.Add(prefill);
         return Task.CompletedTask;
     }
+
+    public Task ShowLinksAsync(IReadOnlyList<string> links)
+    {
+        Opened.Add(links);
+        return Task.CompletedTask;
+    }
 }
 
 public class ViewModelTests

@@ -9,6 +9,8 @@
     <ItemGroup>
         <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
         <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+        <!-- BitTorrent (MIT): magnet links, .torrent files, DHT, peer exchange, fast resume -->
+        <PackageReference Include="MonoTorrent" Version="3.0.2" />
     </ItemGroup>
 
     <ItemGroup>

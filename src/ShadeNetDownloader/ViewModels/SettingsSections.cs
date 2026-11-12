@@ -257,13 +257,218 @@ public sealed partial class DownloadSettingsViewModel : ObservableObject
     readonly Action _applyEngine;
     readonly Action _categoriesChanged;
 
-    public DownloadSettingsViewModel(SettingsService settings, Action applyEngine, Action categoriesChanged)
+    readonly TorrentAssociation _associations;
+    readonly ShadeNet.Core.DownloadManager? _manager;
+    readonly Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>> _adapters;
+
+    /// <param name="associations">Opening magnet links and .torrent files with ShadeNet; tests pass one on a throw-away registry key.</param>
+    /// <param name="manager">For how torrents reach the network and the banned peers (none in some tests).</param>
+    /// <param name="adapters">The network adapters to choose from (tests pass their own).</param>
+    public DownloadSettingsViewModel(SettingsService settings, Action applyEngine, Action categoriesChanged, TorrentAssociation? associations = null,
+        ShadeNet.Core.DownloadManager? manager = null, Func<IReadOnlyList<ShadeNet.Core.Torrents.NetworkAdapterInfo>>? adapters = null)
     {
         _settings = settings;
         _applyEngine = applyEngine;
         _categoriesChanged = categoriesChanged;
+        _associations = associations ?? new TorrentAssociation();
+        _manager = manager;
+        _adapters = adapters ?? ShadeNet.Core.Torrents.NetworkAdapters.List;
         _downloadRootText = Engine.DownloadRoot;
         LoadCategories();
+        RefreshAssociations();
+        RefreshAdapters();
+    }
+
+    // ---- torrents: encryption, the adapter, the proxy, banned peers ----
+
+    public sealed record EncryptionChoice(TorrentEncryption Value, string Label);
+
+    /// <summary>A network adapter torrents can be bound to; <see cref="Id"/> null for "any".</summary>
+    public sealed record AdapterChoice(string? Id, string Name, string Label);
+
+    static readonly IReadOnlyList<EncryptionChoice> Encryptions = new[]
+    {
+        new EncryptionChoice(TorrentEncryption.Prefer, "Prefer encrypted"),
+        new EncryptionChoice(TorrentEncryption.Require, "Encrypted only"),
+        new EncryptionChoice(TorrentEncryption.Off, "Off (plain only)"),
+    };
+
+    public IReadOnlyList<EncryptionChoice> EncryptionChoices => Encryptions;
+
+    public EncryptionChoice SelectedEncryption
+    {
+        get => Encryptions.FirstOrDefault(c => c.Value == Engine.TorrentEncryption) ?? Encryptions[0];
+        set
+        {
+            if (value == null || value.Value == Engine.TorrentEncryption) return;
+            Engine.TorrentEncryption = value.Value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    public ObservableCollection<AdapterChoice> AdapterChoices { get; } = new();
+
+    AdapterChoice? _selectedAdapter;
+    bool _listingAdapters;
+
+    public AdapterChoice? SelectedAdapter
+    {
+        get => _selectedAdapter;
+        set
+        {
+            if (value == null || _listingAdapters || value == _selectedAdapter) return;
+            _selectedAdapter = value;
+            Engine.TorrentNetworkAdapter = value.Id;
+            Engine.TorrentNetworkAdapterName = value.Id == null ? null : value.Name;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+            RefreshTorrentNetwork();
+        }
+    }
+
+    /// <summary>Lists the adapters again (one may have come or gone); the chosen one stays listed while it is not there.</summary>
+    public void RefreshAdapters()
+    {
+        _listingAdapters = true;
+        try
+        {
+            AdapterChoices.Clear();
+            AdapterChoices.Add(new AdapterChoice(null, "", "Any network (usual)"));
+            foreach (var a in _adapters())
+            {
+                var address = a.Addresses.FirstOrDefault(x => x.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) ?? a.Addresses.FirstOrDefault();
+                AdapterChoices.Add(new AdapterChoice(a.Id, a.Name, a.Connected ? $"{a.Name}  ·  {address}" : $"{a.Name} (not connected)"));
+            }
+
+            var chosen = Engine.TorrentNetworkAdapter;
+            if (chosen != null && AdapterChoices.All(c => !string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)))
+            {
+                var name = Engine.TorrentNetworkAdapterName ?? "The chosen adapter";
+                AdapterChoices.Add(new AdapterChoice(chosen, name, $"{name} (not there now)"));
+            }
+
+            _selectedAdapter = AdapterChoices.FirstOrDefault(c => string.Equals(c.Id, chosen, StringComparison.OrdinalIgnoreCase)) ?? AdapterChoices[0];
+        }
+        finally
+        {
+            _listingAdapters = false;
+        }
+
+        OnPropertyChanged(nameof(SelectedAdapter));
+        RefreshTorrentNetwork();
+    }
+
+    public bool TorrentUseProxy
+    {
+        get => Engine.TorrentUseProxy;
+        set
+        {
+            if (Engine.TorrentUseProxy == value) return;
+            Engine.TorrentUseProxy = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+            RefreshTorrentNetwork();
+        }
+    }
+
+    /// <summary>"Torrents go through the proxy 10.0.0.2:1080 (UDP trackers … not used: …)."</summary>
+    [ObservableProperty] string _torrentNetworkText = "";
+
+    [ObservableProperty] string _bannedText = "";
+    [ObservableProperty] bool _hasBanned;
+
+    /// <summary>The words about how torrents reach the network, and the banned peers, again (the settings or the adapters changed).</summary>
+    public void RefreshTorrentNetwork()
+    {
+        if (_manager == null) return;
+        TorrentNetworkText = $"Right now torrents go {_manager.DescribeTorrentNetwork()}.";
+        var banned = _manager.BannedTorrentPeers;
+        HasBanned = banned.Count > 0;
+        BannedText = banned.Count switch
+        {
+            0 => "None. Ban one from a torrent's Details > Peers: it is then never connected to, in any torrent.",
+            <= 4 => $"Never connected to, in any torrent: {string.Join(", ", banned)}.",
+            _ => $"{banned.Count} addresses are never connected to, in any torrent: {string.Join(", ", banned.Take(4))} …",
+        };
+    }
+
+    [RelayCommand]
+    void UnbanPeers()
+    {
+        _manager?.UnbanTorrentPeers();
+        RefreshTorrentNetwork();
+    }
+
+    // ---- magnet links and .torrent files ----
+
+    AssociationStatus _association = new(false, false, false);
+
+    /// <summary>Windows opens magnet links and .torrent files with ShadeNet (registered for the current user).</summary>
+    public bool OpenTorrentsWithShadeNet
+    {
+        get => _association.Registered;
+        set
+        {
+            if (value == _association.Registered) return;
+            try
+            {
+                if (value) _associations.Register();
+                else _associations.Unregister();
+                AssociationError = null;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+            {
+                AssociationError = "Windows did not allow it: " + ex.Message;
+            }
+
+            RefreshAssociations();
+        }
+    }
+
+    /// <summary>What opens them now, and what to do when it is another program.</summary>
+    [ObservableProperty] string _associationText = "";
+    [ObservableProperty] string? _associationError;
+
+    /// <summary>Another program opens them: Windows' Default apps is where the user can choose ShadeNet.</summary>
+    [ObservableProperty] bool _needsDefaultApps;
+
+    public void RefreshAssociations()
+    {
+        try
+        {
+            _association = _associations.GetStatus();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
+        {
+            _association = new AssociationStatus(false, false, false);
+        }
+
+        OnPropertyChanged(nameof(OpenTorrentsWithShadeNet));
+        var s = _association;
+        NeedsDefaultApps = s.Registered && !(s.OpensMagnet && s.OpensTorrentFiles);
+        AssociationText = !s.Registered
+            ? "Off: magnet links and .torrent files open with whatever Windows used before. Paste them into ShadeNet, or drop a .torrent file on its window."
+            : (s.OpensMagnet, s.OpensTorrentFiles) switch
+            {
+                (true, true) => "Magnet links and .torrent files open in ShadeNet.",
+                (true, false) => "Magnet links open in ShadeNet. Another program opens .torrent files: choose ShadeNet for them in Windows' Default apps.",
+                (false, true) => ".torrent files open in ShadeNet. Another program opens magnet links: choose ShadeNet for them in Windows' Default apps.",
+                _ => "Another program opens them: choose ShadeNet for magnet links and .torrent files in Windows' Default apps.",
+            };
+    }
+
+    [RelayCommand]
+    void OpenDefaultApps()
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(TorrentAssociation.DefaultAppsPage) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            AssociationError = "Windows' Default apps could not be opened: " + ex.Message;
+        }
     }
 
     EngineSettings Engine => _settings.Current.Engine;
@@ -362,6 +567,115 @@ public sealed partial class DownloadSettingsViewModel : ObservableObject
             Engine.MaxRecordingLength = TimeSpan.FromMinutes(v);
             OnPropertyChanged();
             EnginePropertiesChanged();
+        }
+    }
+
+    // ---- torrents ----
+
+    /// <summary>A finished torrent is shared until it has sent this many times its size (0 = not shared at all), as text ("1", "1.5").</summary>
+    public string TorrentSeedRatioText
+    {
+        get => Engine.TorrentSeedRatio.ToString("0.##", System.Globalization.CultureInfo.CurrentCulture);
+        set
+        {
+            if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out var v)
+                && !double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v))
+            {
+                OnPropertyChanged();   // not a number: show the value in use again
+                return;
+            }
+
+            v = Math.Clamp(Math.Round(v, 2), 0, 100);
+            if (Math.Abs(Engine.TorrentSeedRatio - v) < 0.001) return;
+            Engine.TorrentSeedRatio = v;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    /// <summary>A finished torrent stops being shared after this many minutes (0 = only the ratio stops it).</summary>
+    public int TorrentSeedMinutes
+    {
+        get => Engine.TorrentSeedMinutes;
+        set
+        {
+            var v = Math.Clamp(value, 0, 525_600);
+            if (Engine.TorrentSeedMinutes == v) return;
+            Engine.TorrentSeedMinutes = v;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    /// <summary>Total upload speed of torrents in KB/s (0 = no limit).</summary>
+    public int TorrentUploadLimitKb
+    {
+        get => (int)(Engine.TorrentUploadLimit / 1024);
+        set
+        {
+            var v = Math.Clamp(value, 0, 1_000_000);
+            if (TorrentUploadLimitKb == v) return;
+            Engine.TorrentUploadLimit = v * 1024L;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    /// <summary>The port peers connect to (0 = a free one each start).</summary>
+    public int TorrentPort
+    {
+        get => Engine.TorrentPort;
+        set
+        {
+            var v = value is >= 0 and <= 65535 ? value : Engine.TorrentPort;
+            if (Engine.TorrentPort == v)
+            {
+                OnPropertyChanged();
+                return;
+            }
+
+            Engine.TorrentPort = v;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+        }
+    }
+
+    public bool TorrentUseDht
+    {
+        get => Engine.TorrentUseDht;
+        set
+        {
+            if (Engine.TorrentUseDht == value) return;
+            Engine.TorrentUseDht = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+            RefreshTorrentNetwork();
+        }
+    }
+
+    public bool TorrentPortForwarding
+    {
+        get => Engine.TorrentPortForwarding;
+        set
+        {
+            if (Engine.TorrentPortForwarding == value) return;
+            Engine.TorrentPortForwarding = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+            RefreshTorrentNetwork();
+        }
+    }
+
+    public bool TorrentLocalPeers
+    {
+        get => Engine.TorrentLocalPeers;
+        set
+        {
+            if (Engine.TorrentLocalPeers == value) return;
+            Engine.TorrentLocalPeers = value;
+            OnPropertyChanged();
+            EnginePropertiesChanged();
+            RefreshTorrentNetwork();
         }
     }
 
@@ -507,7 +821,7 @@ public sealed partial class NetworkSettingsViewModel : ObservableObject
 
     void ValidateProxy() =>
         ProxyError = Engine.Proxy == ProxyMode.Manual && !EngineSettings.IsUsableProxyAddress(Engine.ProxyAddress)
-            ? "Enter the proxy as host:port, for example proxy.example.com:8080. Until then Windows' own setting is used."
+            ? "Enter the proxy as host:port (proxy.example.com:8080) or socks5://host:port. Until then Windows' own setting is used."
             : "";
 
     // ---- timeouts ----

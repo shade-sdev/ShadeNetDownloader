@@ -146,7 +146,10 @@ public sealed record CaptureRequest
     public string[]? AudioPieces { get; init; }
     public string? AudioInit { get; init; }
 
-    /// <summary><c>download</c> (browser started it) or <c>contextmenu</c> (user chose "Download with ShadeNet").</summary>
+    /// <summary>
+    /// <c>download</c> (browser started it), <c>contextmenu</c> (user chose "Download with ShadeNet"), <c>magnet</c> (a magnet link the user
+    /// clicked: <see cref="Url"/> is that link, not a web address), and the video kinds the app knows.
+    /// </summary>
     public string Source { get; init; } = "download";
 }
 
@@ -180,6 +183,9 @@ public sealed record BridgeSettings
 
     /// <summary>The extension sends the page site's sign-in along with a video page, so that yt-dlp can read what needs one (most live streams).</summary>
     public bool PageSignIn { get; init; } = true;
+
+    /// <summary>The extension hands magnet links the user clicks to the app (off: it leaves them to the browser).</summary>
+    public bool MagnetLinks { get; init; } = true;
 }
 
 public sealed record HostHello

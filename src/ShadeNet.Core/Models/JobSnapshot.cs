@@ -24,10 +24,24 @@ public sealed record JobSnapshot(
     int Parts = 0,
     int PartsDone = 0,
     bool Live = false,
-    double Seconds = 0)
+    double Seconds = 0,
+    TorrentStatus? Torrent = null)
 {
     public double Fraction => Total is > 0 ? Math.Clamp((double)Downloaded / Total.Value, 0, 1) : 0;
 }
+
+/// <summary>A torrent's side of a snapshot: the people it is connected to and what it has shared.</summary>
+/// <param name="Peers">Connected peers (seeds included).</param>
+/// <param name="Seeds">Connected peers that have the whole torrent.</param>
+/// <param name="UploadSpeed">Bytes per second sent to others.</param>
+/// <param name="Uploaded">Bytes sent to others over all runs.</param>
+/// <param name="Ratio">Shared ÷ size of the chosen files.</param>
+/// <param name="Seeding">Finished and still sharing it.</param>
+/// <param name="Activity">What it is doing when it is not simply downloading ("Getting the file list from peers…").</param>
+/// <param name="SwarmSeeds">Everyone who has all of it, as the trackers count (null: no tracker said).</param>
+/// <param name="SwarmLeechers">Everyone downloading it, as the trackers count.</param>
+public sealed record TorrentStatus(int Peers, int Seeds, double UploadSpeed, long Uploaded, double Ratio, bool Seeding, string? Activity,
+    int? SwarmSeeds = null, int? SwarmLeechers = null);
 
 public sealed class AddDownloadRequest
 {
@@ -46,8 +60,19 @@ public sealed class AddDownloadRequest
 
     /// <summary>Set for an HLS stream: which quality to download. The job then is a stream download, not a file.</summary>
     public StreamChoice? Stream { get; init; }
+
+    /// <summary>
+    /// Set for a torrent (a magnet link in <see cref="Url"/> is one even without it): the .torrent file, when it is known, and the files to
+    /// download. <see cref="Url"/> is the magnet link, the .torrent file's path or its web address.
+    /// </summary>
+    public TorrentChoice? Torrent { get; init; }
+
     public AddMode Mode { get; init; } = AddMode.Start;
 }
+
+/// <param name="Metadata">The .torrent file's bytes (from <c>DescribeTorrentAsync</c>); null for a magnet link whose file list is not known yet.</param>
+/// <param name="Files">The indexes of the files to download (in the torrent's order); null = all of them.</param>
+public sealed record TorrentChoice(byte[]? Metadata = null, IReadOnlyList<int>? Files = null, bool Sequential = false);
 
 /// <summary>The quality picked for a stream (see <see cref="ShadeNet.Core.Hls.HlsChoice"/>).</summary>
 /// <param name="Height">0 = the best one.</param>

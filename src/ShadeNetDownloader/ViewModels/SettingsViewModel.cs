@@ -34,7 +34,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         BrowserIntegrationInstaller? installer = null, IBrowserBridge? bridge = null,
         DownloadManager? manager = null, FinishWatcher? finish = null, StartupRegistration? startup = null,
         AppController? app = null, QueueScheduler? scheduler = null, IToolUpdates? toolManager = null, ToolUpdateService? toolUpdates = null, AppUpdateService? appUpdates = null,
-        IAppIconApplier? appIcons = null)
+        IAppIconApplier? appIcons = null, TorrentAssociation? associations = null)
     {
         _settings = settings;
         _theme = theme;
@@ -50,7 +50,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
 
         General = new GeneralSettingsViewModel(settings, startup ?? new StartupRegistration(), () => app?.ApplyTraySetting());
-        Downloads = new DownloadSettingsViewModel(settings, ApplyEngine, () => CategoriesChanged?.Invoke());
+        Downloads = new DownloadSettingsViewModel(settings, ApplyEngine, () => CategoriesChanged?.Invoke(), associations, manager);
         Network = new NetworkSettingsViewModel(settings, ApplyEngine);
         Queue = new QueueSettingsViewModel(settings, ApplyEngine, () =>
         {
@@ -93,6 +93,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         foreach (var name in new[] { nameof(IsGeneral), nameof(IsDownloads), nameof(IsCategories), nameof(IsQueue), nameof(IsNetwork), nameof(IsBrowser), nameof(IsAppearance), nameof(IsAbout) })
             OnPropertyChanged(name);
+
+        // what opens magnet links may have been changed in Windows' Default apps meanwhile; adapters come and go; the proxy may be new
+        if (value == SettingsSection.Downloads)
+        {
+            Downloads.RefreshAssociations();
+            Downloads.RefreshAdapters();
+        }
     }
 
     public bool IsGeneral { get => Section == SettingsSection.General; set { if (value) Section = SettingsSection.General; } }
@@ -188,6 +195,19 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             if (Browser.PageSignIn == value) return;
             Browser.PageSignIn = value;
+            OnPropertyChanged();
+            BrowserSettingsChanged();
+        }
+    }
+
+    /// <summary>A magnet link clicked in the browser opens in ShadeNet.</summary>
+    public bool MagnetLinks
+    {
+        get => Browser.MagnetLinks;
+        set
+        {
+            if (Browser.MagnetLinks == value) return;
+            Browser.MagnetLinks = value;
             OnPropertyChanged();
             BrowserSettingsChanged();
         }

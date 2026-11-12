@@ -124,3 +124,13 @@ test('buildCapture leaves out what is not known', () => {
   assert.equal('size' in same, false);
   assert.equal('headers' in same, false);
 });
+
+test('a magnet link is one only when it names a torrent', async () => {
+  const { isMagnetUrl } = await import('../lib/capture.js');
+  assert.equal(isMagnetUrl('magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'), true);
+  assert.equal(isMagnetUrl('MAGNET:?dn=x&xt=urn:btmh:1220abcd'), true);
+  assert.equal(isMagnetUrl('magnet:?dn=no-identity'), false);
+  assert.equal(isMagnetUrl('https://example.com/a.torrent'), false);
+  assert.equal(isMagnetUrl('magnet:?xt=urn:btih:00\nInjected'), false);
+  assert.equal(isMagnetUrl(undefined), false);
+});

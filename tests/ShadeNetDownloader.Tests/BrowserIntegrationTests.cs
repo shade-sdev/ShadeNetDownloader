@@ -21,6 +21,8 @@ sealed class FakeCaptureUi : ICaptureUi
     public void BringToFront() => BroughtToFront++;
     public int Quits;
     public void Quit() => Quits++;
+    public List<IReadOnlyList<string>> OpenedLinks { get; } = new();
+    public void OpenLinks(IReadOnlyList<string> links) => OpenedLinks.Add(links);
 }
 
 public class CaptureProcessorTests

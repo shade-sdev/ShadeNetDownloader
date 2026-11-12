@@ -59,6 +59,12 @@ public sealed class Harness : IAsyncDisposable
             WriteMarkOfTheWeb = false,
             RetryBaseDelay = TimeSpan.FromMilliseconds(100),
             RetryMaxDelay = TimeSpan.FromMilliseconds(600),
+            // torrents stay on this machine: the loopback address, no DHT, no router, no local network
+            TorrentFolder = Path.Combine(Root, "torrent-cache"),
+            TorrentListenAddress = System.Net.IPAddress.Loopback,
+            TorrentUseDht = false,
+            TorrentPortForwarding = false,
+            TorrentLocalPeers = false,
         };
         tweak?.Invoke(s);
         return s;

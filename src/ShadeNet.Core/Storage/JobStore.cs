@@ -11,7 +11,7 @@ namespace ShadeNet.Core.Storage;
 /// </summary>
 public sealed class JobStore : IDisposable
 {
-    const int SchemaVersion = 2;
+    const int SchemaVersion = 3;
 
     readonly object _gate = new();
     readonly SqliteConnection _db;
@@ -100,6 +100,12 @@ public sealed class JobStore : IDisposable
             Exec("ALTER TABLE jobs ADD COLUMN stream_data TEXT;");
         }
 
+        if (version < 3)
+        {
+            // torrent downloads: which torrent, which files, what has been shared
+            Exec("ALTER TABLE jobs ADD COLUMN torrent_data TEXT;");
+        }
+
         Exec($"PRAGMA user_version={SchemaVersion};");
     }
 
@@ -119,16 +125,16 @@ public sealed class JobStore : IDisposable
                 cmd.CommandText = """
                     INSERT INTO jobs (id,url,final_url,referer,cookies,user_agent,headers,file_name,save_dir,category,probed,
                                       total_size,content_type,etag,last_modified,accepts_ranges,state,speed_limit,max_connections,
-                                      priority,error,error_kind,created_at,completed_at,next_segment_id,kind,stream_data)
+                                      priority,error,error_kind,created_at,completed_at,next_segment_id,kind,stream_data,torrent_data)
                     VALUES ($id,$url,$final,$ref,$cookies,$ua,$headers,$name,$dir,$cat,$probed,
                             $total,$ctype,$etag,$lm,$ranges,$state,$limit,$maxc,
-                            $prio,$err,$errk,$created,$completed,$nextseg,$kind,$stream)
+                            $prio,$err,$errk,$created,$completed,$nextseg,$kind,$stream,$torrent)
                     ON CONFLICT(id) DO UPDATE SET
                         url=$url, final_url=$final, referer=$ref, cookies=$cookies, user_agent=$ua, headers=$headers,
                         file_name=$name, save_dir=$dir, category=$cat, probed=$probed, total_size=$total, content_type=$ctype,
                         etag=$etag, last_modified=$lm, accepts_ranges=$ranges, state=$state, speed_limit=$limit,
                         max_connections=$maxc, priority=$prio, error=$err, error_kind=$errk, completed_at=$completed,
-                        next_segment_id=$nextseg, kind=$kind, stream_data=$stream;
+                        next_segment_id=$nextseg, kind=$kind, stream_data=$stream, torrent_data=$torrent;
                     """;
                 Bind(cmd, "$id", job.Id.ToString());
                 Bind(cmd, "$url", job.Url);
@@ -160,6 +166,7 @@ public sealed class JobStore : IDisposable
                 Bind(cmd, "$nextseg", nextSeg);
                 Bind(cmd, "$kind", (int)job.Kind);
                 Bind(cmd, "$stream", job.Hls?.ToJson());
+                Bind(cmd, "$torrent", job.Torrent?.ToJson());
                 cmd.ExecuteNonQuery();
             }
 
@@ -250,6 +257,7 @@ public sealed class JobStore : IDisposable
                     job.NextSegmentId = r.GetInt32(r.GetOrdinal("next_segment_id"));
                     job.Kind = (DownloadKind)r.GetInt32(r.GetOrdinal("kind"));
                     if (job.Kind == DownloadKind.Hls) job.Hls = ShadeNet.Core.Hls.HlsJobData.FromJson(Str(r, "stream_data"));
+                    if (job.Kind == DownloadKind.Torrent) job.Torrent = ShadeNet.Core.Torrents.TorrentJobData.FromJson(Str(r, "torrent_data"));
                     jobs[id] = job;
                 }
             }

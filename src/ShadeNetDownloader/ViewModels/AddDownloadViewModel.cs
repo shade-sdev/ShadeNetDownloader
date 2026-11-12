@@ -11,6 +11,7 @@ using ShadeNet.Core.Hls;
 using ShadeNet.Core.Models;
 using ShadeNet.Core.Net;
 using ShadeNet.Core.Sites;
+using ShadeNet.Core.Torrents;
 using ShadeNet.Core.Util;
 using ShadeNetDownloader.Services.Browser;
 using ShadeNetDownloader.Util;
@@ -19,6 +20,30 @@ namespace ShadeNetDownloader.ViewModels;
 
 /// <summary>One quality of a video stream, as the dialog lists it.</summary>
 public sealed record QualityOption(string Label, StreamChoice Choice, long Bandwidth, YtDlpOption? Source = null);
+
+/// <summary>One file of a torrent, as the dialog lists it: ticked ones are downloaded.</summary>
+public sealed partial class TorrentFileOption : ObservableObject
+{
+    readonly Action _changed;
+
+    public TorrentFileOption(int index, string path, long length, Action changed)
+    {
+        Index = index;
+        Path = path;
+        Length = length;
+        _changed = changed;
+    }
+
+    /// <summary>Its place in the torrent (what the engine is told).</summary>
+    public int Index { get; }
+    public string Path { get; }
+    public long Length { get; }
+    public string SizeText => ByteFormat.Size(Length);
+
+    [ObservableProperty] bool _isSelected = true;
+
+    partial void OnIsSelectedChanged(bool value) => _changed();
+}
 
 public enum ProbeState
 {
@@ -139,6 +164,181 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             Run(() => FileName = FileNameHelper.Sanitize(_yt.Title) + src.Extension);   // the container follows the quality (mp4 or mkv)
     }
 
+    // ---- a torrent ----
+
+    TorrentInfo? _torrent;
+
+    /// <summary>The link is a torrent (a magnet link, or a .torrent file on this computer or the web).</summary>
+    [ObservableProperty] bool _isTorrent;
+
+    /// <summary>The torrent's files, to pick from (shown when there are several).</summary>
+    public ObservableCollection<TorrentFileOption> TorrentFiles { get; } = new();
+
+    public bool HasTorrentFiles => IsTorrent && TorrentFiles.Count > 1;
+
+    /// <summary>What ShadeNet does with a torrent once it is finished (the sharing limits from Settings).</summary>
+    [ObservableProperty] string? _torrentNote;
+
+    /// <summary>A .torrent file on the web: download what it holds (on), or save the .torrent file itself (off).</summary>
+    [ObservableProperty] bool _downloadTorrentContents = true;
+
+    /// <summary>The torrent came from a web address, so it could be saved as a file instead.</summary>
+    [ObservableProperty] bool _isWebTorrent;
+
+    /// <summary>Fetch the pieces in order, so a film can be watched while the rest arrives.</summary>
+    [ObservableProperty] bool _torrentSequential;
+
+    /// <summary>
+    /// Who asks for a .torrent file on the web: the browser's sign-in, page and identity when the browser handed the link over, else what
+    /// was typed under Advanced. Nothing for a magnet link or a file on this computer.
+    /// </summary>
+    RequestSpec? TorrentWeb(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https")) return null;
+        return IsCapturedLink(url)
+            ? new RequestSpec(url, RefererValue, CookieValue, _capture!.UserAgent, _capture.Headers)
+            : new RequestSpec(url, RefererValue, CookieValue);
+    }
+
+    /// <summary>"12 of 14 files · 3.1 GB" for the files ticked.</summary>
+    [ObservableProperty] string _torrentSelectionText = "";
+
+    /// <summary>What the progress ring says while the link is checked.</summary>
+    [ObservableProperty] string _probingText = "Checking the link…";
+
+    /// <summary>A magnet link still waiting for its file list: it can be added anyway (it downloads every file).</summary>
+    bool WaitingForPeers => IsTorrent && _torrent == null && ProbeState == ProbeState.Probing;
+
+    /// <summary>Connections per download: not a torrent's business (it talks to however many peers there are).</summary>
+    public bool ShowConnections => !IsTorrent;
+
+    partial void OnIsTorrentChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasTorrentFiles));
+        OnPropertyChanged(nameof(ShowConnections));
+        OnPropertyChanged(nameof(CanAdd));
+    }
+
+    partial void OnDownloadTorrentContentsChanged(bool value) => OnPropertyChanged(nameof(CanAdd));
+
+    void TorrentSelectionChanged()
+    {
+        var picked = TorrentFiles.Where(f => f.IsSelected).ToList();
+        TorrentSelectionText = $"{picked.Count} of {TorrentFiles.Count} files  ·  {ByteFormat.Size(picked.Sum(f => f.Length))}";
+        if (_torrent != null) Run(() => SizeText = ByteFormat.Size(picked.Sum(f => f.Length)) + (picked.Count < TorrentFiles.Count ? $" of {ByteFormat.Size(_torrent.Size)}" : ""));
+        if (!_folderEdited && picked.Count > 0)
+        {
+            Category = _manager.Settings.CategoryOf(picked.OrderByDescending(f => f.Length).First().Path);
+            SetFolderForCategory(Category);
+        }
+
+        OnPropertyChanged(nameof(CanAdd));
+    }
+
+    [RelayCommand]
+    void SelectAllTorrentFiles()
+    {
+        foreach (var f in TorrentFiles) f.IsSelected = true;
+    }
+
+    [RelayCommand]
+    void SelectNoTorrentFiles()
+    {
+        foreach (var f in TorrentFiles) f.IsSelected = false;
+    }
+
+    /// <summary>"Open .torrent file…": picks a .torrent file on this computer as the link.</summary>
+    [RelayCommand]
+    void OpenTorrentFile()
+    {
+        var dialog = new OpenFileDialog { Title = "Open a .torrent file", Filter = "Torrent files (*.torrent)|*.torrent|All files (*.*)|*.*", Multiselect = true };
+        if (dialog.ShowDialog() == true) UrlText = string.Join(Environment.NewLine, dialog.FileNames);
+    }
+
+    string SharingNote()
+    {
+        var s = _manager.Settings;
+        if (s.TorrentSeedRatio <= 0) return "When it finishes, ShadeNet stops: sharing with others is off (Settings > Torrents).";
+        var limit = s.TorrentSeedMinutes > 0
+            ? $" or for {(s.TorrentSeedMinutes % 60 == 0 ? $"{s.TorrentSeedMinutes / 60} hour{(s.TorrentSeedMinutes == 60 ? "" : "s")}" : $"{s.TorrentSeedMinutes} minutes")}, whichever comes first"
+            : "";
+        return $"Downloaded from the people sharing it. When it finishes, ShadeNet shares it back until it has sent {s.TorrentSeedRatio:0.##}× its size{limit} (Settings > Torrents).";
+    }
+
+    /// <summary>A torrent: its file list (from the peers, for a magnet link), so the user can pick the files.</summary>
+    async Task ShowTorrentAsync(string url, CancellationTokenSource cts)
+    {
+        var magnet = url.StartsWith("magnet:", StringComparison.OrdinalIgnoreCase);
+        IsTorrent = true;
+        IsWebTorrent = Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme is "http" or "https";
+        TorrentNote = SharingNote();
+        ProbingText = magnet ? "Getting the file list from the people sharing it… (you can add it now: it then downloads every file)" : "Reading the torrent…";
+        OnPropertyChanged(nameof(CanAdd));
+
+        TorrentInfo info;
+        try
+        {
+            info = await _manager.DescribeTorrentAsync(url, TorrentWeb(url), cts.Token).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex) when (ex is DownloadException or HttpRequestException or System.IO.IOException or UnauthorizedAccessException)
+        {
+            if (cts.IsCancellationRequested) return;
+            ProbeError = ex is HttpRequestException ? "Can't reach that address. Check the link and your connection." : ex.Message;
+            ProbeHint = "";
+            ProbeState = ProbeState.Failed;
+            return;
+        }
+
+        if (cts.IsCancellationRequested) return;
+        _torrent = info;
+        TorrentFiles.Clear();
+        for (var i = 0; i < info.Files.Count; i++) TorrentFiles.Add(new TorrentFileOption(i, info.Files[i].Path, info.Files[i].Length, TorrentSelectionChanged));
+        OnPropertyChanged(nameof(HasTorrentFiles));
+
+        var name = FileNameHelper.Sanitize(info.Files.Count == 1 ? System.IO.Path.GetFileName(info.Files[0].Path) : info.Name, "torrent");
+        Run(() =>
+        {
+            if (!_nameEdited) FileName = name;
+            TypeText = "Torrent" + (info.Files.Count > 1 ? $"  ·  {info.Files.Count} files, saved in a folder" : "") + (info.IsPrivate ? "  ·  private" : "");
+            Resumable = true;
+        });
+        Icon = FileIconCache.Get(info.Files.Count == 1 ? name : info.Files.OrderByDescending(f => f.Length).First().Path);
+        TorrentSelectionChanged();
+        ProbeState = ProbeState.Ready;
+        _ = CountSwarmAsync(info, cts);
+    }
+
+    /// <summary>How many share the torrent, as its trackers say (asked while the dialog is open; null when there is nothing to say).</summary>
+    [ObservableProperty] string? _torrentSwarmText;
+
+    async Task CountSwarmAsync(TorrentInfo info, CancellationTokenSource cts)
+    {
+        TorrentSwarmText = "Asking its trackers how many share it…";
+        try
+        {
+            var c = await _manager.CountTorrentSwarmAsync(info, cts.Token).ConfigureAwait(true);
+            if (cts.IsCancellationRequested) return;
+            TorrentSwarmText = c.Asked == 0
+                ? "It names no tracker: its peers come from the DHT and from other peers."
+                : c.Answered == 0
+                    ? c.Asked == 1 ? "Its tracker did not say how many share it." : $"None of its {c.Asked} trackers said how many share it."
+                    : $"{c.Seeds:N0} share all of it and {c.Leechers:N0} are downloading it, "
+                      + (c.Answered == 1 && c.Asked == 1 ? "as its tracker says." : $"as {c.Answered} of its {c.Asked} trackers say.");
+        }
+        catch (OperationCanceledException)
+        {
+            // the dialog moved on
+        }
+        catch (Exception ex) when (ex is DownloadException or InvalidOperationException or System.IO.IOException)
+        {
+            TorrentSwarmText = null;
+        }
+    }
+
     // ---- destination ----
 
     [ObservableProperty] string _category;
@@ -166,7 +366,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
     string? RefererValue => string.IsNullOrWhiteSpace(Referer) ? null : Referer.Trim();
     string? CookieValue => CookieHeader.Normalize(Cookies);
 
-    public bool CanAdd => LinkCount > 0 && ProbeState != ProbeState.Probing && !string.IsNullOrWhiteSpace(SaveFolder) && StreamBlock == null;
+    public bool CanAdd => LinkCount > 0 && (ProbeState != ProbeState.Probing || WaitingForPeers) && !string.IsNullOrWhiteSpace(SaveFolder) && StreamBlock == null
+                          && !(IsTorrent && DownloadTorrentContents && _torrent != null && TorrentFiles.All(f => !f.IsSelected));
 
     public bool ConnectionsMatter => !(ProbeState == ProbeState.Ready && !Resumable);
 
@@ -230,6 +431,16 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         IsLiveStream = false;
         SubtitleText = null;
         StreamBlock = null;
+        _torrent = null;
+        TorrentFiles.Clear();
+        IsTorrent = false;
+        IsWebTorrent = false;
+        TorrentNote = null;
+        TorrentSwarmText = null;
+        TorrentSelectionText = "";
+        DownloadTorrentContents = true;
+        ProbingText = "Checking the link…";
+        OnPropertyChanged(nameof(HasTorrentFiles));
         Run(() =>
         {
             FileName = "";
@@ -252,6 +463,15 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         try
         {
             await Task.Delay(500, cts.Token); // let typing settle before touching the network
+
+            // a torrent: a magnet link, a .torrent file here, or one on the web (by its name, or by the name the browser gave it; it is
+            // read with the browser's sign-in when the browser handed it over)
+            if (DownloadManager.IsTorrentAddress(url)
+                || (IsCapturedLink(url) && _capture!.FileName?.EndsWith(".torrent", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                await ShowTorrentAsync(url, cts).ConfigureAwait(true);
+                return;
+            }
 
             if (IsCapturedLink(url) && _capture!.Source == "tracks")
             {
@@ -300,6 +520,14 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             if (cts.IsCancellationRequested)
             {
                 result.Discard();
+                return;
+            }
+
+            // a .torrent file the server names only by its type
+            if (DownloadManager.IsTorrentAddress(url, result.ContentType))
+            {
+                result.Discard();
+                await ShowTorrentAsync(url, cts).ConfigureAwait(true);
                 return;
             }
 
@@ -629,6 +857,30 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
         // a YouTube page: the files behind it (found by yt-dlp) are what gets downloaded, not the page
         var source = single && _yt != null ? SelectedQuality?.Source : null;
 
+        // a torrent: what it holds, the files ticked (all of them while a magnet link's list is not known yet)
+        if (single && IsTorrent && DownloadTorrentContents)
+        {
+            var picked = _torrent != null && TorrentFiles.Any(f => !f.IsSelected) ? TorrentFiles.Where(f => f.IsSelected).Select(f => f.Index).ToList() : null;
+            return new[]
+            {
+                (new AddDownloadRequest
+                {
+                    Url = Links[0],
+                    // (a magnet link added before its file list came: name and folder follow the torrent, unless the user chose them)
+                    FileName = (_torrent != null || _nameEdited) && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,
+                    SaveDirectory = _torrent != null || _folderEdited ? SaveFolder.Trim() : null,
+                    Category = _torrent != null ? Category : null,
+                    Torrent = new TorrentChoice(_torrent?.Metadata, picked, TorrentSequential),
+                    // (a .torrent file on the web is fetched again by the download when it was not read yet: with the same sign-in)
+                    Referer = TorrentWeb(Links[0])?.Referer,
+                    Cookies = TorrentWeb(Links[0])?.Cookies,
+                    UserAgent = TorrentWeb(Links[0])?.UserAgent,
+                    Headers = TorrentWeb(Links[0])?.Headers?.ToDictionary(h => h.Key, h => h.Value),
+                    Mode = mode,
+                }, (ProbeResult?)null),
+            };
+        }
+
         return Links.Select(url => (new AddDownloadRequest
         {
             Url = source?.VideoUrl ?? url,
@@ -639,7 +891,8 @@ public sealed partial class AddDownloadViewModel : ObservableObject, IDisposable
             UserAgent = source?.UserAgent ?? (IsCapturedLink(url) ? _capture!.UserAgent : null),
             Headers = source != null ? source.Headers?.ToDictionary(h => h.Key, h => h.Value)
                 : IsCapturedLink(url) ? _capture!.Headers.ToDictionary(h => h.Key, h => h.Value) : null,
-            FileName = single && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,
+            // (the .torrent file itself, saved as a file, keeps the name the address gives it)
+            FileName = single && !IsTorrent && !string.IsNullOrWhiteSpace(FileName) ? FileName.Trim() : null,
             SaveDirectory = single || _folderEdited ? SaveFolder.Trim() : null,
             Category = single ? Category : null,
             MaxConnections = Connections,

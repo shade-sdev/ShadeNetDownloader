@@ -14,6 +14,7 @@ using ShadeNet.TestServer;
 //   resumetest                          pause/resume, restart, hard kill, changed file, expired link
 //   limittest                           speed limiter: accuracy, per-job, live changes, pause latency
 //   serve                               run the test server so you can point probe/get at it
+//   swarm [-o dir] [--kbps n]           a torrent shared on this machine (tracker + seeder on 127.0.0.1): prints its magnet link
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
@@ -28,6 +29,7 @@ if (args.Length == 0)
           resumetest                     pause/resume, restart, hard kill, changed file, expired link
           limittest                      speed limiter: accuracy, per-job, live changes, pause latency
           serve                          run the local test server (Ctrl+C to stop)
+          swarm [-o dir] [--kbps n]      share a test torrent on this machine; prints its magnet link and .torrent file
         """);
     return 1;
 }
@@ -50,6 +52,8 @@ switch (args[0])
         return await ResumeTest();
     case "limittest":
         return await LimitTest();
+    case "swarm":
+        return await SwarmCommand.RunAsync(args);
     default:
         Console.WriteLine("Unknown command.");
         return 1;

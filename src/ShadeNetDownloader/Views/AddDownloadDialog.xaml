@@ -54,10 +54,19 @@
     <StackPanel MinWidth="560">
 
         <!-- ================= link(s) ================= -->
-        <TextBlock Style="{StaticResource Field}" Text="Web address" Margin="2,0,0,6" />
+        <Grid Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Style="{StaticResource Field}" Text="Web address" Margin="2,0,0,0" VerticalAlignment="Bottom" />
+            <ui:Button Grid.Column="1" Appearance="Transparent" Padding="8,2" FontSize="12" Content="Open .torrent file…"
+                       Icon="{ui:SymbolIcon ArrowImport24}" Command="{Binding OpenTorrentFileCommand}"
+                       AutomationProperties.Name="Open .torrent file" />
+        </Grid>
         <ui:TextBox x:Name="UrlBox" AutomationProperties.Name="Web address" MinLines="2" MaxLines="5" AcceptsReturn="True" TextWrapping="NoWrap"
                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                    PlaceholderText="Paste a link (or several, one per line)"
+                    PlaceholderText="Paste a link, a magnet link (or several, one per line)"
                     Icon="{ui:SymbolIcon Link24}"
                     Text="{Binding UrlText, UpdateSourceTrigger=PropertyChanged}" />
 
@@ -79,7 +88,7 @@
                 <!-- probing -->
                 <StackPanel Style="{StaticResource WhenProbing}" Orientation="Horizontal" VerticalAlignment="Center">
                     <ui:ProgressRing IsIndeterminate="True" Width="22" Height="22" />
-                    <TextBlock Text="Checking the link…" Margin="12,0,0,0" VerticalAlignment="Center"
+                    <TextBlock Text="{Binding ProbingText}" Margin="12,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="500"
                                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
@@ -152,6 +161,60 @@
                                    Text="Recording starts now and goes on until the broadcast ends or you press Stop and save on its card."
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    Visibility="{Binding IsLiveStream, Converter={StaticResource B2V}}" />
+
+                        <!-- a torrent: which of its files -->
+                        <CheckBox Margin="2,10,0,0" IsChecked="{Binding DownloadTorrentContents, Mode=TwoWay}"
+                                  Content="Download what this torrent holds (untick to save just the .torrent file)"
+                                  Visibility="{Binding IsWebTorrent, Converter={StaticResource B2V}}" />
+                        <StackPanel Margin="2,10,0,0" Visibility="{Binding HasTorrentFiles, Converter={StaticResource B2V}}"
+                                    IsEnabled="{Binding DownloadTorrentContents}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding TorrentSelectionText}" FontSize="12" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <ui:Button Grid.Column="1" Appearance="Transparent" Padding="8,2" FontSize="12" Content="All"
+                                           Command="{Binding SelectAllTorrentFilesCommand}" AutomationProperties.Name="Choose all files" />
+                                <ui:Button Grid.Column="2" Appearance="Transparent" Padding="8,2" FontSize="12" Content="None"
+                                           Command="{Binding SelectNoTorrentFilesCommand}" AutomationProperties.Name="Choose no files" />
+                            </Grid>
+                            <Border Margin="0,6,0,0" CornerRadius="6" BorderThickness="1" Padding="6,4"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                <ScrollViewer MaxHeight="190" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                    <ItemsControl ItemsSource="{Binding TorrentFiles}" AutomationProperties.Name="Files of the torrent">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,1">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}" MinHeight="24" Padding="6,0,0,0"
+                                                              AutomationProperties.Name="{Binding Path}">
+                                                        <TextBlock Text="{Binding Path}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Path}" />
+                                                    </CheckBox>
+                                                    <TextBlock Grid.Column="1" Text="{Binding SizeText}" FontSize="12" Margin="10,0,4,0" VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </StackPanel>
+                        <CheckBox Margin="2,8,0,0" IsChecked="{Binding TorrentSequential, Mode=TwoWay}"
+                                  Content="Download in order (a film can be watched while the rest arrives)"
+                                  IsEnabled="{Binding DownloadTorrentContents}"
+                                  Visibility="{Binding IsTorrent, Converter={StaticResource B2V}}" />
+                        <TextBlock Margin="2,8,0,0" FontSize="12" TextWrapping="Wrap" Text="{Binding TorrentSwarmText}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" AutomationProperties.Name="How many share it"
+                                   Visibility="{Binding TorrentSwarmText, Converter={StaticResource NullToCollapsed}}" />
+                        <TextBlock Margin="2,8,0,0" FontSize="12" TextWrapping="Wrap" Text="{Binding TorrentNote}"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Visibility="{Binding TorrentNote, Converter={StaticResource NullToCollapsed}}" />
                     </StackPanel>
                 </Grid>
 
@@ -199,7 +262,8 @@
             <Run Text="Category: " /><Run Text="{Binding Category, Mode=OneWay}" FontWeight="SemiBold" />
         </TextBlock>
 
-        <!-- ================= connections ================= -->
+        <!-- ================= connections (not for a torrent) ================= -->
+        <StackPanel Visibility="{Binding ShowConnections, Converter={StaticResource B2V}}">
         <Grid Margin="0,16,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -240,6 +304,7 @@
             <ui:TextBox Text="{Binding Referer, UpdateSourceTrigger=LostFocus}" PlaceholderText="https://…" />
             <TextBlock Style="{StaticResource Field}" Text="Cookie header" />
             <ui:TextBox Text="{Binding Cookies, UpdateSourceTrigger=LostFocus}" PlaceholderText="name=value; name2=value2" />
+        </StackPanel>
         </StackPanel>
     </StackPanel>
 </ui:ContentDialog>

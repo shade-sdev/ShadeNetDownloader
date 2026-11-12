@@ -109,6 +109,9 @@ public sealed class BrowserSettings
     /// right after): live streams and private videos can only be read by a signed-in session.
     /// </summary>
     public bool PageSignIn { get; set; } = true;
+
+    /// <summary>A magnet link clicked in the browser opens in ShadeNet (off: the browser does with it what it did before).</summary>
+    public bool MagnetLinks { get; set; } = true;
 }
 
 /// <summary>Window, tray and notification behaviour.</summary>

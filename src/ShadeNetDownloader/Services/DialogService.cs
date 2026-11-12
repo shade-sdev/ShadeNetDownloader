@@ -17,6 +17,9 @@ public interface IDialogService
 
     /// <summary>Opens the Add dialog for a download the browser handed over; waits if another dialog is open.</summary>
     Task ShowCaptureAsync(CaptureInfo capture);
+
+    /// <summary>Opens the Add dialog with links that came from outside (Windows opened a magnet link with ShadeNet); waits if another dialog is open.</summary>
+    Task ShowLinksAsync(IReadOnlyList<string> links);
 }
 
 public sealed class DialogService : IDialogService
@@ -44,6 +47,13 @@ public sealed class DialogService : IDialogService
         // Unlike a click on "Add download", a capture is something the user already did in the browser: do not drop it.
         while (_open) await Task.Delay(300);
         await ShowAsync(null, capture);
+    }
+
+    public async Task ShowLinksAsync(IReadOnlyList<string> links)
+    {
+        // like a capture: the user already chose this (in Explorer, in a browser), so it is not dropped while another dialog is open
+        while (_open) await Task.Delay(300);
+        await ShowAsync(links, null);
     }
 
     async Task ShowAsync(IReadOnlyList<string>? prefill, CaptureInfo? capture)

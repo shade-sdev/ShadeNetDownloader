@@ -16,9 +16,23 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     {
         Job = job;
         _owner = owner;
-        Host = HostOf(job.Url);
+        Host = job.Kind == DownloadKind.Torrent ? "BitTorrent" : HostOf(job.Url);
         Update(snapshot);
     }
+
+    /// <summary>A torrent: peers instead of a server, a folder for several files, and sharing once it is finished.</summary>
+    public bool IsTorrent => Job.Kind == DownloadKind.Torrent;
+
+    /// <summary>A finished torrent that is being shared with others right now.</summary>
+    [ObservableProperty] bool _isSeeding;
+
+    /// <summary>A finished torrent not being shared: it can be shared again.</summary>
+    public bool CanShareAgain => IsTorrent && State == DownloadState.Completed && !IsSeeding;
+
+    partial void OnIsSeedingChanged(bool value) => OnPropertyChanged(nameof(CanShareAgain));
+
+    /// <summary>A torrent whose files are known: they can be checked against it again.</summary>
+    public bool CanRecheck => IsTorrent && Job.Torrent?.Files != null;
 
     public DownloadJob Job { get; }
     public Guid Id => Job.Id;
@@ -31,7 +45,14 @@ public sealed partial class DownloadItemViewModel : ObservableObject
     internal long Sequence { get; set; }
     public string Host { get; }
     public string Url => Job.Url;
-    public ImageSource? Icon => FileIconCache.Get(FileName);
+    public ImageSource? Icon => FileIconCache.Get(IconName);
+
+    /// <summary>The name the icon comes from: a folder torrent shows the icon of its largest file (a film's folder looks like a film).</summary>
+    string IconName => Job.Torrent is { IsFolder: true, Files: { Count: > 0 } files }
+        ? (files.Where(f => f.Selected).DefaultIfEmpty(files[0]).MaxBy(f => f.Length) ?? files[0]).Path
+        : FileName;
+
+    string? _iconName;
 
     [ObservableProperty] string _fileName = "";
     [ObservableProperty] string _category = "";
@@ -123,12 +144,19 @@ public sealed partial class DownloadItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CanQueue));
         OnPropertyChanged(nameof(CanRefreshAddress));
         OnPropertyChanged(nameof(IsRecording));
+        OnPropertyChanged(nameof(CanShareAgain));
+        OnPropertyChanged(nameof(CanRecheck));
     }
 
     /// <summary>Applies a fresh engine snapshot (called on the UI thread, at most ~10×/s).</summary>
     public void Update(JobSnapshot s)
     {
         FileName = s.FileName;
+        if (IconName != _iconName)
+        {
+            _iconName = IconName;   // a torrent's file list came (or the name changed): its icon may be another
+            OnPropertyChanged(nameof(Icon));
+        }
         Category = Job.Category;
         IsLive = s.Live;
         State = s.State;
@@ -193,6 +221,8 @@ public sealed partial class DownloadItemViewModel : ObservableObject
                 break;
         }
 
+        if (s.Torrent is { } torrent) DescribeTorrent(s, torrent, of);
+
         HintText = s.State == DownloadState.Failed ? HintFor(s.ErrorKind) : "";
         PercentText = s.State is DownloadState.Downloading or DownloadState.Paused or DownloadState.Stopping && total > 0
             ? $"{s.Fraction:P0}"
@@ -205,7 +235,7 @@ public sealed partial class DownloadItemViewModel : ObservableObject
                 (SymbolRegular.Pause24, "Pause", true),
             DownloadState.Paused => (SymbolRegular.Play24, "Resume", true),
             DownloadState.Failed => (SymbolRegular.ArrowClockwise24, "Try again", true),
-            DownloadState.Completed => (SymbolRegular.Open24, "Open file", true),
+            DownloadState.Completed => (SymbolRegular.Open24, Job.Torrent?.IsFolder == true ? "Open folder" : "Open file", true),
             _ => (SymbolRegular.Pause24, "", false),
         };
 
@@ -227,6 +257,51 @@ public sealed partial class DownloadItemViewModel : ObservableObject
 
         Updated?.Invoke();
     }
+
+    /// <summary>A torrent's own words: peers instead of connections, and its sharing once it is finished.</summary>
+    void DescribeTorrent(JobSnapshot s, TorrentStatus t, string of)
+    {
+        IsSeeding = t.Seeding;
+        var peers = t.Peers == 1 ? "1 peer" : $"{t.Peers} peers";
+        switch (s.State)
+        {
+            case DownloadState.Queued when s.Total == null:
+                DetailText = "Waiting for a free slot";
+                break;
+            case DownloadState.Probing:
+                StatusText = "Starting";
+                DetailText = t.Activity ?? "Starting…";
+                break;
+            case DownloadState.Downloading:
+                var parts = new List<string> { of };
+                if (s.Speed > 0) parts.Add(ByteFormat.Speed(s.Speed));
+                if (s.Eta != null) parts.Add($"{ByteFormat.Eta(s.Eta)} left");
+                parts.Add(t.Activity ?? (t.Seeds > 0 ? $"{peers} ({t.Seeds} sharing all of it)" : peers));
+                if (t.Activity == null && SwarmText(t) is { } swarm) parts.Add(swarm);
+                if (t.UploadSpeed > 0) parts.Add($"sending {ByteFormat.Speed(t.UploadSpeed)}");
+                DetailText = string.Join("  ·  ", parts);
+                break;
+            case DownloadState.Completed when t.Seeding:
+                StatusText = "Sharing";
+                DetailText = string.Join("  ·  ", new[]
+                {
+                    s.Total is { } size ? ByteFormat.Size(size) : ByteFormat.Size(s.Downloaded),
+                    t.UploadSpeed > 0 ? $"sending {ByteFormat.Speed(t.UploadSpeed)}" : "waiting for someone who needs it",
+                    $"shared {t.Ratio:0.00}× its size",
+                    t.Activity ?? peers,
+                }.Concat(SwarmText(t) is { } s2 ? new[] { s2 } : Array.Empty<string>()));
+                break;
+            case DownloadState.Completed:
+                DetailText = $"{(s.Total is { } total ? ByteFormat.Size(total) : ByteFormat.Size(s.Downloaded))}  ·  BitTorrent"
+                             + (t.Uploaded > 0 ? $"  ·  shared {t.Ratio:0.00}× its size" : "")
+                             + (Job.CompletedAt is { } when ? $"  ·  {WhenText(when)}" : "");
+                break;
+        }
+    }
+
+    /// <summary>"swarm: 120 sharing, 30 downloading", as the trackers count it (null when none said).</summary>
+    static string? SwarmText(TorrentStatus t) =>
+        t.SwarmSeeds == null && t.SwarmLeechers == null ? null : $"swarm: {t.SwarmSeeds ?? 0:N0} sharing, {t.SwarmLeechers ?? 0:N0} downloading";
 
     /// <summary>The highest speed in the remembered window.</summary>
     public double PeakSpeed => _history.Peak;
@@ -273,6 +348,18 @@ public sealed partial class DownloadItemViewModel : ObservableObject
 
     [RelayCommand]
     void Resume() => _owner.ResumeSelectionOf(this);
+
+    /// <summary>A finished torrent: stop sharing it with others (its files stay).</summary>
+    [RelayCommand]
+    Task StopSharing() => _owner.StopSharingAsync(this);
+
+    /// <summary>A finished torrent: share it with others again, until the sharing limits.</summary>
+    [RelayCommand]
+    Task ShareAgain() => _owner.ShareAgainAsync(this);
+
+    /// <summary>A torrent: check every piece on the disk again; whatever is missing or damaged is downloaded again.</summary>
+    [RelayCommand]
+    Task CheckFilesAgain() => _owner.CheckFilesAgainAsync(this);
 
     [RelayCommand]
     void OpenFile() => _owner.OpenFile(this);
