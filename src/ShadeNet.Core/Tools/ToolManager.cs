@@ -88,15 +88,19 @@ public sealed class ToolManager : IToolUpdates
     readonly string _appFolder;
     readonly Func<ManagedTool, string, CancellationToken, Task<string?>> _versionOf;
     readonly string? _pathVariable;
+    readonly IReadOnlyList<string>? _programFolders;
     HttpClient? _http;
 
     /// <param name="userTools">Where updates are installed (<c>&lt;data folder&gt;\tools</c>).</param>
     /// <param name="versionOf">How to ask a program for its version; tests replace it.</param>
     /// <param name="pathVariable">The PATH to search; null = the real one (tests pass an empty one).</param>
+    /// <param name="programFolders">Where installed programs are (an installed 7-Zip); null = the real Program Files (tests pass none).</param>
     public ToolManager(EngineSettings settings, string userTools, string? appFolder = null, HttpClient? http = null,
-        Func<ManagedTool, string, CancellationToken, Task<string?>>? versionOf = null, string? pathVariable = null)
+        Func<ManagedTool, string, CancellationToken, Task<string?>>? versionOf = null, string? pathVariable = null,
+        IReadOnlyList<string>? programFolders = null)
     {
         _pathVariable = pathVariable;
+        _programFolders = programFolders;
         _settings = settings;
         _userTools = userTools;
         _appFolder = appFolder ?? AppContext.BaseDirectory;
@@ -135,7 +139,7 @@ public sealed class ToolManager : IToolUpdates
     {
         ManagedTool.YtDlp => YtDlp.Locate(_settings.YtDlpPath, _appFolder, _pathVariable, _userTools),
         ManagedTool.Ffmpeg => Ffmpeg.Locate(_settings.FfmpegPath, _appFolder, _pathVariable, _userTools),
-        _ => Archives.SevenZip.Locate(_settings.SevenZipPath, _appFolder, _pathVariable, _userTools),
+        _ => Archives.SevenZip.Locate(_settings.SevenZipPath, _appFolder, _pathVariable, _userTools, _programFolders),
     };
 
     public ToolSource SourceOf(ManagedTool tool)

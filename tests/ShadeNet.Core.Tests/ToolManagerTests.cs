@@ -53,7 +53,8 @@ public class ToolManagerTests : IDisposable
     {
         var settings = new EngineSettings();
         tweak?.Invoke(settings);
-        return new ToolManager(settings, User, App, new HttpClient(web), versionOf ?? ((_, _, _) => Task.FromResult<string?>("2026.08.19")), pathVariable: "");
+        return new ToolManager(settings, User, App, new HttpClient(web), versionOf ?? ((_, _, _) => Task.FromResult<string?>("2026.08.19")), pathVariable: "",
+            programFolders: []);   // (a 7-Zip installed on the computer, as on the CI runners, would hide the test's own copies)
     }
 
     string Put(string folder, string name, string content = "exe")
@@ -154,6 +155,24 @@ public class ToolManagerTests : IDisposable
 
         // the same version: nothing to offer
         Assert.Null(await Manager(web, versionOf: (_, _, _) => Task.FromResult<string?>("26.06")).CheckAsync(ManagedTool.SevenZip, default));
+    }
+
+    [Fact]
+    public async Task An_installed_7_Zip_is_used_when_none_came_with_ShadeNet_and_is_left_to_its_own_installer()
+    {
+        var programs = Path.Combine(_root, "Program Files");
+        var installed = Put(Path.Combine(programs, "7-Zip"), "7z.exe");
+        var web = new FakeWeb();
+        var m = new ToolManager(new EngineSettings(), User, App, new HttpClient(web), (_, _, _) => Task.FromResult<string?>("24.09"),
+            pathVariable: "", programFolders: [programs]);
+
+        Assert.Equal((installed, ToolSource.Path), (m.Find(ManagedTool.SevenZip), m.SourceOf(ManagedTool.SevenZip)));
+        Assert.Null(await m.CheckAsync(ManagedTool.SevenZip, default));
+        Assert.Empty(web.Asked);
+
+        // the bundled copy wins over the installed one
+        var bundled = Put(Path.Combine(App, "tools", "7zip"), "7z.exe");
+        Assert.Equal(bundled, m.Find(ManagedTool.SevenZip));
     }
 
     [Fact]
